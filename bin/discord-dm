@@ -1,0 +1,64 @@
+#!/bin/sh
+# discord-dm -- コンテナ(Devbox・MailBox)から、研究室の Discord のボット「aiza」で研究室の人に DM を送る(the deployment notes)。
+#   discord-dm <宛先>… -m "本文"     宛先は aiza の名前・Discord 名・名簿の名前(5人まで)
+#   echo "本文" | discord-dm <宛先>…  本文は標準入力からでもよい
+#   discord-dm --list                 送れる人(名簿に Discord ID がある人)
+#   discord-dm -c <チャンネル> [<宛先>…] -m "本文"
+#                                     研究室のサーバーのチャンネルに書く。宛先を付けると先頭でその人たちをメンションする
+# DM は「@宛先 〈宛先の名前〉さんへ — 〈あなたの名前〉さんより(aiza)」で始まる。本文の「@<名前>」はその人へのメンションになる。
+# 送り手はあなたの aiza のアカウント(なりすませない)。1人 1 時間に 20 通まで。名簿は `labthe deployment notes。
+# 本文を標準入力で受けるので、スクリプトは -c で渡す(heredoc だと標準入力がふさがる)
+PY=$(cat <<'PY'
+import json, socket, sys
+SOCK = "/opt/aiza-ssh/discord-dm.sock"
+a = sys.argv[1:]
+def usage():
+    sys.stderr.write("usage: discord-dm <to>... [-m TEXT]  |  discord-dm -c CHANNEL [<to>...] [-m TEXT]  |  discord-dm --list\n"); sys.exit(2)
+if not a or a[0] in ("-h", "--help"):
+    usage()
+if a == ["--list"]:
+    req = {"list": True}
+else:
+    to, text, channel, i = [], None, None, 0
+    while i < len(a):
+        if a[i] in ("-m", "-c"):
+            if i + 1 >= len(a): usage()
+            if a[i] == "-m": text = a[i + 1]
+            else: channel = a[i + 1]
+            i += 2
+        else:
+            to.append(a[i]); i += 1
+    if text is None:
+        if sys.stdin.isatty():
+            sys.stderr.write("discord-dm: give the text with -m or on stdin\n"); sys.exit(2)
+        text = sys.stdin.read()
+    if not to and not channel: usage()
+    req = {"to": to, "text": text}
+    if channel: req["channel"] = channel
+s = socket.socket(socket.AF_UNIX)
+s.settimeout(120)
+try:
+    s.connect(SOCK)
+except OSError as e:
+    sys.stderr.write(f"discord-dm: not available here ({e.strerror}); it runs only on the host that has the lab roster\n"); sys.exit(1)
+s.sendall((json.dumps(req, ensure_ascii=False) + "\n").encode())
+buf = b""
+while not buf.endswith(b"\n"):
+    d = s.recv(65536)
+    if not d: break
+    buf += d
+r = json.loads(buf or b'{"ok": false, "error": "no answer"}')
+if "members" in r:
+    for m in r["members"]:
+        print(f"{m['aiza']}\t{m['name']}\t{m['discord']}")
+    sys.exit(0)
+for u in r.get("sent", []):
+    print(f"sent: {u}")
+for t, why in (r.get("failed") or {}).items():
+    sys.stderr.write(f"not sent: {t}: {why}\n")
+if r.get("error"):
+    sys.stderr.write("discord-dm: " + r["error"] + "\n")
+sys.exit(0 if r.get("ok") else 1)
+PY
+)
+exec python3 -c "$PY" "$@"

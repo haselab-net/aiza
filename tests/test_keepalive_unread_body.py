@@ -1,5 +1,5 @@
 """A POST answered without reading its body must not desync a kept-alive
-connection: aigw-gateway pools its connections to the backend, so leftover
+connection: aiza-gateway pools its connections to the backend, so leftover
 body bytes ("{}") used to become the start of the next request ("{}GET ..."
 -> 501 -> 502 at the gateway -> 500 for /email/'s auth_request).
 

@@ -49,8 +49,8 @@ class SendMessageTest(unittest.TestCase):
         text = "1行目\n" + "長い行。" * 400
         B.send_message("cccc00000001", text)
         self.assertEqual(self.calls, [
-            ["set-buffer", "-b", "aigw-send-cccc00000001", "--", text],
-            ["paste-buffer", "-p", "-d", "-b", "aigw-send-cccc00000001", "-t", "cccc00000001"],
+            ["set-buffer", "-b", "aiza-send-cccc00000001", "--", text],
+            ["paste-buffer", "-p", "-d", "-b", "aiza-send-cccc00000001", "-t", "cccc00000001"],
             ["send-keys", "-t", "cccc00000001", "Enter"],
         ])
 
@@ -69,12 +69,62 @@ class SendMessageTest(unittest.TestCase):
                 ["send-keys", "-t", sid, "Enter"],
             ])
 
+    def test_hand_started_codex_gets_the_paste(self):
+        # The Email box's shell (its Codex is started there by hand, and the
+        # pane only shows the box's entry) and a shell whose relay says Codex.
+        meta = {"id": "cccc00000006", "preset": "mail-shell", "tmux_name": "cccc00000006", "tmux_location": "host"}
+        saved = (B.load_meta, B.session_dir)
+        B.load_meta = lambda sid: dict(meta)            # a box session's own folder is in the box
+        B.session_dir = lambda sid: self.root / sid
+        (self.root / "cccc00000006").mkdir()
+        try:
+            B.send_message("cccc00000006", "1行目\n2行目")
+        finally:
+            B.load_meta, B.session_dir = saved
+        self.assertEqual([c[0] for c in self.calls], ["set-buffer", "paste-buffer", "send-keys"])
+        self.calls = []
+        self.session("cccc00000007", "shell")
+        saved = B._codex_relay_active
+        B._codex_relay_active = lambda sid, meta, sdir: sid == "cccc00000007"
+        try:
+            B.send_message("cccc00000007", "abc")
+        finally:
+            B._codex_relay_active = saved
+        self.assertEqual([c[0] for c in self.calls], ["set-buffer", "paste-buffer", "send-keys"])
+
     def test_run_with_text_starts_the_stuck_input_check(self):
         self.session("cccc00000005", "claude-tui")
         B.send_message("cccc00000005", "abc")
         B.send_message("cccc00000005", "", submit=True)
         B.send_message("cccc00000005", "def", submit=False)
         self.assertEqual(self.checks, [("cccc00000005", "container", "cccc00000005", "abc")])
+
+
+class BoxPidTest(unittest.TestCase):
+    """The Email box's Codex is found on the host by its box pid and its
+    session (the box has its own pid numbers)."""
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.proc = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def p(self, pid, ppid, nspid, env=""):
+        d = self.proc / str(pid)
+        d.mkdir()
+        (d / "status").write_text(f"Name:\tx\nPPid:\t{ppid}\nNSpid:\t{nspid}\n")
+        (d / "environ").write_text(env.replace(" ", "\0"))
+
+    def test_found_only_for_its_own_session(self):
+        self.p(500, 2, "500")
+        self.p(600, 500, "600\t40", "HOME=/x AIZA_TALKTO=/m/.aiza/aaaaaaaaaa01/talkto_out.jsonl")
+        self.p(700, 600, "700\t41")
+        self.p(800, 2, "800\t41", "AIZA_TALKTO=/m/.aiza/bbbbbbbbbb01/talkto_out.jsonl")
+        self.assertEqual(B._box_host_pid(41, "aaaaaaaaaa01", proc=str(self.proc)), 700)
+        self.assertEqual(B._box_host_pid(41, "bbbbbbbbbb01", proc=str(self.proc)), 800)
+        self.assertIsNone(B._box_host_pid(41, "cccccccccc01", proc=str(self.proc)))
+        self.assertIsNone(B._box_host_pid(500, "aaaaaaaaaa01", proc=str(self.proc)))   # host-only pid
 
 
 RULE = "─" * 80

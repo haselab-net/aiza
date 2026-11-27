@@ -1,0 +1,423 @@
+#!/usr/bin/env python3
+"""aiza-ask-hook -- answer Claude Code's questions and permission prompts from
+the aiza page (a phone), while the terminal can still answer them too.
+
+  aiza-ask-hook perm    PermissionRequest (every tool). The terminal shows its
+                        own prompt at the same time; whichever answers first
+                        wins (Claude Code ends this hook when the terminal
+                        does). Questions and permission prompts in every
+                        session (2026-11-24, the user: devbox もカードを出す
+                        ように). An "allow" is given only when it can be
+                        trusted beyond the answer file, which the session's
+                        own agent can write: as root, while root's unlock
+                        window is open; on the host, while the host's is;
+                        in a container (devbox, the Email box), when the
+                        backend's own record says so (POST /ask-check).
+  aiza-ask-hook pre     PreToolUse, matcher AskUserQuestion. Only when the
+                        session skips permission prompts, where no
+                        PermissionRequest comes; the terminal shows nothing
+                        while this waits, so the page offers "answer on the
+                        terminal", which makes this return with no answer.
+
+The request goes to the backend as one line {"id", "ask": {...}} appended to
+$AIZA_TALKTO (like aiza-task-hook); the answer comes back as a line
+{"id", "status": "answer", "answer": {...}} in talkto_status.jsonl next to it
+(like talkto's own delivery report). With no $AIZA_TALKTO (cron, by hand) it
+does nothing; on any error it prints nothing, which leaves the prompt to the
+terminal.
+"""
+import os as _aiza_os  # aigw-legacy: sessions started before the rename (2026-11-23) only have AIGW_*
+for _k in [k for k in _aiza_os.environ if k.startswith("AIGW_")]:
+    _aiza_os.environ.setdefault("AIZA_" + _k[5:], _aiza_os.environ[_k].replace("/.aigw/", "/.aiza/").replace("/.aigw-state/", "/.aiza-state/"))
+import hashlib
+import json
+import os
+import secrets
+import urllib.request
+import signal
+import socket
+import struct
+import sys
+import time
+import pwd
+import math
+import unicodedata
+
+from pathlib import Path
+_lib = Path(__file__).resolve().parent.parent / 'lib'
+if not (_lib / 'aiza_session_io.py').is_file():
+    _lib = Path('/opt/sandbox-shared/tools/lib')
+sys.path.insert(0, str(_lib))
+from aiza_session_io import open_output_directory, open_private, record_failure
+from aiza_session_path import open_session_dir, split_talkto
+
+import importlib.machinery, importlib.util
+_tl = importlib.machinery.SourceFileLoader('aiza_task_hook', str(Path(__file__).resolve().parent / 'aiza-task-hook'))
+_th = importlib.util.module_from_spec(importlib.util.spec_from_loader('aiza_task_hook', _tl))
+_tl.exec_module(_th)
+
+POLL = 0.5
+# No time limit on any card (2026-11-25, the user: Codex のカードが時間切れに
+# ならないように / claude も切れないように; until then 6 hours, 30 and 5
+# minutes): a card waits until it is answered -- on the page, or on the
+# terminal (Claude Code then ends this hook; "端末で答える" on the card gives
+# a question or a Codex prompt, which show nothing on the terminal while this
+# waits, back to it) -- or until Claude/Codex goes away (wait_answer). The
+# settings allow 20 days (1728000 s: Claude Code's timer cannot go past
+# about 24.8 days).
+WAIT_PERM = None
+WAIT_PRE = None
+WAIT_CODEX = None
+TEXT_MAX = 400
+QUESTION_MAX = 4
+OPTION_MAX = 8
+SESSION_KINDS = ("addRules", "addDirectories")   # "allow for this session": only these, never a mode change
+
+
+def short(value, n=TEXT_MAX):
+    s = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+    s = s.strip()
+    return s if len(s) <= n else s[:n] + "…"
+
+
+def summary(tool, inp):
+    """One line for the page: what the tool is about to do."""
+    if not isinstance(inp, dict):
+        return short(inp)
+    for key in ("command", "file_path", "notebook_path", "url", "pattern", "path"):
+        if isinstance(inp.get(key), str):
+            return short(inp[key])
+    return short(inp)
+
+
+def questions(inp):
+    out = []
+    for q in (inp.get("questions") or [])[:QUESTION_MAX] if isinstance(inp, dict) else []:
+        if not isinstance(q, dict) or not isinstance(q.get("question"), str):
+            continue
+        opts = [{"label": short(o.get("label", ""), 120), "description": short(o.get("description", ""), 200)}
+                for o in (q.get("options") or [])[:OPTION_MAX] if isinstance(o, dict) and isinstance(o.get("label"), str)]
+        out.append({"question": short(q["question"], 400), "header": short(q.get("header", ""), 40),
+                    "multiSelect": q.get("multiSelect") is True, "options": opts})
+    return out
+
+
+def read_status(talkto, ask_id, pos):
+    """(answer or None, new position) from talkto_status.jsonl."""
+    dfd = open_output_directory(Path(talkto).parent)
+    try:
+        try:
+            fd = open_private(dfd, "talkto_status.jsonl", os.O_RDONLY)
+        except FileNotFoundError:
+            return None, pos
+        with os.fdopen(fd, "rb") as f:
+            size = os.fstat(f.fileno()).st_size
+            if size < pos:
+                pos = 0          # trimmed by the backend: read it again
+            f.seek(pos)
+            data = f.read()
+    finally:
+        os.close(dfd)
+    *lines, rest = data.split(b"\n")
+    pos += len(data) - len(rest)
+    for raw in lines:
+        try:
+            obj = json.loads(raw)
+        except ValueError:
+            continue
+        if isinstance(obj, dict) and obj.get("id") == ask_id and obj.get("status") in ("answer", "skip"):
+            return (obj.get("answer") if obj.get("status") == "answer" else {"terminal": True}), pos
+    return None, pos
+
+
+def status_size(talkto):
+    dfd = open_output_directory(Path(talkto).parent)
+    try:
+        try:
+            fd = open_private(dfd, "talkto_status.jsonl", os.O_RDONLY)
+        except FileNotFoundError:
+            return 0
+        try:
+            return os.fstat(fd).st_size
+        finally:
+            os.close(fd)
+    finally:
+        os.close(dfd)
+
+
+def output(mode, payload, answer):
+    """The hook's stdout for an answer, or None for "leave it to the terminal"."""
+    if not isinstance(answer, dict) or answer.get("terminal"):
+        return None
+    if mode == "codex":
+        # Codex 0.155 reserves updatedInput/updatedPermissions/interrupt.
+        behavior = answer.get("behavior")
+        if behavior not in ("allow", "deny") or "answers" in answer:
+            return None
+        decision = {"behavior": behavior}
+        if behavior == "deny":
+            decision["message"] = short(answer.get("message") or "スマホから拒否されました", 1000)
+        return {"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": decision}}
+    inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+    event = "PreToolUse" if mode == "pre" else "PermissionRequest"
+    answers = answer.get("answers")
+    if isinstance(answers, dict):
+        upd = dict(inp, answers={str(k): str(v) for k, v in answers.items()})
+        if mode == "pre":
+            return {"hookSpecificOutput": {"hookEventName": event, "permissionDecision": "allow", "updatedInput": upd}}
+        return {"hookSpecificOutput": {"hookEventName": event, "decision": {"behavior": "allow", "updatedInput": upd}}}
+    behavior = answer.get("behavior")
+    if behavior == "deny":
+        msg = short(answer.get("message") or "スマホから拒否されました", 1000)
+        if mode == "pre":
+            return {"hookSpecificOutput": {"hookEventName": event, "permissionDecision": "deny",
+                                           "permissionDecisionReason": msg}}
+        return {"hookSpecificOutput": {"hookEventName": event, "decision": {"behavior": "deny", "message": msg}}}
+    if behavior == "allow" and mode == "perm":
+        decision = {"behavior": "allow"}
+        if answer.get("session"):
+            sugg = [dict(s, destination="session") for s in payload.get("permission_suggestions") or []
+                    if isinstance(s, dict) and s.get("type") in SESSION_KINDS]
+            if sugg:
+                decision["updatedPermissions"] = sugg
+        return {"hookSpecificOutput": {"hookEventName": event, "decision": decision}}
+    return None
+
+
+def root_window_open(talkto, tiers=("root",)):
+    """Read the root-owned unlock daemon immediately before granting, not
+    the host-user-writable answer file. Status never extends the window.
+    tiers: the windows that count (the host's: host or root)."""
+    try:
+        dfd, _ = open_session_dir(talkto)
+        try:
+            user = pwd.getpwuid(os.fstat(dfd).st_uid).pw_name
+        finally:
+            os.close(dfd)
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            sock.settimeout(2)
+            sock.connect('/run/aiza-unlockd.sock')
+            _, uid, _ = struct.unpack('3i', sock.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize('3i')))
+            if uid != 0:
+                return False
+            sock.sendall((json.dumps({'verb':'status', 'user':user})+'\n').encode())
+            with sock.makefile('rb') as stream:
+                raw = stream.readline(8193)
+            if len(raw) > 8192 or not raw.endswith(b'\n'):
+                return False
+        result = json.loads(raw)
+        until = result.get('expires_at') if isinstance(result, dict) else None
+        return (isinstance(result, dict) and result.get('ok') is True
+                and result.get('unlocked') is True and result.get('tier') in tiers
+                and type(until) in (int,float) and 0 < until < 1e11
+                and math.isfinite(until) and until > time.time())
+    except (OSError, ValueError, KeyError, OverflowError):
+        return False
+
+
+def in_container():
+    return os.path.exists("/.dockerenv")
+
+
+def ask_hash(ask):
+    """What the card was made from: the backend hashes the request it read
+    from the talkto file the same way (aiza-backend _ask_hash), and keeps an
+    answer only for that. The file is the container's to write, so a request
+    changed or added under the same id before the backend read it gives a
+    card whose answer never lets this hook allow (2026-11-25, 漏洩対策 K1)."""
+    return hashlib.sha256(json.dumps(ask, sort_keys=True, ensure_ascii=False,
+                                     separators=(",", ":")).encode()).hexdigest()
+
+
+def backend_answer(talkto, ask_id, ask_digest=None):
+    """The answer the backend recorded for this card (POST /ask-check on this
+    user's notify listener, which only this user's containers reach), or None.
+    The address is fixed: no setting from inside the container may point it
+    at a listener of its own (2026-11-25, 漏洩対策 K3)."""
+    sid = Path(talkto).parent.name
+    url = f"http://172.17.0.1:{23000 + os.getuid() - 1000}/ask-check"
+    try:
+        req = urllib.request.Request(url, data=json.dumps({"session": sid, "id": ask_id, "ask_hash": ask_digest}).encode(),
+                                     headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=10) as r:
+            got = json.loads(r.read(65536))
+    except (OSError, ValueError):
+        return None
+    ans = got.get("answer") if isinstance(got, dict) and got.get("ok") is True else None
+    return ans if isinstance(ans, dict) else None
+
+
+def emit_answer(talkto, mode, payload, answer, ask_id=None, question=False, ask=None):
+    out = output(mode, payload, answer)
+    if out is None:
+        return
+    h = out['hookSpecificOutput']
+    allow = h.get('decision', {}).get('behavior') == 'allow' or h.get('permissionDecision') == 'allow'
+    if os.geteuid() == 0 and allow and not root_window_open(talkto):
+        print('AI-za: root unlock is closed; answer on the terminal', file=sys.stderr)
+        return
+    if os.geteuid() != 0 and allow and not question:
+        if in_container():
+            # The answer file is the container's to write: what the page
+            # answered is the backend's record.
+            given = backend_answer(talkto, ask_id, ask_hash(ask)) if ask_id and ask is not None else None
+            if not given or given.get("behavior") != "allow":
+                print('AI-za: the answer was not confirmed; answer on the terminal', file=sys.stderr)
+                return
+            out = output(mode, payload, given)
+            if out is None:
+                return
+        elif not root_window_open(talkto, ("host", "root")):
+            print('AI-za: the host unlock is closed; answer on the terminal', file=sys.stderr)
+            return
+    print(json.dumps(out, ensure_ascii=False))
+
+
+def main():
+    talkto = os.environ.get("AIZA_TALKTO")
+    mode = sys.argv[1] if len(sys.argv) > 1 else ""
+    if not talkto or mode not in ("perm", "pre"):
+        return
+    payload = _th.read_payload()
+    tool = payload.get("tool_name")
+    if not isinstance(tool, str):
+        return
+    question = tool == "AskUserQuestion"
+    skipping = payload.get("permission_mode") == "bypassPermissions"
+    if mode == "pre" and not (question and skipping):
+        return                   # PermissionRequest comes for this one (or nothing to ask)
+    info = _th.conv_info(payload)
+    if info.get("nested"):
+        return                   # a Claude run by the session's Claude: not the pane's prompt
+    inp = payload.get("tool_input")
+    ask = {"kind": "question" if question else "permission", "tool": tool,
+           "terminal": mode == "perm", "session_id": payload.get("session_id"), "pane": info.get("pane")}
+    if question:
+        ask["questions"] = questions(inp)
+        if not ask["questions"]:
+            return
+    else:
+        ask["summary"] = summary(tool, inp)
+        ask["can_session"] = any(isinstance(s, dict) and s.get("type") in SESSION_KINDS
+                                 for s in payload.get("permission_suggestions") or [])
+    ask_id, answer = wait_answer(talkto, ask, WAIT_PERM if mode == "perm" else WAIT_PRE)
+    emit_answer(talkto, mode, payload, answer, ask_id, question, ask)
+
+
+def codex_permission(payload):
+    """Called after the Codex hook verifies the foreground cli parent.
+
+    No native prompt exists while waiting. Returning no decision lets the
+    terminal handle it. Sessions that bypass approvals are left alone.
+    Root, the host and a devbox (2026-11-25, the deployment notes): an "allow" is
+    trusted as for Claude's prompts (emit_answer): root's unlock window,
+    the host's, or in a container the backend's own record. The Email box's
+    Codex never asks (it runs with approvals off) and its session tree is
+    not one of these, so it stays out.
+    """
+    talkto = os.environ.get("AIZA_TALKTO")
+    if not talkto or payload.get("permission_mode") == "bypassPermissions":
+        return False
+    tool = payload.get("tool_name")
+    if not isinstance(tool, str) or not tool:
+        return False
+    split = split_talkto(talkto)
+    if split is None:
+        return False
+    fd, resolved = open_session_dir(talkto)
+    try:
+        if in_container():
+            # The only tree a devbox has; its answers are checked against
+            # the backend's record before an allow (backend_answer).
+            expected = '/' + '/'.join(split[0] + ['sandhome', '.aiza', split[1]])
+        else:
+            # On the host (root or not), never the legacy container-writable tree.
+            expected = '/' + '/'.join(split[0] + ['.aiza-state', 'sessions', split[1]])
+        if resolved != expected:
+            return False
+    finally:
+        os.close(fd)
+    inp = payload.get("tool_input")
+    # Show the complete request, including permissions, additional paths and
+    # descriptions. Never omit a field or render invisible/bidi controls.
+    request = {'tool':tool, 'input':inp, 'cwd':payload.get('cwd')}
+    def invisible(value):
+        if isinstance(value, str):
+            return any(unicodedata.category(c) in ('Cc','Cf','Zl','Zp') and c not in '\n\t' for c in value)
+        if isinstance(value, dict):
+            return any(invisible(k) or invisible(v) for k,v in value.items())
+        if isinstance(value, list):
+            return any(invisible(v) for v in value)
+        return False
+    if invisible(request):
+        return False
+    try:
+        full = json.dumps(request, ensure_ascii=False, allow_nan=False)
+    except (TypeError, ValueError):
+        return False
+    if isinstance(inp, dict) and inp.get('sandbox_permissions') == 'require_escalated':
+        full = 'sandbox の外で実行\n' + full
+    if len(full) > TEXT_MAX:
+        return False
+    ask = {"kind": "permission", "tool": tool, "summary": full,
+           "terminal": False, "can_session": False,
+           "session_id": payload.get("session_id"), "pane": os.environ.get("TMUX_PANE")}
+    ask_id, answer = wait_answer(talkto, ask, WAIT_CODEX)
+    emit_answer(talkto, 'codex', payload, answer, ask_id, ask=ask)
+    return True
+
+
+def _ppid_of(pid):
+    try:
+        with open(f"/proc/{pid}/stat") as f:
+            return int(f.read().rsplit(")", 1)[1].split()[1])
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def wait_answer(talkto, ask, timeout):
+    """Wait for the page's answer: `timeout` seconds, or with None for as
+    long as whoever started this hook is there -- the parent (Codex, or the
+    sh -c of Claude Code's hook line) and the parent's parent (Claude Code)."""
+    ask_id = "ask-" + secrets.token_hex(8)
+    parent = os.getppid()
+    grand = _ppid_of(parent)
+    pos = status_size(talkto)
+    gone = {"how": None}
+
+    def ended(signum, _frame):
+        # Claude Code ends the hook when the terminal answered first.
+        gone["how"] = "terminal"
+        raise SystemExit(0)
+    signal.signal(signal.SIGTERM, ended)
+    signal.signal(signal.SIGHUP, ended)
+    _th.append(talkto, {"id": ask_id, "ask": ask})
+    deadline = None if timeout is None else time.monotonic() + timeout
+    answer = None
+    try:
+        while deadline is None or time.monotonic() < deadline:
+            answer, pos = read_status(talkto, ask_id, pos)
+            if answer is not None:
+                break
+            if timeout is None and (os.getppid() != parent
+                                    or (grand is not None and _ppid_of(parent) != grand)):
+                gone["how"] = "terminal"    # Claude/Codex went away without ending this hook
+                break
+            time.sleep(POLL)
+    finally:
+        if answer is None:
+            try:
+                _th.append(talkto, {"ask_done": ask_id, "how": gone["how"] or "timeout"})
+            except Exception:
+                pass
+    return ask_id, answer
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except SystemExit:
+        raise
+    except Exception as exc:
+        record_failure(Path(os.environ.get("AIZA_TALKTO", "")).parent, "ask:" + type(exc).__name__)
+    sys.exit(0)

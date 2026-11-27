@@ -26,7 +26,7 @@ ME = pwd.getpwuid(os.getuid()).pw_name
 
 class DemoLoginTest(unittest.TestCase):
     def setUp(self):
-        self.store = Path(tempfile.mkdtemp(prefix="aigw-test-demo-")) / "sessions.json"
+        self.store = Path(tempfile.mkdtemp(prefix="aiza-test-demo-")) / "sessions.json"
         self.secret = self.store.parent / "cookie_secret"
         self.secret.write_bytes(b"test-secret")
         self.saved = (G.SESSION_STORE_PATH, G.SESSION_STORE_LOCK_PATH, G.COOKIE_SECRET_FILE)
@@ -53,14 +53,14 @@ class DemoLoginTest(unittest.TestCase):
 
     def test_without_demo_user_nothing_is_registered(self):
         with mock.patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("AIGW_DEMO_USER", None)
+            os.environ.pop("AIZA_DEMO_USER", None)
             self.assertEqual(G.load_extensions(DEMO_EXT), ["demo"])
         self.assertEqual(G._EXT["GET"], [])
         r, _ = self.get("/agents/demo-login")
         self.assertEqual(r.status, 404)
 
     def test_demo_login_gives_a_working_session(self):
-        with mock.patch.dict(os.environ, {"AIGW_DEMO_USER": ME}):
+        with mock.patch.dict(os.environ, {"AIZA_DEMO_USER": ME}):
             G.load_extensions(DEMO_EXT)
         r, body = self.get("/agents/demo-login")
         self.assertEqual(r.status, 302)
@@ -71,8 +71,8 @@ class DemoLoginTest(unittest.TestCase):
         self.assertEqual((r.status, json.loads(body)), (200, {"username": ME}))
 
     def test_only_loopback_names_get_a_login(self):
-        with mock.patch.dict(os.environ, {"AIGW_DEMO_USER": ME}):
-            os.environ.pop("AIGW_DEMO_HOSTS", None)
+        with mock.patch.dict(os.environ, {"AIZA_DEMO_USER": ME}):
+            os.environ.pop("AIZA_DEMO_HOSTS", None)
             G.load_extensions(DEMO_EXT)
         for host in ("localhost:8878", "127.0.0.1", "[::1]:8878", "LOCALHOST"):
             r, _ = self.get("/agents/demo-login", host=host)
@@ -83,30 +83,30 @@ class DemoLoginTest(unittest.TestCase):
             self.assertIsNone(r.getheader("Set-Cookie"), host)
 
     def test_demo_hosts_adds_names(self):
-        with mock.patch.dict(os.environ, {"AIGW_DEMO_USER": ME, "AIGW_DEMO_HOSTS": "box.lan, other"}):
+        with mock.patch.dict(os.environ, {"AIZA_DEMO_USER": ME, "AIZA_DEMO_HOSTS": "box.lan, other"}):
             G.load_extensions(DEMO_EXT)
         self.assertEqual(self.get("/agents/demo-login", host="box.lan:8878")[0].status, 302)
         self.assertEqual(self.get("/agents/demo-login", host="evil.example")[0].status, 403)
 
     def test_unknown_demo_user_fails_the_load(self):
-        with mock.patch.dict(os.environ, {"AIGW_DEMO_USER": "no-such-user-aigw-demo"}):
+        with mock.patch.dict(os.environ, {"AIZA_DEMO_USER": "no-such-user-aiza-demo"}):
             self.assertEqual(G.load_extensions(DEMO_EXT), [])
 
 
 class GatewayHostTest(unittest.TestCase):
     def test_default_is_loopback(self):
         with mock.patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("AIGW_GATEWAY_HOST", None)
+            os.environ.pop("AIZA_GATEWAY_HOST", None)
             self.assertEqual(load_gateway().GATEWAY_HOST, "127.0.0.1")
 
     def test_env_overrides(self):
-        with mock.patch.dict(os.environ, {"AIGW_GATEWAY_HOST": "0.0.0.0"}):
+        with mock.patch.dict(os.environ, {"AIZA_GATEWAY_HOST": "0.0.0.0"}):
             self.assertEqual(load_gateway().GATEWAY_HOST, "0.0.0.0")
 
 
 class SandboxStandInTest(unittest.TestCase):
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp(prefix="aigw-test-sbx-"))
+        self.home = Path(tempfile.mkdtemp(prefix="aiza-test-sbx-"))
 
     def run_sandbox(self, *args):
         env = {"HOME": str(self.home), "PATH": os.environ["PATH"]}
@@ -118,7 +118,7 @@ class SandboxStandInTest(unittest.TestCase):
         home, cwd, tmux = r.stdout.strip().split("|")
         self.assertEqual(home, str(self.home / "sandhome"))
         self.assertEqual(os.path.realpath(cwd), os.path.realpath(home))
-        self.assertEqual(tmux, f"/tmp/aigw-sandbox-{os.getuid()}")
+        self.assertEqual(tmux, f"/tmp/aiza-sandbox-{os.getuid()}")
 
     def test_exec_passes_stdin_and_exit_status(self):
         env = {"HOME": str(self.home), "PATH": os.environ["PATH"]}

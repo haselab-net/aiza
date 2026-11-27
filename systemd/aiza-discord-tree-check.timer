@@ -1,0 +1,11 @@
+# aiza-discord-tree-check.timer -- aiza-discord-tree-check.service を1日1回。
+[Unit]
+Description=aiza: daily check of the tree's Discord channels
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

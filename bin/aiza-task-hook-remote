@@ -1,0 +1,44 @@
+#!/bin/bash
+# aiza-task-hook-remote -- the ssh:<machine> twin of aiza-task-hook
+# (the deployment notes, the deployment notes), installed on each SSH_MACHINES entry as
+# ~/.local/bin/aiza-task-hook and named in that machine's Claude Code
+# settings (~/.claude/settings.json: SessionStart -> "start", Stop and
+# Notification -> "event"). `aiza-task-hook-install <machine>` on the aiza
+# host puts both there.
+#
+# Does something only inside an aiza pane ($AIZA_TALKTO_ID, set by the
+# backend with `tmux respawn-pane -e`). Like talkto-remote it appends one
+# JSON line to $HOME/.aiza-talkto/<id>.jsonl, which the backend takes over
+# ssh: {"ts", "hook": "start"|"event", "pane": 0|1, "b64": <the hook's whole
+# input, base64>}. Plain bash + base64 for the same reason as talkto-remote:
+# on the Windows (MSYS2/Git Bash) machines there is no usable python3.
+# "pane": $TMUX_PANE is set -- this Claude runs in the aiza pane itself, not
+# in a background process of Claude Code's daemon.
+#
+# "start" also prints the status-line rule (stdout becomes context for
+# Claude). The rule below is filled in by aiza-task-hook-install from the
+# local aiza-task-hook's RULE, so the two never differ.
+#
+# Never fails: a hook that errors must not get in Claude's way.
+# aigw-legacy: panes started before the rename (2026-11-23) only have AIGW_TALKTO_ID
+: "${AIZA_TALKTO_ID:=${AIGW_TALKTO_ID:-}}"
+
+mode=${1:-}
+payload=$(cat 2>/dev/null)
+if [ -z "${AIZA_TALKTO_ID:-}" ]; then
+    exit 0
+fi
+if [ "$mode" = start ]; then
+    cat <<'AIZA_RULE_END'
+@RULE@
+AIZA_RULE_END
+fi
+case "$mode" in start|event) ;; *) exit 0 ;; esac
+case "$AIZA_TALKTO_ID" in *[!A-Za-z0-9_-]*|'') exit 0 ;; esac
+d="$HOME/.aiza-talkto"
+mkdir -p "$d" 2>/dev/null || exit 0
+pane=0
+[ -n "${TMUX_PANE:-}" ] && pane=1
+b64=$(printf '%s' "$payload" | base64 -w0 2>/dev/null) || b64=$(printf '%s' "$payload" | base64 | tr -d '\n')
+printf '{"ts":%s,"hook":"%s","pane":%s,"b64":"%s"}\n' "$(date +%s)" "$mode" "$pane" "$b64" >> "$d/$AIZA_TALKTO_ID.jsonl" 2>/dev/null
+exit 0

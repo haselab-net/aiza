@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>aigw 教程</title>
+<title>AI座 教程</title>
 <style>
   :root {
     --bg: #ffffff; --fg: #1d2330; --muted: #5b6575; --line: #dde2ea; --card: #f5f7fa;
@@ -70,23 +70,22 @@
 <body>
 <div class="wrap">
 
-<h1>aigw 教程 进阶篇</h1>
+<h1>AI座 教程 进阶篇</h1>
 <nav class="langs" aria-label="Language"><a href="../advanced.html" lang="ja">日本語</a><a href="../en/advanced.html" lang="en">English</a><a href="../zh/advanced.html" lang="zh-CN" class="here" aria-current="page">简体中文</a></nav>
 <div class="editions"><a href="index.html">入口</a><a href="docker.html">用 Docker 试用</a><a href="basic.html">基础篇</a><a href="advanced.html" class="here">进阶篇</a></div>
-<div class="note">聊天、终端、设置和共享界面的截图显示的是日文界面。aigw 本身可以在 设置 → 语言 中切换为简体中文。</div>
 
-<p class="lead">本篇是<a href="basic.html">基础篇</a>的续篇。介绍会话增多时的整理方法（文件夹、巡览、通知）、与其他会话的连接、沙箱之外（Email、主机、root）以及其他机器的用法。</p>
+<p class="lead">本篇是<a href="basic.html">基础篇</a>的续篇。介绍会话增多时的整理方法（文件夹、工作树、巡览、按轮次）、与其他会话的连接、devbox 之外（mailbox、主机、root）以及其他机器的用法。</p>
 
 <nav class="toc">
 <strong>目录</strong>
 <ol>
-  <li><a href="#folders">用文件夹整理</a></li>
+  <li><a href="#folders">用文件夹和工作树整理</a></li>
   <li><a href="#patrol">等待确认与巡览</a></li>
-  <li><a href="#notifications">通知列表</a></li>
+  <li><a href="#tree">工作树与“按轮次”</a></li>
   <li><a href="#links">连接会话</a></li>
-  <li><a href="#where">沙箱、主机、root、Email 的区别</a></li>
+  <li><a href="#where">devbox、mailbox、主机、root 的区别</a></li>
   <li><a href="#settings">设置界面与登录 Claude</a></li>
-  <li><a href="#passkey">Email 与通行密钥（钥匙）的注册</a></li>
+  <li><a href="#passkey">mailbox 与通行密钥（钥匙）的注册</a></li>
   <li><a href="#root">成为 root 的步骤</a></li>
   <li><a href="#machines">其他机器与 Windows 机器黑板</a></li>
   <li><a href="#faq">遇到问题时</a></li>
@@ -94,31 +93,33 @@
 </nav>
 
 <!-- ===================================================================== -->
-<h2 id="folders">1. 用文件夹整理</h2>
+<h2 id="folders">1. 用文件夹和工作树整理</h2>
 
-<p>会话可以归入文件夹。文件夹中还可以再建文件夹，层数没有限制。</p>
+<p>在工作的 🌳 树中，可以把会话归入<strong>文件夹</strong>，还可以放在<strong>工作树</strong>（把要做的事按分支写下来的东西，<a href="#tree">第 3 章</a>）的项目下面。文件夹中还可以再建文件夹，层数没有限制。</p>
 
 <div class="shot">
-  <figure><img src="img/11-folders.png" alt="列表中有文件夹“研究”，其中有文件夹“机器人”，再往里有两个会话。机器人文件夹上有共享中的标志"><figcaption>打开“研究”中的“机器人”后的样子。👥 表示整个文件夹正在共享</figcaption></figure>
+  <figure><img src="img/11-folders.png" alt="按 ↕ 后的排序界面。文件夹“研究”，其中的工作树“准备学会”及其项目（练习报告、准备答疑），项目下的会话，每行左侧有 ⠿"><figcaption>按 ↕ 后的样子。用每行左侧的 ⠿ 拖动</figcaption></figure>
   <div class="side">
     <ul>
-      <li><strong>创建</strong>：列表上方的“＋ 新建文件夹”。要在某个文件夹中创建时，点该文件夹那一行的 <strong>＋</strong> →“在此新建文件夹”。</li>
-      <li><strong>放入、移动</strong>：按住行左侧的 ⠿ 拖动，在文件夹的行上松开即可放入其中。在行与行之间松开，则排序到该位置。也可以把整个文件夹放入另一个文件夹。</li>
-      <li><strong>展开、收起</strong>：点按文件夹的行。行上的数字是其中会话的数量，“等待确认”是其中正在等待回复的会话数量。</li>
+      <li><strong>选中、展开</strong>：文件夹的行<strong>按一次是选中</strong>（边框发蓝光），<strong>再按一次选中的行是展开 / 收起</strong>。按 📁 右下角的 ▶/▼，不选中也能直接展开收起。行上的数字是其中会话的数量。展开的文件夹会连同其内容一起用边框围起来。</li>
+      <li><strong>创建</strong>：按上方工具行的“＋ 📁”，工具行正下方会打开名称栏。写好名称后按“创建”（或 <kbd>Enter</kbd>）。如果选中了文件夹，就创建在其中。</li>
+      <li><strong>放入、移动</strong>：按上方工具行的 <strong>↕</strong>，每行左侧会出现 ⠿。按住 ⠿ 拖动，在文件夹的行上松开即可放入其中。在行与行之间松开，则排序到该位置。也可以把整个文件夹、整棵工作树放入另一个文件夹。完成后再按一次 ↕。</li>
+      <li><strong>把会话放到工作树的项目下</strong>：把会话的 ⠿ 在树的项目上松开，就会放到该项目下面（项目和会话关联起来）。项目完成后，会话会回到文件夹中。</li>
       <li><strong>批量停止、继续</strong>：点按文件夹行上的 ●，会停止其中所有正在运行的会话。停止后点按灰色的 ●，会把当时停止的会话一起继续。</li>
-      <li><strong>归档</strong>：用 🗄 归档整个文件夹。只能删除空文件夹（🗑）。</li>
+      <li><strong>文件夹的 ⋯</strong>：✏️ 重命名、设置工作目录、🧑‍🤝‍🧑 共享整个文件夹、🗄 归档（整个文件夹）、🗑 删除（仅限空文件夹）。</li>
+      <li>会话行的 ⋯ 中有重命名、🔗 连接、🗄 归档、🗑 删除。</li>
     </ul>
   </div>
 </div>
 
 <h3>工作目录</h3>
 <div class="shot">
-  <figure><img src="img/12-folder-menu.png" alt="按文件夹的 ✏️ 后出现的菜单：重命名、设置工作目录、共享整个文件夹"><figcaption>文件夹 ✏️ 的菜单</figcaption></figure>
+  <figure><img src="img/12-folder-menu.png" alt="按文件夹“研究”的 ⋯ 后出现的菜单：重命名、设置工作目录、共享整个文件夹…、归档"><figcaption>文件夹 ⋯ 的菜单</figcaption></figure>
   <div class="side">
-    <p>可以为文件夹指定一个<strong>工作目录</strong>（服务器上的位置）。用 ✏️ →“设置工作目录”，写成 <code>robot</code> 这样。</p>
+    <p>可以为文件夹指定一个<strong>工作目录</strong>（服务器上的位置）。用 ⋯ →“设置工作目录”，写成 <code>robot</code> 这样。</p>
     <ul>
-      <li>位置用相对路径写。对沙箱会话来说是 <code>~/sandhome/robot</code>，对主机 shell 来说是自己主目录下，对 root shell 来说是 <code>/root</code> 下的同名位置。</li>
-      <li>点该文件夹的 <strong>＋</strong> →“在此文件夹新建会话”，列表上方的创建栏会显示“📁 机器人 · 工作目录 ~/robot”。按<strong>开始</strong>后，会话会在该位置启动，并放入该文件夹。如果该位置不存在，会自动创建。</li>
+      <li>位置用相对路径写。对 devbox 会话来说是 <code>~/sandhome/robot</code>，对主机会话来说是自己主目录下，对 root 会话来说是 <code>/root</code> 下的同名位置。</li>
+      <li>选中该文件夹后按上方工具行的 <strong>＋ 🤖 AI</strong>，会打开开始会话的界面，放置位置已填入该文件夹。按<strong>开始</strong>后，会话会在工作目录的位置启动，并放入该文件夹。如果该位置不存在，会自动创建。</li>
       <li>无论从哪里创建，在工作目录中启动的新会话都会自动放入该文件夹。</li>
       <li>没有填写工作目录的文件夹，会使用上级文件夹的工作目录。</li>
     </ul>
@@ -126,13 +127,14 @@
 </div>
 
 <h3>按文件夹共享</h3>
-<p>用 ✏️ →“共享整个文件夹…”，可以共享其中的所有会话（包括子文件夹以及之后放入的会话）。对象以及“只读/协作”的选择方法，与单个会话的共享（<a href="basic.html#share">基础篇</a>）相同。root shell 会变为只读，Email 不会按文件夹共享。正在共享的文件夹会带有 👥。</p>
+<p>用 ⋯ →“🧑‍🤝‍🧑 共享整个文件夹…”，可以共享其中的所有会话（包括子文件夹以及之后放入的会话）。对象以及“只读/协作”的选择方法，与单个会话的共享（<a href="basic.html#share">基础篇</a>）相同。root 的会话会变为只读，mailbox 的会话只有在共享给<strong>指定用户</strong>时才会被共享（共享给“所有人”的文件夹对 mailbox 无效）。协作的文件夹中，mailbox 的 Claude、Codex 为协作，mailbox 的 shell 为只读。正在共享的文件夹会带有 🧑‍🤝‍🧑。</p>
 
 <h3>归档中的文件夹</h3>
 <div class="shot">
-  <figure><img src="img/16-archive.png" alt="打开归档后的样子。归档中也有“研究”“机器人”文件夹，其中是已归档的会话"><figcaption>归档中也按同样的文件夹结构排列</figcaption></figure>
+  <figure><img src="img/16-archive.png" alt="打开最下方“打开归档”后的样子。已完成的树“上次学会”及其分支（在文件夹“研究”下），以及“打开共享记录”和“机器”按钮"><figcaption>最下方的“🗄 打开归档”。已完成的工作树也会放在这里</figcaption></figure>
   <div class="side">
-    <p>在文件夹中归档的会话，在“🗄 打开归档”里也会排在同一文件夹下。用 📤 恢复后会回到原来的文件夹。整个文件夹归档的，可以用该文件夹行上的 📤 一起恢复。</p>
+    <p>在文件夹中归档的会话，在“🗄 打开归档”里也会排在同一文件夹下。用 📤 恢复后会回到原来的文件夹。整个文件夹归档的（⋯ 中的 🗄），可以用该文件夹行上的 📤 一起恢复。</p>
+    <p>所有项目都已完成的工作树，也会移到归档中。用 ↕ 也可以把它移到归档中的文件夹里。</p>
   </div>
 </div>
 
@@ -142,140 +144,174 @@
 <p>Claude 正在等待回复（工作已完成、请求批准计划等）的会话，会在列表中名称旁边带有黄色的“等待确认”。</p>
 
 <div class="shot">
-  <figure><img src="img/13-patrol.png" alt="聊天界面上方的巡览栏。有文件夹位置、上一个/下一个按钮、1/5、筛选选择栏、归档和垃圾桶按钮"><figcaption>点按聊天名称后打开的巡览栏</figcaption></figure>
+  <figure><img src="img/02-chat.png" alt="聊天界面标题下方的巡览栏。有文件夹位置、上一个/下一个按钮、7/7、筛选选择栏、重命名、归档和垃圾桶按钮"><figcaption>聊天标题下方的巡览栏</figcaption></figure>
   <div class="side">
     <ul>
-      <li>在聊天界面<strong>点按名称部分</strong>，会打开巡览栏（再点按一次关闭）。</li>
+      <li>巡览栏一开始就在聊天标题正下方打开着。<strong>点按名称部分</strong>会关闭，再点按一次会打开（此浏览器会记住）。</li>
       <li>用 <strong>‹ 上一个、下一个 ›</strong> 可以不返回列表，直接切换到前后的会话。顺序与列表（包括文件夹内）一致。</li>
       <li>在选择栏中可以选择“全部、运行中、等待确认”。选择“等待确认”后，就可以只依次查看正在等待回复的会话。</li>
-      <li>用 🗄 归档当前会话，用 🗑 删除对话记录，然后直接转到下一个。</li>
+      <li>用 ✏️ 重命名当前会话，用 🗄 归档，用 🗑 删除对话记录，然后直接转到下一个。</li>
       <li>栏上方的小字表示该会话位于列表中的哪个文件夹。</li>
     </ul>
   </div>
 </div>
 
 <!-- ===================================================================== -->
-<h2 id="notifications">3. 通知列表</h2>
+<h2 id="tree">3. 工作树与“按轮次”</h2>
 
+<p><strong>工作树</strong>是把一项工作（例如“学会准备”）分成若干分支（“发表练习”“答疑准备”…）写下来的东西。每个分支都记着“现在轮到谁”（🙋 人、🤖 AI、💤 等待、✓ 已完成），并且可以和会话关联。AI座 中的 Claude 会在会话里自己添加分支，或把分支标为完成。</p>
+<ul>
+  <li><strong>外观</strong>：树的根那一行带有 🌳（右下角的 ▶ 表示已收起、▼ 表示已展开、▽ 表示连已完成的分支也显示；左下角的 🔒 表示没有与任何人共享的树）。下面还有分支的分支，会连同其下内容一起用边框围起来。</li>
+  <li><strong>选中、展开</strong>：与文件夹一样，分支的行<strong>按一次是选中</strong>，<strong>再按一次选中的行是展开 / 收起</strong>。选中后，该分支的整个边框会发光。</li>
+  <li><strong>创建树</strong>：按上方工具行的“＋ 🌳”，在工具行正下方打开的栏中写下名称。如果选中了文件夹，树会放在该文件夹中；没有选中时会列在“未放入文件夹的树”中，用 ↕ 把它移到文件夹中（也可以用根部 ⋯ 中的“📁 放入的文件夹…”选择）。</li>
+  <li><strong>添加分支</strong>：选中分支（或根）后按“＋ 🌳”。可以选择按标题添加，或关联到 GitHub 的 Issue。</li>
+  <li><strong>用分支开始会话</strong>：选中分支后按“＋ 🤖 AI”。如果该分支还没有会话，开始的会话就成为该分支的负责会话（见下文“负责与协助”）。如果已经有会话，会在其下创建分支并由新会话负责。选中别人的会话所负责的分支时，会变为 🤛 接手（由自己的新会话来负责）。</li>
+  <li><strong>分支的 ⋯</strong>：有 ✓ 标为完成（↺ 重新打开）、🧑‍🤝‍🧑 共享（可查看的人、可编辑的人）、⛓ 被什么卡住、💬 引用、📁 放入的文件夹（仅限根）、✏️ 重命名等。要创建的东西（分支、会话）不在 ⋯ 中，而是用上方工具行的 ＋ 创建。</li>
+  <li>分支旁边的“🙋 你”等标记表示现在轮到谁。<strong>红色的“已停滞 ◯ 天”</strong>表示轮次 3 天以上没有变化。用上方的“显示”可以筛选为“🙋 轮到你”或“⏳ 停滞 3 天”。</li>
+  <li>已完成的分支会收进“✓ 已完成的分支 ◯ 个”。</li>
+</ul>
+
+<h3 id="team">🧭 负责与 🤝 协助</h3>
 <div class="shot">
-  <figure><img src="img/14-notifications.png" alt="通知列表。列出日期时间、会话名称、正文，每条都有归档按钮"><figcaption>用 🔔 打开的通知列表。红色的 ● 表示尚未查看</figcaption></figure>
+  <figure><img src="img/19-team.png" alt="树“整理实验数据”的行上显示“🧭 整理实验数据 · 🤝 制作表格・绘制图表”，边框中带标题地排列着负责和协助会话的行"><figcaption>分支“整理实验数据”的负责会话，以及协助它的两个会话</figcaption></figure>
   <div class="side">
+    <p>这是由几个人（几个会话）共同承担一个分支时的形式。</p>
     <ul>
-      <li>用界面上方的 🔔 打开至今收到的通知（推送）列表。红色数字是尚未查看的数量。</li>
-      <li>每条都显示日期时间、会话名称和正文。点按即可打开该会话。</li>
-      <li>在列表中显示过的就算已查看。用 🗄 归档一条，用“全部归档”一起归档。</li>
-      <li><strong>已处理完的会自动移到归档</strong>：通知之后自己向该会话发送了内容，或者会话已结束、已归档、已删除，满足任一条件即可。原因会显示在归档栏中。</li>
+      <li><strong>🧭 负责</strong>：与分支关联的会话。只有负责会话会写分支的轮次（🙋、🤖、💤、✓）。</li>
+      <li><strong>🤝 协助</strong>：帮助负责会话的会话。协助不会在树上写任何东西。负责会话移到别的分支时，协助也会一起移过去。</li>
+      <li>有负责会话的分支行上会显示“🧭 负责 · 🤝 协助”的名称，分支的边框中会带标题地排列负责和协助会话的行。</li>
+      <li><strong>设为协助</strong>：按 ↕，把要让它帮忙的会话的 ⠿ 拖到有负责会话的分支（或负责会话的行）上松开。会弹出确认。目前只能在自己的会话之间设置。</li>
+      <li><strong>停止、取消</strong>：分支 ⋯ 中的“🤝 停止协助”“🧭 取消负责会话”。用 ↕ 把会话拖到树的边框外松开也会取消。取消后的会话会回到文件夹中。</li>
+      <li>即使分支收起，负责会话的行也会显示（协助只显示数量）。展开后协助的行也会显示。</li>
+      <li>如果有可以分别说“已完成”的段落，就拆成分支；如果是一起做一个东西，就不拆分，用负责与协助。</li>
+    </ul>
+  </div>
+</div>
+
+<h3>🙋 按轮次</h3>
+<div class="shot">
+  <figure><img src="img/18-ball.png" alt="按轮次的界面。轮到你、AI 工作中、等待（搁置）、轮到你(树的项目)、轮到别人"><figcaption>🙋 按轮次。按轮到谁分组的列表</figcaption></figure>
+  <div class="side">
+    <p>把会话和工作树的分支<strong>按轮到谁</strong>分组排列。从上往下依次是“轮到你”“AI 工作中”“等待（搁置）”，然后是树的分支中的“轮到你”。轮到别人的、还没有轮到任何人的，是收起来的。</p>
+    <ul>
+      <li>用 ✓ 标为完成，用 💤 选择“搁置到什么时候”并搁置。用 ⏰ 提前唤醒搁置的项目。</li>
+      <li>点分支的 🌳，会跳到 🌳 树中的该分支。</li>
+      <li>标签页“工作”旁边的数字是轮到你的数量。手机收到通知时，就看这里。</li>
     </ul>
   </div>
 </div>
 
 <!-- ===================================================================== -->
 <h2 id="links">4. 连接会话</h2>
-<p>用列表中的 🔗，可以把两个会话（例如沙箱中的 Claude 和主机上的 Claude）连接起来。连接后，只有当一方的 Claude 执行 <code>talkto "…"</code> 时，那段文字才会送到对方的输入框。并不会自动转发所有内容。用法 Claude 自己可以通过 <code>talkto --help</code> 查到。</p>
+<p>用会话行的 ⋯（或聊天的 ⋯）中的 🔗，可以把两个会话（例如 devbox 中的 Claude 和主机上的 Claude）连接起来。连接后，只有当一方的 Claude 执行 <code>talkto "…"</code> 时，那段文字才会送到对方的输入框。并不会自动转发所有内容。用法 Claude 自己可以通过 <code>talkto --help</code> 查到。</p>
 
 <!-- ===================================================================== -->
-<h2 id="where">5. 沙箱、主机、root、Email 的区别</h2>
+<h2 id="where">5. devbox、mailbox、主机、root 的区别</h2>
 
-<p>创建栏中的类型区别在于“在哪里运行”。平时只用<strong>沙箱</strong>（Claude、Codex、Shell(沙箱内)）。</p>
+<p>在开始会话的界面中，“运行什么”（Claude、Codex、Shell）和“在哪里运行”（devbox、mailbox、主机、root、其他机器）是分开选择的。任何组合都可以启动（例如主机上的 Claude、mailbox 中的 Codex、mailbox 中的 Shell）。平时只用 <strong>devbox</strong>，一开始选中的就是“Claude”×“devbox”。mailbox 只在已配置的服务器上出现，root 只对拥有 root 级别通行密钥的人出现。</p>
 
-<div class="diagram" role="img" aria-label="沙箱和 Email 信箱是服务器中各自独立的容器，主机和 root 在容器之外，要出去需要通行密钥">
+<div class="diagram" role="img" aria-label="devbox 和 mailbox 是服务器中各自独立的容器，主机和 root 在容器之外，要出去需要通行密钥">
 <svg viewBox="0 0 760 330" xmlns="http://www.w3.org/2000/svg" font-size="13">
-  <text x="24" y="28" font-size="15" font-weight="600">要到容器之外（主机、root、Email），需要通行密钥</text>
+  <text x="24" y="28" font-size="15" font-weight="600">要到 devbox 之外（mailbox、主机、root），需要通行密钥</text>
   <rect class="box" x="24" y="48" width="712" height="262" rx="10"/>
   <text x="40" y="72" font-weight="600">服务器</text>
   <rect class="acc" x="48" y="92" width="300" height="96" rx="8"/>
-  <text x="64" y="118" font-weight="600">沙箱（自己专属的容器）</text>
-  <text x="64" y="140" class="q" font-size="12">Claude / Codex / Shell(沙箱内)</text>
+  <text x="64" y="118" font-weight="600">devbox（自己专属的容器）</text>
+  <text x="64" y="140" class="q" font-size="12">Claude / Codex / Shell</text>
   <text x="64" y="158" class="q" font-size="12">只能看到 ~/sandhome</text>
   <text x="64" y="176" class="q" font-size="12">无需通行密钥。平时在这里</text>
   <rect class="wrn" x="412" y="92" width="300" height="96" rx="8"/>
-  <text x="428" y="118" font-weight="600">Email 信箱（另一个容器）</text>
-  <text x="428" y="140" class="q" font-size="12">Email（仅限已配置的服务器）</text>
-  <text x="428" y="158" class="q" font-size="12">只能看到 ~/mailbox，沙箱中看不到它</text>
+  <text x="428" y="118" font-weight="600">mailbox（另一个容器）</text>
+  <text x="428" y="140" class="q" font-size="12">Claude / Codex / Shell。仅限已配置的服务器</text>
+  <text x="428" y="158" class="q" font-size="12">能看到 ~/mailbox 和 ~/sandhome，devbox 中看不到它</text>
   <text x="428" y="176" class="q" font-size="12">🔑 用主机级别的通行密钥解锁</text>
   <rect class="wrn" x="48" y="208" width="300" height="84" rx="8"/>
   <text x="64" y="234" font-weight="600">主机（容器之外，自己的权限）</text>
-  <text x="64" y="256" class="q" font-size="12">Shell(沙箱外,主机)。能看到真正的主目录</text>
+  <text x="64" y="256" class="q" font-size="12">Claude / Codex / Shell。能看到真正的主目录</text>
   <text x="64" y="274" class="q" font-size="12">🔑 用主机级别的通行密钥解锁</text>
   <rect class="wrn" x="412" y="208" width="300" height="84" rx="8"/>
   <text x="428" y="234" font-weight="600">root（服务器的管理员权限）</text>
-  <text x="428" y="256" class="q" font-size="12">Shell(root,沙箱外)。仅对获许可的人显示</text>
+  <text x="428" y="256" class="q" font-size="12">Claude / Codex / Shell。仅对获许可的人显示</text>
   <text x="428" y="274" class="q" font-size="12">🔓 用 root 级别的通行密钥解锁</text>
 </svg>
 </div>
 
 <div class="scroll"><table>
-  <tr><th>类型（创建栏中的显示）</th><th>运行位置</th><th>能看到的内容</th><th>通行密钥</th><th>用途</th></tr>
-  <tr><td><strong>Claude</strong> / Codex / Shell(沙箱内)</td><td>沙箱：自己专属的容器</td><td>只有 <code>~/sandhome</code></td><td>不需要</td><td>所有日常开发</td></tr>
-  <tr><td><strong>Email</strong></td><td>Email 信箱：与沙箱分开的另一个容器（仅限已配置的服务器）</td><td>只有 <code>~/mailbox</code></td><td>🔑 主机级别</td><td>邮件、个人信息等不想放在开发用沙箱中的东西</td></tr>
-  <tr><td>Shell(沙箱外,主机)</td><td>服务器本身，以自己的权限</td><td>真正的主目录（<code>~/</code>）等</td><td>🔑 主机级别</td><td>需要操作容器外的文件时</td></tr>
-  <tr><td>Shell(root,沙箱外)</td><td>服务器本身，以 root 身份</td><td>全部</td><td>🔓 root 级别</td><td>管理服务器。仅对获许可的人显示</td></tr>
+  <tr><th>开始界面中的选择（运行什么 × 在哪里运行）</th><th>运行位置</th><th>能看到的内容</th><th>通行密钥</th><th>用途</th></tr>
+  <tr><td><strong>Claude</strong> / Codex / Shell × <strong>devbox</strong></td><td>devbox：自己专属的容器</td><td>只有 <code>~/sandhome</code></td><td>不需要</td><td>所有日常开发</td></tr>
+  <tr><td>Claude / Codex / Shell × <strong>mailbox</strong></td><td>mailbox：与 devbox 分开的另一个容器（仅限已配置的服务器）</td><td><code>~/mailbox</code> 和 <code>~/sandhome</code>（可读写）</td><td>🔑 主机级别</td><td>邮件、个人信息等不想放在开发用 devbox 中的东西</td></tr>
+  <tr><td>Claude / Codex / Shell × 主机</td><td>服务器本身，以自己的权限</td><td>真正的主目录（<code>~/</code>）等</td><td>🔑 主机级别</td><td>需要操作容器外的文件时</td></tr>
+  <tr><td>Claude / Codex / Shell × root</td><td>服务器本身，以 root 身份</td><td>全部</td><td>🔓 root 级别</td><td>管理服务器。仅对获许可的人显示</td></tr>
 </table></div>
 
 <ul>
-  <li><strong>为什么平时用沙箱</strong>：在容器中，无论 Claude 执行什么，都到达不了自己 <code>~/sandhome</code> 之外。所以即使跳过权限确认也是安全的。</li>
-  <li><strong>为什么要把 Email 信箱分开</strong>：在沙箱中，通过 <code>npm install</code> 装进来的他人的软件包也会运行。如果把邮件之类的信息放在那里，这些软件包也能读到。Email 信箱是沙箱看不到的另一个容器，对话记录也保存在 <code>~/mailbox</code> 一侧。</li>
-  <li>在机器选择中选择通过 ssh 连接的其他机器，就可以使用那台机器上的 Claude 或 shell。它与沙箱不共享文件（<a href="#machines">第 9 章</a>）。</li>
-  <li>在列表中，可以通过名称前的图标区分类型：🛠️ 沙箱、📫 Email、🏠 主机、🔒 root、💻 其他机器。</li>
+  <li><strong>为什么平时用 devbox</strong>：在容器中，无论 Claude 执行什么，都到达不了自己 <code>~/sandhome</code> 之外。所以即使跳过权限确认也是安全的。</li>
+  <li><strong>为什么要把 mailbox 分开</strong>：在 devbox 中，通过 <code>npm install</code> 装进来的他人的软件包也会运行。如果把邮件之类的信息放在那里，这些软件包也能读到。mailbox 是 devbox 看不到的另一个容器，对话记录也保存在 <code>~/mailbox</code> 一侧。反过来，mailbox 可以读写 <code>~/sandhome</code>，因此可以和 devbox 交换文件（把邮件内容放进 <code>~/sandhome</code> 后，devbox 也能读到，放之前请先考虑）。</li>
+  <li>在“在哪里运行”中选择通过 ssh 连接的其他机器，就可以使用那台机器上的 Claude 或 shell。它与 devbox 不共享文件（<a href="#machines">第 9 章</a>）。</li>
+  <li>在列表中，可以通过名称前的图标区分运行位置：🛠️ devbox、📫 mailbox、🏠 主机、🔒 root、💻 其他机器。</li>
 </ul>
 
 <!-- ===================================================================== -->
 <h2 id="settings">6. 设置界面与登录 Claude</h2>
 
-<p>第一次使用 Claude 之前，要<strong>在每个使用位置各登录一次</strong> Claude。沙箱、主机、root、其他机器的登录信息是各自独立的。只有 Email 信箱在设置界面中没有对应的行，要<a href="#passkey">在信箱中</a>登录。</p>
+<p>第一次使用 Claude 之前，要<strong>在每个使用位置各登录一次</strong> Claude。devbox 的步骤见<a href="basic.html#login">基础篇的“登录 Claude”</a>。这里说明其他位置，以及设置中的其他卡片。</p>
 
 <div class="shot">
-  <figure><img src="../img/07-settings.png" alt="设置界面。Accounts 标题下有沙箱内、沙箱外(主机)、root 几行，每行都有登录和退出登录按钮"><figcaption>设置界面。每行显示当前登录的账号。标题旁边是显示语言的选择栏</figcaption></figure>
+  <figure><img src="img/07-settings.png" alt="设置标签页。显示（显示语言）、AI 登录（Claude、Codex 按位置分行）、朗读与语音、通知、账户的卡片"><figcaption>设置标签页。每行显示当前登录的账号或“未登录”</figcaption></figure>
   <div class="side">
     <h3>打开方法</h3>
-    <p>在首页的机器选择（<code>server</code> 栏）中选择<strong>设置</strong>。返回时，在同一栏中重新选择 <code>server</code>（本服务器）。</p>
-    <h3>登录步骤</h3>
-    <ol class="steps">
-      <li>按“Accounts”中<strong>沙箱内</strong>那一行（如果要在主机或其他机器上使用，就是相应那一行）的<strong>登录</strong>。会打开用于登录的聊天界面。</li>
-      <li>聊天中会显示一个 URL，点按后在浏览器中打开，用 Claude 账号授权。</li>
-      <li>复制显示的代码，粘贴到聊天输入框中并点<strong>执行</strong>。<strong>粘贴的代码不会显示在界面上</strong>，这是正常的。</li>
-      <li>会显示一行成功或失败的结果，用于登录的会话会自动消失。设置界面那一行显示出邮箱地址，就完成了。</li>
-    </ol>
+    <p>按界面顶部标签页中的<strong>设置</strong>。</p>
+    <h3>按位置登录</h3>
     <ul>
-      <li>该行显示“未登录”（黄色）的位置，那里的 Claude 无法运行。</li>
-      <li><strong>Codex</strong> 一栏也是同样的步骤（ChatGPT 账号）。</li>
-      <li>用标题旁边的 ⟳ 可以重新获取状态。</li>
-      <li>用标题旁边的选择栏可以更改<strong>显示语言</strong>（日本語、English、简体中文）。选择的语言会被保存，在其他设备上登录后也会相同。登录界面的下方也可以选择。</li>
-      <li>用最下方的<strong>👥 所有人的登录</strong>，可以查看本服务器上所有人在哪里登录了哪个 Claude 或 ChatGPT 账号（仅供查看）。root 的登录只对正在解锁 root 的人显示。</li>
-      <li>其上方的<strong>结束 Chrome</strong>是停止自己用的测试浏览器（有界面 Chrome）的按钮。变卡时可以按。下次使用时会自动重新启动。</li>
+      <li><strong>AI 登录</strong>卡片中，<strong>Claude</strong>、<strong>Codex</strong> 标题下有按位置分的行。每一行都可以<strong>登录</strong>、<strong>退出登录</strong>，步骤与 devbox 相同（打开 URL 授权，把代码粘贴到聊天中）。</li>
+      <li><strong>devbox</strong>：日常会话（🛠️）使用的 Claude。最先完成这里的登录。</li>
+      <li><strong>主机</strong>：主机会话（🏠）使用的 Claude。与 devbox 是分开登录的。</li>
+      <li><strong>root</strong>：root 会话（🔒）使用的 Claude。只对获准使用 root 的人显示这一行（<a href="#root">第 8 章</a>）。</li>
+      <li><strong>Other hosts</strong>：通过 ssh 连接的其他机器（💻）各自的 Claude。只显示能连上的机器。如果几个人共用该机器上的账号，登录、退出登录会对使用这台机器的所有人生效。</li>
+      <li><strong>mailbox</strong> 的 Claude 在设置中没有对应的行，要<a href="#passkey">在 mailbox 中</a>登录。</li>
+      <li><strong>Codex</strong> 的行，是在打开 URL 后的页面中<strong>输入</strong> AI座 聊天中显示的<strong>代码</strong>（方向与 Claude 相反）。使用 ChatGPT 账号。</li>
+      <li>该行显示“未登录”“Not logged in”（黄色）的位置，那里的 AI 无法运行。用 ⟳ 可以重新获取所有行的状态。</li>
+      <li>用卡片最下方的<strong>🧑‍🤝‍🧑 所有人的登录</strong>，可以查看本服务器上所有人在哪里登录了哪个 Claude 或 ChatGPT 账号（仅供查看）。root 的登录只对正在解锁 root 的人显示。</li>
+    </ul>
+    <h3>其他卡片</h3>
+    <ul>
+      <li><strong>显示</strong>：显示语言（日本語、English、简体中文）。选择的语言会被保存，在其他设备上登录后也会相同。登录界面的下方也可以选择。</li>
+      <li><strong>朗读与语音</strong>：回复朗读和语音模式的声音、语速。从麦克风菜单的“设置”也能来到这里。</li>
+      <li><strong>通知</strong>：切换是否通知此设备。这是按设备的设置。</li>
+      <li><strong>服务器特有的卡片</strong>：有的服务器会显示它自己的设置卡片。</li>
+      <li><strong>账户</strong>：退出登录。</li>
     </ul>
   </div>
 </div>
 
 <!-- ===================================================================== -->
-<h2 id="passkey">7. Email 与通行密钥（钥匙）的注册</h2>
+<h2 id="passkey">7. mailbox 与通行密钥（钥匙）的注册</h2>
 
-<p>像 Email、主机、root 这样要到容器之外时，需要用<strong>通行密钥</strong>（由手机的指纹、面容识别或电脑的 PIN 保护的钥匙）解锁。这样即使 aigw 的登录被盗，没有你手边的设备也出不去。</p>
+<p>像 mailbox、主机、root 这样要到 devbox 之外时，需要用<strong>通行密钥</strong>（由手机的指纹、面容识别或电脑的 PIN 保护的钥匙）解锁。这样即使 AI座 的登录被盗，没有你手边的设备也出不去。</p>
 
 <h3>注册通行密钥（首次一次）</h3>
 <ol class="steps">
   <li>从电脑用 SSH 登录服务器（<a href="basic.html#account">基础篇 第 1 章</a>）。对于只允许从内部网络 SSH 的服务器，要先进入内部网络。<pre><code>ssh <ユーザー名>@<サーバー>
-aigw-passkey register</code></pre></li>
-  <li>会显示一个 URL。请在 <strong>5 分钟内</strong>，用想放置通行密钥的设备（平时使用 aigw 的手机等）的浏览器打开它。这个 URL 在外部也能打开（只有 SSH 需要内部网络）。</li>
+aiza-passkey register</code></pre></li>
+  <li>会显示一个 URL。请在 <strong>5 分钟内</strong>，用想放置通行密钥的设备（平时使用 AI座 的手机等）的浏览器打开它。这个 URL 在外部也能打开（只有 SSH 需要内部网络）。</li>
   <li>在“注册通行密钥”页面按<strong>注册通行密钥</strong>，用指纹、面容识别或 PIN 确认。</li>
   <li>显示完成即可。想增加设备时，在那台设备上再执行一遍同样的步骤。</li>
 </ol>
-<div class="note">通行密钥是每台服务器各自独立的。如果在其他服务器上也要使用，也要在那边注册。已注册的列表可以用 <code>aigw-passkey list</code> 查看，当前状态可以用 <code>aigw-passkey status</code> 查看。</div>
+<div class="note">通行密钥是每台服务器各自独立的。如果在其他服务器上也要使用，也要在那边注册。已注册的列表可以用 <code>aiza-passkey list</code> 查看，当前状态可以用 <code>aiza-passkey status</code> 查看。</div>
 
-<h3>使用 Email</h3>
-<div class="shot">
-  <figure><img src="../img/08-email-bar.png" alt="在创建栏中选择了 Email。文件夹为 Email，继续一栏为新建"><figcaption>在创建栏中选择了 Email</figcaption></figure>
-  <div class="side">
+<h3>使用 mailbox</h3>
+<div>
+  <div>
     <ol class="steps">
-      <li>在创建栏中选择 <strong>Email</strong>（只有已配置的服务器才有）。文件夹从自己的 <code>~/mailbox</code> 开始，可以和 Claude 一样选择子文件夹，或用 <code>＋</code> 新建。</li>
+      <li>在开始会话的界面（<a href="basic.html#coding">基础篇</a>）中，“运行什么”选 <strong>Claude</strong>，“在哪里运行”选 <strong>mailbox</strong>（mailbox 只有已配置的服务器才有）。工作目录从自己的 <code>~/mailbox</code> 开始，可以和 Claude 一样选择子目录，或用 <code>＋</code> 新建。</li>
       <li>按<strong>开始</strong>后，会弹出设备的通行密钥确认。用指纹等确认后，右上角出现 🔑 表示已解锁，会话随即启动。</li>
-      <li><strong>仅限第一次 Email 会话</strong>，信箱中的 Claude 会要求登录。用 🖥️ 打开画面面板，用按键行的 <kbd>↑</kbd> <kbd>↓</kbd> <kbd>⏎</kbd> 选择登录方式（Claude 账号），打开出现的 URL 并授权，把显示的代码粘贴到输入框中点<strong>执行</strong>。接着如果出现是否跳过权限确认的确认，选择同意的那一项。第二次起不会再出现。</li>
-      <li>之后的用法与沙箱中的 Claude 相同。<code>~/mailbox</code> 一开始是空的，需要的工具（读取邮件的脚本等）请自己准备，或者请 Claude 准备。</li>
+      <li><strong>仅限第一次在 mailbox 中使用 Claude 的会话</strong>，mailbox 中的 Claude 会要求登录。用 🖥️ 打开画面面板，用按键行的 <kbd>↑</kbd> <kbd>↓</kbd> <kbd>⏎</kbd> 选择登录方式（Claude 账号），打开出现的 URL 并授权，把显示的代码粘贴到输入框中点<strong>执行</strong>。接着如果出现是否跳过权限确认的确认，选择同意的那一项。第二次起不会再出现。</li>
+      <li>之后的用法与 devbox 中的 Claude 相同。<code>~/mailbox</code> 一开始是空的，需要的工具（读取邮件的脚本等）请自己准备，或者请 Claude 准备。</li>
     </ol>
     <ul>
       <li>解锁状态会持续到你锁定或经过 <strong>2 小时</strong>为止。</li>
-      <li>点按右上角的 🔑 可以立即锁定。锁定期间打开 Email 会话，会出现“🔒 … 解锁”的提示条，点按它即可解锁。</li>
-      <li>沙箱中的 Claude 看不到 Email 信箱。反过来，也请不要下指令把 Email 的内容带到沙箱中。</li>
+      <li>点按右上角的 🔑 可以立即锁定。锁定期间打开 mailbox 的会话，会出现“🔒 … 解锁”的提示条，点按它即可解锁。</li>
+      <li>devbox 中的 Claude 看不到 mailbox。反过来，也请不要下指令把 mailbox 的内容带到 devbox 中。</li>
     </ul>
   </div>
 </div>
@@ -285,14 +321,14 @@ aigw-passkey register</code></pre></li>
 
 <p>root（服务器的管理员权限）<strong>只有管理员许可的人</strong>才能使用。途径有两种，都需要本人操作。</p>
 
-<h3>使用 aigw 的“Shell(root,沙箱外)”</h3>
+<h3>在 AI座 中使用“root”这个位置</h3>
 <ol class="steps">
-  <li>请管理员帮忙。管理员在服务器上执行以下命令，并把显示的 URL 交给你。<pre><code>sudo aigw-passkey register <ユーザー名> --tier root</code></pre></li>
-  <li>在 <strong>5 分钟内</strong>用自己设备的浏览器打开收到的 URL，按<strong>注册通行密钥</strong>。这就是 root 级别的通行密钥（也可以用于解锁主机和 Email）。</li>
-  <li>重新加载 aigw 后，创建栏中会出现 <strong>Shell(root,沙箱外)</strong>。选择它并按<strong>开始</strong>，用通行密钥确认后右上角会变为 🔓，root shell 随即打开。</li>
-  <li>要在 root shell 中使用 Claude，需要先在设置界面的 <strong>root</strong> 一行登录 Claude（<a href="#settings">第 6 章</a>）。</li>
+  <li>请管理员帮忙。管理员在服务器上执行以下命令，并把显示的 URL 交给你。<pre><code>sudo aiza-passkey register <ユーザー名> --tier root</code></pre></li>
+  <li>在 <strong>5 分钟内</strong>用自己设备的浏览器打开收到的 URL，按<strong>注册通行密钥</strong>。这就是 root 级别的通行密钥（也可以用于解锁主机和 mailbox）。</li>
+  <li>重新加载 AI座 后，开始会话界面的“在哪里运行”中会出现 <strong>root</strong>。选择“Shell”和“root”并按<strong>开始</strong>，用通行密钥确认后右上角会变为 🔓，root shell 随即打开。</li>
+  <li>要以 root 使用 Claude（选择“Claude”和“root”），需要先在设置“AI 登录”中“Claude”下的 <strong>root</strong> 一行登录 Claude（<a href="#settings">第 6 章</a>）。</li>
 </ol>
-<div class="warn"><strong>即使锁定，root shell 中的工作也不会停止。</strong> 只是窗口关闭后从 aigw 看不到了，下次解锁就能回到同一画面。</div>
+<div class="warn"><strong>即使锁定，root shell 中的工作也不会停止。</strong> 只是窗口关闭后从 AI座 看不到了，下次解锁就能回到同一画面。</div>
 
 <h3>通过 SSH 使用 <code>sudo</code></h3>
 <p>在服务器上获准使用 <code>sudo</code> 的人，可以用 SSH 登录后使用 <code>sudo</code>。许可给谁由管理员决定。</p>
@@ -300,23 +336,23 @@ aigw-passkey register</code></pre></li>
 <!-- ===================================================================== -->
 <h2 id="machines">9. 其他机器与 Windows 机器黑板</h2>
 
-<p>如果有通过 ssh 连接到服务器的其他机器（装有 GPU 的 Windows 机器等），它们会列在机器选择（<code>server</code> 栏）中。选择后，列表和创建栏会切换为那台机器的内容，可以在那台机器上运行 Claude 或 shell。连不上的机器（关机等）不会显示。</p>
+<p>如果有通过 ssh 连接到服务器的其他机器（装有 GPU 的 Windows 机器等），它们会列在开始会话界面的“在哪里运行”中。选择后，可以在那台机器上运行 Claude 或 shell。连不上的机器（关机等）不会显示。</p>
 <ul>
-  <li>在 Windows 机器上，可以在创建栏中选择工作驱动器和文件夹（<code>C:</code>、<code>D:</code> …）。也可以选择接着之前的对话。</li>
+  <li>在 Windows 机器上，可以在开始会话的界面中选择工作驱动器和目录（<code>C:</code>、<code>D:</code> …）。也可以选择接着之前的对话。</li>
   <li>用 🐚/🪟 切换，选择在没有画面的地方（🐚）运行，还是在已登录的桌面（🪟，运行带画面的应用时）上运行。</li>
-  <li>其他机器上的会话在列表中带有 💻。</li>
+  <li>其他机器上的会话，行上带有 💻，第二行显示 🖥 机器名。</li>
 </ul>
 
 <h3>Windows 机器黑板</h3>
 <div class="shot">
-  <figure><img src="img/15-board.png" alt="Windows 机器黑板。每台机器显示使用者和会话、要做的事和状态（使用中、30分钟以上无活动、结束）"><figcaption>用 📋 打开的黑板（名字为模拟数据）</figcaption></figure>
+  <figure><img src="img/15-board.png" alt="Windows 机器黑板。每台机器显示使用者和会话、状态（使用中、无法连接）和“＋ 使用”"><figcaption>用最下方的 🖥 机器打开的黑板（名字为模拟数据）</figcaption></figure>
   <div class="side">
-    <p>Windows 机器由几个人共用，所以有一块黑板，可以看出“哪台机器正被谁的哪个会话使用”。用界面上方的 📋 打开。<strong>无论是人还是 Claude，使用前只要看一下黑板即可，不需要填写。</strong></p>
+    <p>Windows 机器由几个人共用，所以有一块黑板，可以看出“哪台机器正被谁的哪个会话使用”。在工作 🌳 树最下方的 <strong>🖥 机器</strong>中打开。<strong>无论是人还是 Claude，使用前只要看一下黑板即可，不需要填写。</strong></p>
     <ul>
-      <li><strong>自动</strong>：在该 Windows 机器上运行的 aigw 会话会自动列出。</li>
-      <li><strong>SSH（自动）</strong>：在沙箱或主机的会话中用 <code>ssh</code>、<code>scp</code>、<code>sftp</code>、<code>rsync</code> 连接 Windows 机器时，也会自动列出。连接结束后会变为“结束（SSH 已断开）”。</li>
+      <li><strong>自动</strong>：在该 Windows 机器上运行的 AI座 会话会自动列出。</li>
+      <li><strong>SSH（自动）</strong>：在 devbox 或主机的会话中用 <code>ssh</code>、<code>scp</code>、<code>sftp</code>、<code>rsync</code> 连接 Windows 机器时，也会自动列出。连接结束后会变为“结束（SSH 已断开）”。</li>
       <li>每 3 分钟检查一次，已停止或掉线的会话显示“结束”，聊天 30 分钟以上没有动静的显示“30分钟以上无活动”。</li>
-      <li>只有想留下要做的事的备注时，才需要用 ✏️ 补充，或用“＋ 使用”手写（手写条目会一直保留，直到自己“取消”）。在会话中可以用 <code>aigw-board</code> 查看黑板。</li>
+      <li>只有想留下要做的事的备注时，才需要用 ✏️ 补充，或用“＋ 使用”手写（手写条目会一直保留，直到自己“取消”）。在会话中可以用 <code>aiza-board</code> 查看黑板。</li>
       <li>使用前请先看黑板，如果有人在用，请和对方商量。</li>
     </ul>
   </div>
@@ -326,16 +362,16 @@ aigw-passkey register</code></pre></li>
 <h2 id="faq">10. 遇到问题时</h2>
 <div class="scroll"><table>
   <tr><th>症状</th><th>处理方法</th></tr>
-  <tr><td>找不到会话</td><td>可能在文件夹中。点按文件夹的行展开。也有可能不小心把文件夹在另一个文件夹上松开，放进了里面。也看看归档中（<a href="#folders">第 1 章</a>）</td></tr>
-  <tr><td>Email 或主机 shell 要求“解锁”而无法继续</td><td>确认是否注册了通行密钥、是否在这台设备上注册的（<a href="#passkey">第 7 章</a>）。如果出现了锁定中的提示条，点按它</td></tr>
-  <tr><td>名称变成了 🔒</td><td>Email、主机、root 的会话在解锁前会隐藏名称。从列表上方的提示条解锁</td></tr>
-  <tr><td>Claude 没有任何回复、要求登录</td><td>在设置界面确认该位置那一行是否显示“未登录”，然后登录（<a href="#settings">第 6 章</a>）</td></tr>
-  <tr><td>其他机器没有出现在机器选择中</td><td>连不上那台机器（电源、网络）。找管理员商量</td></tr>
-  <tr><td>想知道 Windows 机器是否有人在用</td><td>看 📋 黑板（<a href="#machines">第 9 章</a>）</td></tr>
-  <tr><td>通知太多</td><td>在 🔔 列表中点“全部归档”。已处理完的会自动移过去（<a href="#notifications">第 3 章</a>）</td></tr>
+  <tr><td>找不到会话</td><td>可能在文件夹中，或在工作树的分支下。点按文件夹的行展开。已停止的会话勾选“也显示已停止的会话”后会显示。也确认一下“显示”是否为“全部”。也看看归档中（<a href="#folders">第 1 章</a>）</td></tr>
+  <tr><td>mailbox 或主机的会话要求“解锁”而无法继续</td><td>确认是否注册了通行密钥、是否在这台设备上注册的（<a href="#passkey">第 7 章</a>）。如果出现了锁定中的提示条，点按它</td></tr>
+  <tr><td>名称变成了 🔒</td><td>mailbox、主机、root 的会话在解锁前会隐藏名称。从列表上方的提示条解锁</td></tr>
+  <tr><td>Claude 没有任何回复、要求登录</td><td>在设置界面确认该位置那一行是否显示“未登录”（黄色），然后登录（<a href="#settings">第 6 章</a>）</td></tr>
+  <tr><td>其他机器没有出现在“在哪里运行”中</td><td>连不上那台机器（电源、网络）。找管理员商量</td></tr>
+  <tr><td>想知道 Windows 机器是否有人在用</td><td>看最下方 🖥 机器中的黑板（<a href="#machines">第 9 章</a>）</td></tr>
+  <tr><td>通知太多</td><td>在 🙋 按轮次中，把已完成的标为 ✓，可以稍后处理的用 💤 搁置（<a href="#tree">第 3 章</a>）。如果这台设备不需要通知，就在设置的“通知”中关闭</td></tr>
   <tr><td>不清楚基本操作</td><td><a href="basic.html#faq">基础篇的“遇到问题时”</a></td></tr>
 </table></div>
-<footer>aigw 教程 进阶篇 · 2026-11-06 · 截图按手机宽度拍摄。用户名、机器名等已替换，或是在装入模拟数据的同一界面上拍摄的</footer>
+<footer>AI座 教程 进阶篇 · 2026-11-27 · 截图按手机宽度拍摄。用户名、机器名等已替换，或是在装入模拟数据的同一界面上拍摄的</footer>
 </div>
 </body>
 </html>

@@ -1,0 +1,15 @@
+[Unit]
+Description=aiza shared front-door (mobile AI control panel: OAuth login + PWA + per-user proxy fan-out)
+After=network.target
+
+[Service]
+Type=simple
+User=aiza
+RuntimeDirectory=aiza-gateway
+RuntimeDirectoryMode=0755
+ExecStart=/usr/local/sbin/aiza-gateway
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

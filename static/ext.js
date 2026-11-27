@@ -1,7 +1,7 @@
-// The page's extension registry (ext/README.md): window.aigwExt.
+// The page's extension registry (ext/README.md): window.aizaExt.
 //
 // An extension's page files (listed in /config's "ext", loaded by app.js
-// from /agents/ext/<name>/<file>) call aigwExt.register(name, hooks), and
+// from /agents/ext/<name>/<file>) call aizaExt.register(name, hooks), and
 // app.js asks this registry at each of its extension points. No DOM here,
 // so it runs in node too (tests/test_ext_frontend.py). A hook that throws
 // is logged and counts as no answer: an extension never stops the page.
@@ -27,9 +27,13 @@
 //                          nothing there, then() not called)
 //   model3d(url, label, opts) -> bool
 //                          opens a 3D model attachment its own way
+//   tabs: [{id, label, path, show(), hide()}]
+//                          a tab of its own between 仕事 and 設定 (the deployment notes):
+//                          path its address ("/inbox"), show()/hide() its page
+//                          under the header when the tab is chosen / left
 //   slots: {"header-links": fn(el, app), "settings": fn(el, app)}
 //                          the page's insertion points
-//   i18n: {en: {...}, "zh-CN": {...}} (or a plain {ja: en})
+//   i18n: {"<name>.<word>": {ja, en, "zh-CN"}, ...} (the deployment notes)
 //                          the extension's own words
 (() => {
   "use strict";
@@ -40,7 +44,7 @@
     try {
       return fn();
     } catch (e) {
-      console.error(`aigw extension ${name}: ${what}:`, e);
+      console.error(`aiza extension ${name}: ${what}:`, e);
       return fallback;
     }
   }
@@ -56,11 +60,8 @@
     register(name, hooks) {
       exts.push({ name: String(name), hooks: hooks || {} });
       const h = hooks || {};
-      if (h.i18n && typeof window !== "undefined" && window.aigwI18n) {
-        guard(name, "i18n", () => {
-          const langs = Object.keys(h.i18n).every((k) => k === "en" || k === "zh-CN");
-          window.aigwI18n.add(langs ? h.i18n : { en: h.i18n });
-        });
+      if (h.i18n && typeof window !== "undefined" && window.aizaI18n) {
+        guard(name, "i18n", () => window.aizaI18n.define(h.i18n));
       }
       for (const fn of listeners) guard(name, "listener", () => fn(name));
     },
@@ -115,7 +116,7 @@
         if (!h.todo || typeof h.todo.load !== "function") return;
         out.push(Promise.resolve()
           .then(() => h.todo.load())
-          .catch((e) => console.error(`aigw extension ${name}: todo.load:`, e)));
+          .catch((e) => console.error(`aiza extension ${name}: todo.load:`, e)));
       });
       return out;
     },
@@ -152,6 +153,26 @@
       });
       return taken;
     },
+    tabs() {
+      const out = [];
+      each((name, h) => {
+        for (const t of Array.isArray(h.tabs) ? h.tabs : []) {
+          if (t && t.id && t.path) out.push(Object.assign({ ext: name }, t));
+        }
+      });
+      return out;
+    },
+    tab(id) {
+      return x.tabs().find((t) => t.id === id) || null;
+    },
+    tabShow(id) {
+      const t = x.tab(id);
+      if (t && typeof t.show === "function") guard(t.ext, "tabs.show", () => t.show());
+    },
+    tabHide(id) {
+      const t = x.tab(id);
+      if (t && typeof t.hide === "function") guard(t.ext, "tabs.hide", () => t.hide());
+    },
     model3d(url, label, opts) {
       let taken = false;
       each((name, h) => {
@@ -174,5 +195,5 @@
       return out;
     },
   };
-  window.aigwExt = x;
+  window.aizaExt = x;
 })();

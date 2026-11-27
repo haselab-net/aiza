@@ -17,8 +17,8 @@ def rec(kind, payload, ts="2026-10-12T07:04:00.000Z"):
     return json.dumps({"timestamp": ts, "type": kind, "payload": payload}) + "\n"
 
 
-def meta_line(started):
-    return rec("session_meta", {"id": "x", "timestamp": started})
+def meta_line(started, identity="x"):
+    return rec("session_meta", {"id": identity, "timestamp": started})
 
 
 def said(text, phase="final_answer"):
@@ -64,7 +64,7 @@ class TailTest(unittest.TestCase):
         self.steps = []
         stubs = {
             "session_roots": lambda: [self.root],
-            "_codex_rollout_of": lambda talkto: self.live,
+            "_codex_rollout_of": lambda talkto, *a: self.live,
             "LIVE_CONVERSATION_CHECK_INTERVAL": 0.0,
         }
         self.saved = {name: getattr(B, name) for name in stubs}
@@ -91,7 +91,7 @@ class TailTest(unittest.TestCase):
     def rollout(self, name, started, body=""):
         p = self.root / ".codex" / "sessions" / f"rollout-{name}.jsonl"
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(meta_line(started) + body)
+        p.write_text(meta_line(started, name) + body)
         return str(p)
 
     def append(self, path, body):
@@ -117,11 +117,11 @@ class TailTest(unittest.TestCase):
         B._tail_codex_rollout(self.sid)
         self.assertEqual(self.outputs(), ["一つ目", "停止中に書かれた"])
 
-    def test_resumed_older_conversation_starts_at_its_end(self):
+    def test_resumed_older_conversation_backfills_history(self):
         self.live = self.rollout("old", "2026-10-11T01:00:00.000Z", said("昨日の答え"))
         self.steps = [lambda: self.append(self.live, said("今日の答え"))]
         B._tail_codex_rollout(self.sid)
-        self.assertEqual(self.outputs(), ["今日の答え"])
+        self.assertEqual(self.outputs(), ["昨日の答え", "今日の答え"])
 
     def test_switch_flushes_the_old_file_then_reads_the_new_one(self):
         first = self.live = self.rollout("a", "2026-10-12T07:03:26.987Z", said("一つ目"))
@@ -149,9 +149,9 @@ class FindTest(unittest.TestCase):
             rollout.parent.mkdir(parents=True)
             rollout.write_text("")
             talkto = Path(d) / "sess" / "talkto_out.jsonl"
-            env = dict(os.environ, AIGW_TALKTO=str(talkto))
+            env = dict(os.environ, AIZA_TALKTO=str(talkto))
             code = f"f=open({str(rollout)!r},'a'); import time; time.sleep(30)"
-            other = dict(os.environ, AIGW_TALKTO=str(talkto) + "x")
+            other = dict(os.environ, AIZA_TALKTO=str(talkto) + "x")
             p = subprocess.Popen([sys.executable, "-c", code], env=env)
             q = subprocess.Popen([sys.executable, "-c", code], env=other)
             try:

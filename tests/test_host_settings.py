@@ -1,6 +1,6 @@
 """The `claude` shell function typed into a shell pane (the deployment notes,
 the deployment notes, 2026-11-10): on the host it passes the
-managed settings (the aigw-task-hook hooks) as --settings too, since an
+managed settings (the aiza-task-hook hooks) as --settings too, since an
 organization's remote settings replace /etc/claude-code/managed-settings.json.
 
     python3 -m unittest discover -s tests -v
@@ -13,11 +13,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-SCRIPT = Path(__file__).resolve().parent.parent / "bin" / "aigw-backend"
+SCRIPT = Path(__file__).resolve().parent.parent / "bin" / "aiza-backend"
 
 
 def load():
-    loader = importlib.machinery.SourceFileLoader("aigw_backend_host_settings", str(SCRIPT))
+    loader = importlib.machinery.SourceFileLoader("aiza_backend_host_settings", str(SCRIPT))
     spec = importlib.util.spec_from_loader(loader.name, loader)
     mod = importlib.util.module_from_spec(spec)
     loader.exec_module(mod)
@@ -47,7 +47,7 @@ class HostSettingsTest(unittest.TestCase):
                 f.write('#!/bin/sh\necho "$*"\n')
             os.chmod(fake, 0o755)
             script = body + "\n" + "\n".join(calls)
-            env = dict(os.environ, PATH=d + ":" + os.environ["PATH"], AIGW_SESSION_ID="abc")
+            env = dict(os.environ, PATH=d + ":" + os.environ["PATH"], AIZA_SESSION_ID="abc")
             return subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True).stdout.splitlines()
 
     def test_host_gets_settings(self):

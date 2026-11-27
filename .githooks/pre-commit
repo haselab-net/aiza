@@ -1,11 +1,15 @@
 #!/bin/sh
-# Refuses a commit that changes aigw-backend (or the tests) while the
+# Refuses a commit that changes aiza-backend (or the tests) while the
 # cross-user access tests fail (the deployment notes). Enabled per clone with:
 #   git config core.hooksPath .githooks
 files=$(git diff --cached --name-only) || exit 1
-printf '%s\n' "$files" | grep -qE '^(bin/aigw-backend|tests/)' || exit 0
+printf '%s\n' "$files" | grep -qE '^(bin/aiza-backend|tests/)' || exit 0
 cd "$(git rev-parse --show-toplevel)" || exit 1
+# The tests make throw-away repositories of their own: git's variables for
+# this commit (GIT_INDEX_FILE, GIT_DIR in a worktree) would point their
+# `git commit` at this repository instead (2026-11-23: 9d9dfac/1e6285a).
+unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_PREFIX GIT_OBJECT_DIRECTORY GIT_COMMON_DIR GIT_ALTERNATE_OBJECT_DIRECTORIES
 out=$(python3 -m unittest discover -s tests -q 2>&1); rc=$?
-printf '%s\n' "$out" | grep -v '^\[aigw-backend\]'
-[ $rc -eq 0 ] || echo "pre-commit: aigw access tests failed, commit refused" >&2
+printf '%s\n' "$out" | grep -v '^\[aiza-backend\]'
+[ $rc -eq 0 ] || echo "pre-commit: aiza access tests failed, commit refused" >&2
 exit $rc

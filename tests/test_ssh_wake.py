@@ -14,7 +14,7 @@ from test_shared_search import B
 MACHINES = {
     "pc": {"tmux": "/usr/bin/tmux", "wol_mac": "02:00:5e:10:20:30", "wol_via": "jump", "wol_broadcast": "10.0.0.255"},
     "half": {"tmux": "/usr/bin/tmux", "wol_mac": "02:00:5e:10:20:31"},   # no wol_via/wol_broadcast: not wakeable
-    "pc-desktop": {"tmux": "/usr/bin/tmux", "ssh_host": "pc", "tmux_socket": "aigw-desktop"},
+    "pc-desktop": {"tmux": "/usr/bin/tmux", "ssh_host": "pc", "tmux_socket": "aiza-desktop"},
     "other": {"tmux": "/usr/bin/tmux"},
 }
 

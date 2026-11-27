@@ -1,0 +1,141 @@
+#!/bin/bash
+# Self-service registration of the Google account email the "aiza" mobile
+# control panel should recognize for the caller's own Unix account. Stores it
+# in the "Other" slot of the account's own GECOS field (5th colon-separated
+# field of /etc/passwd), leaving Full Name/Room/Work phone/Home phone intact.
+#
+# We deliberately do NOT shell out to `chfn -o` here: on this host (and per
+# chfn(1) generally) the -o/--other field can only be changed by the
+# superuser, and even as root, `chfn` re-authenticates the invoking user via
+# PAM (a password prompt) -- which fails outright for accounts created via
+# `adm-adduser` (--disabled-password, SSH-key-only login, no usable Unix
+# password to authenticate with). Using `usermod -c` as root (via the same
+# self-elevation pattern as the adm-* scripts) sets the field directly with
+# no PAM/password step, so it works for every account regardless of whether
+# it has a usable password.
+set -euo pipefail
+
+# Self-elevate: re-exec through sudo if not root. Safe because this re-runs
+# the same allowlisted path (NOPASSWD for %sandboxusers, see
+# /etc/sudoers.d/aiza), not a broader command.
+if [ "$(id -u)" -ne 0 ]; then
+    exec sudo /usr/local/bin/aiza-set-email "$@"
+fi
+
+if [ -z "${SUDO_USER:-}" ]; then
+    echo "This must be run via sudo by a real user (normally just: aiza-set-email --code <code>)." >&2
+    exit 1
+fi
+username="$SUDO_USER"
+
+usage() {
+    echo "Usage: aiza-set-email --code <code>   (the code AI-za shows after a Google sign-in it does not know yet)" >&2
+    echo "       aiza-set-email --clear         (remove your registered email)" >&2
+    exit 1
+}
+
+# Only an address someone has just signed in to Google with (2026-11-24, root
+# audit S4): before, any address could be written here, and whoever wrote
+# someone's address first got that person's later logins. aiza-gateway keeps,
+# for a Google login no account matches, a code for that verified address
+# (/var/lib/aiza-email-proof/<sha256(code)>, owner aiza, 15 minutes); the
+# code is what ties it to the account that runs this. Registered addresses
+# stay as they are.
+PROOF_DIR=/var/lib/aiza-email-proof
+proof_email() {
+    python3 -I - "$PROOF_DIR" "$1" <<'PY'
+import hashlib, json, os, pwd, stat, sys, time
+d, code = sys.argv[1], sys.argv[2]
+name = hashlib.sha256(code.encode()).hexdigest()
+try:
+    dfd = os.open(d, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dfd)
+    st = os.fstat(fd)
+    gw = pwd.getpwnam("aiza").pw_uid
+    if not stat.S_ISREG(st.st_mode) or st.st_uid != gw or st.st_nlink != 1 or os.fstat(dfd).st_uid != gw:
+        sys.exit(1)
+    rec = json.loads(os.read(fd, 4096))
+    os.unlink(name, dir_fd=dfd)   # one use
+    if not (isinstance(rec, dict) and rec.get("exp", 0) > time.time() and isinstance(rec.get("email"), str)):
+        sys.exit(1)
+    print(rec["email"])
+except (OSError, ValueError, KeyError):
+    sys.exit(1)
+PY
+}
+
+[ "$#" -ge 1 ] || usage
+case "$1" in
+    --clear)
+        [ "$#" -eq 1 ] || usage
+        email="" ;;
+    --code)
+        [ "$#" -eq 2 ] && [[ "$2" =~ ^[0-9a-f]{12}$ ]] || usage
+        # Asked at a terminal below (audit E1); not from a script or an agent,
+        # and that before the code is used up.
+        if ! [ -t 0 ] || ! [ -t 2 ]; then
+            echo "端末で打ってください(確かめを聞くので、スクリプトやエージェントからは結び付けません)。" >&2
+            exit 1
+        fi
+        if ! email="$(proof_email "$2")"; then
+            echo "そのコードは使えません(違う・15分を過ぎた・一度使った)。AI座 に Google でもう一度ログインすると、新しいコードが出ます。" >&2
+            exit 1
+        fi
+        email="$(printf '%s' "$email" | tr '[:upper:]' '[:lower:]')"
+        if ! [[ "$email" =~ ^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$ ]]; then
+            echo "Invalid email address" >&2
+            exit 1
+        fi ;;
+    *)
+        echo "アドレスを直に書いての登録はできません。AI座 に Google でログインすると出るコードを使ってください。" >&2
+        usage ;;
+esac
+
+# One email, one account. aiza-gateway's login maps a verified email to the
+# account whose "Other" field holds it, so registering an address someone
+# else already uses would otherwise race them for their own logins (and the
+# gateway now refuses an ambiguous match outright -- see its
+# find_usernames_for_email). Only the address itself is reported, never which
+# account holds it.
+if [ -n "$email" ]; then
+    while IFS=: read -r other_user _ _ _ other_gecos _; do
+        [ "$other_user" = "$username" ] && continue
+        other_email="$(cut -d, -f5 <<<"$other_gecos" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+        if [ "$other_email" = "$email" ]; then
+            echo "${email} is already registered for another account. Ask the administrator if it is yours." >&2
+            exit 1
+        fi
+    done < <(getent passwd)
+fi
+
+gecos="$(getent passwd "$username" | cut -d: -f5)"
+full="$(cut -d, -f1 <<<"$gecos")"
+room="$(cut -d, -f2 <<<"$gecos")"
+work="$(cut -d, -f3 <<<"$gecos")"
+home="$(cut -d, -f4 <<<"$gecos")"
+
+# Asked at a terminal, with the address shown (2026-11-24, audit E1): the code
+# is shown to whoever signed in to Google, and someone could hand theirs to
+# another person ("run this") to have that person's account take their
+# Google login. Not from a script or an agent (no terminal): refused.
+if [ -n "$email" ]; then
+    current="$(cut -d, -f5 <<<"$gecos" | tr -d '[:space:]')"
+    echo "Google のアドレス ${email} を、このホストのあなたのアカウント ${username} のログインに結び付けます。" >&2
+    echo "以後、そのアドレスで AI座 に入ると ${username} として動きます。自分で AI座 にログインしたときのコードでなければ、やめてください。" >&2
+    if [ -n "$current" ] && [ "$current" != "$email" ]; then
+        echo "いま結び付いている ${current} は外れ、置き換わります。" >&2
+    fi
+    read -r -p "よいですか [y/N] " ans
+    case "$ans" in
+        y|Y|yes|YES) ;;
+        *) echo "やめました(コードは使い終わりです。もう一度ログインすると新しいコードが出ます)。" >&2; exit 1 ;;
+    esac
+fi
+
+usermod -c "${full},${room},${work},${home},${email}" "$username"
+
+if [ -n "$email" ]; then
+    echo "Registered ${email} for ${username}. You can now sign in to AI-za with this Google account."
+else
+    echo "Cleared the registered email for ${username}."
+fi

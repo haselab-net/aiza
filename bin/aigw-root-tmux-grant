@@ -23,10 +23,10 @@
 # Read-only ACL bridge to /root/.claude/projects (added 2026-08-29): a
 # `claude` process run by hand inside a root-shell pane runs as literal
 # root, so its own conversation logs land in /root/.claude/projects/<key>/
-# -- not the mounted sandhome aigw-backend (running as $user) can already
-# see. Without this, aigw-backend's transcript tailer (_watch_shell_claude
-# in aigw-backend) can never read those files, so a root-shell session's
-# replies never reach the aigw phone chat log at all (the raw tmux screen
+# -- not the mounted sandhome aiza-backend (running as $user) can already
+# see. Without this, aiza-backend's transcript tailer (_watch_shell_claude
+# in aiza-backend) can never read those files, so a root-shell session's
+# replies never reach the aiza phone chat log at all (the raw tmux screen
 # mirror still worked -- only the chat-log view was silently empty; see
 # the deployment notes). This grants no new privilege: a
 # user enabled for aigw-root-tmux@<user>.service already has unrestricted
@@ -36,7 +36,7 @@
 # couldn't already `cat` for itself. Deliberately still not a sudo
 # wrapper: `setfacl` here takes no user-supplied argument, and grants a
 # fixed, narrow, always-read-only path -- see the rejected-sudo-wrapper
-# note in /etc/sudoers.d/aigw for why an open command channel was ruled
+# note in /etc/sudoers.d/aiza for why an open command channel was ruled
 # out. `-x`/`--revoke` mirrors this off on ExecStopPost, so disabling the
 # unit closes the bridge the same one command already closes every root
 # pane with (the deployment notes).
@@ -47,9 +47,15 @@ revoke=0
 if [ "${2:-}" = "--revoke" ]; then
   revoke=1
 fi
-sock="/run/aigw-root-tmux/$user/sock"
+dir="/run/aigw-root-tmux/$user"
+sock="$dir/sock"
 
 getent passwd "$user" >/dev/null || { echo "no such user: $user" >&2; exit 1; }
+# The socket's folder must be root's own, 0711, and not a link (the unit makes
+# it so): then nobody but root can put a link where the socket is, and the
+# chown/chmod below act on the socket itself (2026-11-24, the audit).
+dir_ok() { [ ! -L "$dir" ] && [ -d "$dir" ] && [ "$(stat -c '%u %a' "$dir")" = "0 711" ]; }
+sock_ok() { [ ! -L "$sock" ] && [ -S "$sock" ]; }
 
 if [ "$revoke" = 1 ]; then
   if systemctl is-active --quiet "aigw-root-tmux@$user.service"; then
@@ -71,8 +77,8 @@ if [ "$revoke" = 1 ]; then
     # `_grant_access`'s own wait loop was waiting for something that could
     # only ever have been recreated by a NEW server's ExecStart, which
     # never came.)
-    if [ -S "$sock" ]; then
-      chown root:root "$sock"
+    if dir_ok && sock_ok; then
+      chown -h root:root "$sock"
       chmod 600 "$sock"
     fi
     tmux -S "$sock" server-access -d "$user" 2>/dev/null || true
@@ -87,7 +93,7 @@ if [ "$revoke" = 1 ]; then
     # <user>, left behind by the tmux process systemd had SIGTERMed. tmux
     # only unlinks its socket on its own orderly shutdown paths.
     #
-    # That matters because root_shell_allowed() in aigw-backend is literally
+    # That matters because root_shell_allowed() in aiza-backend is literally
     # os.access(sock, R_OK|W_OK) -- a stale file answers "yes" exactly like a
     # live one. The documented contract for that check is "if it says yes, the
     # button will work" (the deployment notes), which a leftover socket quietly
@@ -96,7 +102,7 @@ if [ "$revoke" = 1 ]; then
     # server is left listening on it to be cut off from -- the very next
     # thing to bind this path is a brand new ExecStart, which needs the old
     # file gone to bind cleanly anyway.
-    rm -f "$sock"
+    if dir_ok; then rm -f "$sock"; fi
   fi
   for d in /root /root/.claude; do
     [ -d "$d" ] && setfacl -x "u:$user" "$d" 2>/dev/null || true
@@ -119,21 +125,22 @@ for _ in $(seq 1 50); do
   sleep 0.1
 done
 [ -S "$sock" ] || { echo "tmux socket never appeared: $sock" >&2; exit 1; }
+dir_ok && sock_ok || { echo "not granted: $dir is not root's 0711, or $sock is not a socket" >&2; exit 1; }
 
-# Started by root's own resume (aigw-resume-after-boot, the deployment notes
+# Started by root's own resume (aiza-resume-after-boot, the deployment notes
 # resume, 2026-11-08) with no passkey window open: leave the server in the
 # revoked state (as --revoke on a running server does). The marker lives in
 # a root-only directory, so only root can ask for this; the next real unlock
-# grants as usual (aigw-unlockd's _grant_access on an active unit).
+# grants as usual (aiza-unlockd's _grant_access on an active unit).
 nogrant="/run/aigw-root-tmux-nogrant/$user"
 if [ -e "$nogrant" ]; then
   rm -f "$nogrant"
-  chown root:root "$sock"
+  chown -h root:root "$sock"
   chmod 600 "$sock"
   exit 0
 fi
 
-chown "$user" "$sock"
+chown -h "$user" "$sock"
 chmod 600 "$sock"
 # "user already added" (re-running this against an already-granted server,
 # e.g. by hand) exits 1 too, indistinguishable here from a real failure --
@@ -142,7 +149,7 @@ chmod 600 "$sock"
 # abort those.
 tmux -S "$sock" server-access -aw "$user" || true
 
-# --x only (no read): lets $user's own aigw-backend traverse into a known
+# --x only (no read): lets $user's own aiza-backend traverse into a known
 # child path without being able to list /root or /root/.claude themselves.
 install -d -m 0700 -o root -g root /root/.claude/projects
 setfacl -m "u:$user:--x" /root
@@ -156,7 +163,7 @@ setfacl -R -m "u:$user:rX" /root/.claude/projects
 setfacl -R -d -m "u:$user:rX" /root/.claude/projects
 # Claude Code's per-process records (<pid>.json, 0644: which conversation a
 # running `claude` is writing and in which tmux pane), listed so
-# aigw-backend's _live_claude_conversation can follow a root-shell's
+# aiza-backend's _live_claude_conversation can follow a root-shell's
 # `claude` across /clear (the deployment notes). Read by
 # ACL, not by "other": /root's files are kept from world-read (2026-11-02,
 # the deployment's changelog). The default ACL reaches new records; the 0600

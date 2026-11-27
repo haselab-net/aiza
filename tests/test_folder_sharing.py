@@ -22,9 +22,10 @@ OTHER = next(u for u in ["nobody", "root"] + [p.pw_name for p in pwd.getpwall()]
 class FolderSharingTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.saved = (B.STATE_DIR, B.MAIL_PRESETS)
+        self.saved = (B.STATE_DIR, B.MAIL_PRESETS, B.MAIL_TREE_PRESETS)
         B.STATE_DIR = Path(self.tmp.name)
         B.MAIL_PRESETS = {"mail-tui"}
+        B.MAIL_TREE_PRESETS = {"mail-tui", "mail-shell"}
         B.apply_folder_ops([
             {"op": "put", "folder": {"id": "fa", "name": "A"}},
             {"op": "put", "folder": {"id": "fb", "name": "B", "parent": "fa"}},
@@ -36,18 +37,18 @@ class FolderSharingTest(unittest.TestCase):
         ])
 
     def tearDown(self):
-        B.STATE_DIR, B.MAIL_PRESETS = self.saved
+        B.STATE_DIR, B.MAIL_PRESETS, B.MAIL_TREE_PRESETS = self.saved
         self.tmp.cleanup()
 
-    def mode(self, sid, preset="claude-tui", user=OTHER):
-        return B.share_mode({"id": sid, "preset": preset}, user)
+    def mode(self, sid, preset="claude-tui", user=OTHER, **meta):
+        return B.share_mode({"id": sid, "preset": preset, **meta}, user)
 
     def test_inherited_from_parent(self):
         self.assertIsNone(self.mode("s1"))
         B.apply_folder_ops([{"op": "share", "id": "fa", "username": OTHER, "mode": "write"}])
         self.assertEqual(self.mode("s1"), "write")
         self.assertEqual(self.mode("s1", preset="root-shell"), "read")
-        self.assertIsNone(self.mode("s2", preset="mail-tui"))
+        self.assertEqual(self.mode("s2", preset="mail-tui"), "write")
         self.assertIsNone(self.mode("s4"))
         self.assertIsNone(self.mode("unfiled"))
         B.apply_folder_ops([{"op": "unshare", "id": "fa", "username": OTHER}])
@@ -60,6 +61,23 @@ class FolderSharingTest(unittest.TestCase):
             B.apply_folder_ops([{"op": "share", "id": "fb", "username": "*", "mode": "write"}])
         with self.assertRaises(ValueError):
             B.apply_folder_ops([{"op": "share", "id": "fb", "username": "no-such-user-xyz"}])
+
+    def test_mailbox_by_named_folder_only(self):
+        # 2026-11-27: a mailbox session goes with its folder to a named
+        # person -- co-working only where mail_cowork_ok (the box's plain
+        # shell read-only) -- never to a folder shared with everyone.
+        B.apply_folder_ops([{"op": "share", "id": "fa", "username": OTHER, "mode": "write"}])
+        self.assertEqual(self.mode("s2", preset="mail-tui"), "write")
+        self.assertEqual(self.mode("s2", preset="mail-shell"), "read")
+        self.assertEqual(self.mode("s2", preset="mail-shell", launch="codex"), "write")
+        B.apply_folder_ops([{"op": "share", "id": "fa", "username": OTHER, "mode": "read"}])
+        self.assertEqual(self.mode("s2", preset="mail-tui"), "read")
+        B.apply_folder_ops([{"op": "unshare", "id": "fa", "username": OTHER},
+                            {"op": "share", "id": "fb", "username": "*", "mode": "read"}])
+        self.assertIsNone(self.mode("s2", preset="mail-tui", user="anyone"))
+        self.assertIsNone(self.mode("s2", preset="mail-tui"))
+        self.assertIsNone(self.mode("s2", preset="mail-tui", user="*"))
+        self.assertEqual(self.mode("s3", user="anyone"), "read")
 
     def test_put_keeps_shares_and_moving_out_unshares(self):
         B.apply_folder_ops([{"op": "share", "id": "fb", "username": OTHER, "mode": "read"}])

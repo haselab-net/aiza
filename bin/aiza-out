@@ -1,0 +1,448 @@
+#!/usr/bin/env node
+// aiza-out -- outward actions from the Email box, each allowed by the user on one card (the deployment notes, 2026-11-20).
+// The user: 確認は本人のカード1回だけ。用意の段階では相手側に何も作らない。カードの中身と実行する中身をハッシュで照らす。
+//
+//   aiza-out mail <gmail.py draft のオプション>     メール: --to --cc --bcc --subject --body-file --reply-to [--no-quote] --attach --from
+//   aiza-out trash <threadId>...                    メールをゴミ箱へ
+//   aiza-out slack   --channel-url <URL> [--channel <名前>] [--thread-ts <ts>] --text-file <ファイル> [--attach <ファイル>]...
+//                                                   スレッドへの返信: --thread-ts 1700000000.000100、またはスレッドの URL
+//                                                   (…/archives/<C>/p<ts>?thread_ts=<ts>)を --channel-url に
+//   aiza-out discord --channel-url <URL> [--channel <名前>] --text-file <ファイル> [--attach <ファイル>]...
+//                                                   添付は 10 個・合わせて 25MB まで。用意の時に写しを取り、名前・大きさ・sha256 をカードに結ぶ
+//   aiza-out form --url <URL> --fields-file <JSON> --submit <CSS>   fields: [{"selector", "value", "label"?}, ...]
+//                                                   (チェックボックスは value "true"/"false"、select は option の value)
+//   aiza-out run <id>        本人が許可したものを実行する(一度だけ。カードのときと中身が違えば実行しない)
+//   aiza-out list            用意したものと、その後(許可を待つ・実行した・失敗)
+//   aiza-out cancel <id>     カードを取り下げる
+//
+// 用意すると ~/.out/<id>/ に中身を置き(メールは送る形そのままの message.eml。Gmail には何も作らない)、aiza がチャットに
+// 許可のカードを出す。カードの「全文を見る」で、宛先・投稿先と中身の全部が見られる(本人だけ)。本人が許可すると aiza が
+// このセッションに「aiza-out run <id> で実行して」と送ってくる。答えに期限は無い。
+// aigw-legacy: sessions started before the rename (2026-11-23) only have AIGW_*
+for (const k of Object.keys(process.env)) if (k.startsWith('AIGW_') && process.env['AIZA_' + k.slice(5)] === undefined) process.env['AIZA_' + k.slice(5)] = process.env[k].replace('/.aigw/', '/.aiza/').replace('/.aigw-state/', '/.aiza-state/');
+import fs from 'fs'; import os from 'os'; import path from 'path'; import crypto from 'crypto'; import { spawnSync } from 'child_process';
+
+const HOME = os.homedir();
+const OUT = process.env.AIZA_OUT_DIR || path.join(HOME, '.out');
+const GMAIL = process.env.AIZA_OUT_GMAIL || path.join(HOME, 'gmail.py');
+const GATE_URL = process.env.AIZA_GATE_URL || `http://172.17.0.1:${23000 + process.getuid() - 1000}/gate`;
+const CDP = `http://${process.env.CDP_HOST || '127.0.0.1'}:${process.env.CDP_PORT || '9222'}`;
+const ID_RE = /^o[0-9a-f]{12}$/;
+const die = (m, c = 2) => { console.error('aiza-out: ' + m); process.exit(c); };
+const sha = b => crypto.createHash('sha256').update(b).digest('hex');
+const session = () => { const t = process.env.AIZA_TALKTO; const s = t ? path.basename(path.dirname(t)) : ''; return /^[0-9a-f]{12}$/.test(s) ? s : ''; };
+
+async function gate(body) {
+  const s = session(); if (!s) return { ok: false, why: 'AI座 のセッションの外' };
+  try {
+    const r = await fetch(GATE_URL, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...body, session: s }), signal: AbortSignal.timeout(20000) });
+    const j = await r.json(); return j && typeof j.ok === 'boolean' ? j : { ok: false, why: 'AI座 の答えが読めない' };
+  } catch (e) { return { ok: false, why: `AI座 に届かない(${e.name})` }; }
+}
+function opts(argv, many = []) {
+  const o = { _: [] };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a.startsWith('--')) { const k = a.slice(2), v = argv[++i]; if (v === undefined) die(`${a} の値が無い`); if (many.includes(k)) (o[k] ||= []).push(v); else o[k] = v; }
+    else o._.push(a);
+  }
+  return o;
+}
+// 添付(2026-11-24 ユーザー、Email の箱から): 用意の時に ~/.out/<id>/att/<n>/<名前> へ写し、名前・大きさ・sha256 を action.json に入れる
+// (カードのハッシュが中身まで結ぶ)。実行の時に写しの sha256 を照らしてから入れる
+const ATT_MAX = 10, ATT_TOTAL = 25 * 1024 * 1024;
+const attName = f => { const n = path.basename(f); if (!n || n === '.' || n === '..' || n.length > 200 || /[\x00-\x1f\/\\]/.test(n)) die(`添付の名前が使えない: ${f}`); return n; };
+// 用意の前に確かめる(フォルダを作ってから止まらないように)
+function checkFiles(files) {
+  if (!files || !files.length) return;
+  if (files.length > ATT_MAX) die(`添付は ${ATT_MAX} 個まで`);
+  let total = 0;
+  for (const f of files) {
+    let st; try { st = fs.statSync(f); } catch { die(`添付が無い: ${f}`); }
+    if (!st.isFile()) die(`添付がファイルでない: ${f}`);
+    attName(f); total += st.size; if (total > ATT_TOTAL) die('添付が合わせて 25MB を超える');
+  }
+}
+function copyAttachments(d, files) {
+  if (!files || !files.length) return [];
+  return files.map((f, i) => {
+    const name = attName(f), rel = `att/${i}/${name}`, buf = fs.readFileSync(f);
+    fs.mkdirSync(path.join(d, 'att', String(i)), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(path.join(d, rel), buf, { mode: 0o600, flag: 'wx' });
+    return { name, size: buf.length, sha256: sha(buf), file: rel };
+  });
+}
+function checkAttachments(d, a) {
+  for (const x of a.attachments || []) {
+    const b = fs.readFileSync(path.join(d, x.file));
+    if (b.length !== x.size || sha(b) !== x.sha256) throw new Error(`添付 ${x.name} がカードのときと違う(実行しない)`);
+  }
+}
+const readText = f => { if (!f) die('--text-file が要ります'); return fs.readFileSync(f, 'utf8'); };
+function newDir() {
+  fs.mkdirSync(OUT, { recursive: true, mode: 0o700 });
+  const id = 'o' + crypto.randomBytes(6).toString('hex'), d = path.join(OUT, id);
+  fs.mkdirSync(d, { mode: 0o700 }); return { id, d };
+}
+async function prepare(id, d, action) {
+  const raw = Buffer.from(JSON.stringify({ v: 1, ...action, created: new Date().toISOString(), session: session() }, null, 1));
+  fs.writeFileSync(path.join(d, 'action.json'), raw, { mode: 0o600, flag: 'wx' });
+  const h = sha(raw);
+  const r = await gate({ op: 'out-card', id, hash: h });
+  if (!r.ok) die(`カードを出せませんでした: ${r.why}`, 1);
+  console.log(`用意しました(${id})。チャットに許可のカードを出しました。本人が許可すると「aiza-out run ${id}」の知らせが届きます。` +
+    'それまで実行しないでください(Gmail・相手側には何も作っていません)。');
+}
+
+// ---- 実行(本人が許可したものだけ) ----
+async function cdpTab() {
+  const t = await fetch(CDP + '/json/new?about:blank', { method: 'PUT' }).then(r => r.json());
+  const ws = new WebSocket(t.webSocketDebuggerUrl.replace(/^ws:\/\/[^/]+/, CDP.replace(/^http/, 'ws')));
+  let n = 0; const pend = {};
+  ws.onmessage = e => { const m = JSON.parse(e.data); if (m.id && pend[m.id]) { pend[m.id](m); delete pend[m.id]; } };
+  await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
+  const send = (method, params = {}) => new Promise(r => { const i = ++n; pend[i] = r; ws.send(JSON.stringify({ id: i, method, params })); });
+  const ev = async js => (await send('Runtime.evaluate', { expression: js, returnByValue: true, awaitPromise: true })).result?.result?.value;
+  const close = async () => { try { ws.close(); } catch {} await fetch(CDP + '/json/close/' + t.id).catch(() => {}); };
+  const leave = () => { try { ws.close(); } catch {} };   // the tab stays open
+  return { send, ev, close, leave };
+}
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+async function waitFor(tab, js, ms = 20000) { const end = Date.now() + ms; while (Date.now() < end) { if (await tab.ev(js)) return true; await sleep(500); } return false; }
+const key = async (tab, k, code, vk, mod = 0) => { for (const type of ['keyDown', 'keyUp']) await tab.send('Input.dispatchKeyEvent', { type, key: k, code, windowsVirtualKeyCode: vk, modifiers: mod }); };
+// 投稿: チャンネルを開き、入力欄にそのままの文を入れて Enter。改行は Shift+Enter。最後のメッセージに文の始めが出たかを見る
+// Slack: the page keeps the last opened thread open beside the channel, with its
+// own box, file input and send button (2026-11-24, in the box): everything is
+// looked up inside the channel's box (message_input_container) or the thread's
+// pane (threads_flexpane), never the first on the page.
+const THREAD_PANE = '[data-qa="threads_flexpane"]';
+const scopeOf = (kind, a) => kind !== 'slack' ? '' : a.thread_ts ? THREAD_PANE + ' ' : '[data-qa="message_input_container"] ';
+const COMPOSER = (kind, a) => kind === 'slack'
+  ? `document.querySelector('${scopeOf(kind, a)}[data-qa="message_input"] [contenteditable="true"]')`
+  : `document.querySelector('[role="textbox"][data-slate-editor="true"], [role="textbox"][contenteditable="true"]')`;
+const LAST = (kind, a) => kind === 'slack'
+  ? `(()=>{const m=[...document.querySelectorAll('[data-qa="message-text"], .c-message_kit__blocks')].filter(e=>!!e.closest('${THREAD_PANE}')===${!!a.thread_ts});return m.length?m[m.length-1].innerText:''})()`
+  : `(()=>{const m=[...document.querySelectorAll('[id^="message-content-"]')];return m.length?m[m.length-1].innerText:''})()`;
+// Slack の宛先: workspace の …/archives/<C>[/p<ts>][?thread_ts=<ts>](…/messages/<C> も)か app.slack.com/client/<T>/<C>[/thread/<C>-<ts>]
+const TS_RE = /^\d{9,10}\.\d{6}$/;
+function slackTarget(u) {
+  let x; try { x = new URL(u); } catch { return {}; }
+  const c = x.pathname.match(/^\/client\/([TE][A-Z0-9]+)\/([CDG][A-Z0-9]+)(?:\/thread\/[CDG][A-Z0-9]+-(\d{9,10}\.\d{6}))?/);
+  if (x.hostname === 'app.slack.com') return c ? { team: c[1], channel: c[2], ts: c[3] || '' } : {};
+  const m = x.pathname.match(/^\/(?:archives|messages)\/([CDG][A-Z0-9]+)(?:\/p(\d{9,10})(\d{6}))?/);
+  return m ? { channel: m[1], ts: x.searchParams.get('thread_ts') || (m[2] ? `${m[2]}.${m[3]}` : '') } : {};
+}
+// The workspace's own links stop at an "open in the app" page in a new tab
+// (2026-11-24): ?skip_today=1 goes on to app.slack.com/client/<T>/<C>. A
+// thread opens at …/client/<T>/<C>/thread/<C>-<ts>.
+async function openSlack(tab, a) {
+  await tab.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 900, deviceScaleFactor: 1, mobile: false });
+  const t = slackTarget(a.channel_url);
+  let team = t.team;
+  if (t.channel && !team) {
+    await tab.send('Page.navigate', { url: `https://${new URL(a.channel_url).hostname}/messages/${t.channel}?skip_today=1` });
+    if (!await waitFor(tab, `/^https:\\/\\/app\\.slack\\.com\\/client\\/[TE][A-Z0-9]+\\/${t.channel}\\b/.test(location.href)`, 30000))
+      throw new Error('Slack のチャンネルが開かない(ログインやチャンネルを確かめて)');
+    team = String(await tab.ev('location.href')).match(/\/client\/([TE][A-Z0-9]+)\//)[1];
+  }
+  if (a.thread_ts) {
+    if (!t.channel) throw new Error('スレッドのチャンネルが URL から分からない');
+    await tab.send('Page.navigate', { url: `https://app.slack.com/client/${team}/${t.channel}/thread/${t.channel}-${a.thread_ts}` });
+  } else if (!t.channel || t.team) await tab.send('Page.navigate', { url: a.channel_url });
+}
+// the thread's pane shows its first message (data-item-key = its ts); "also send to the channel" stays off
+async function checkThread(tab, a) {
+  if (!await waitFor(tab, `!!document.querySelector('${THREAD_PANE} [data-item-key="${a.thread_ts}"], ${THREAD_PANE} [data-msg-ts="${a.thread_ts}"]')`, 15000))
+    throw new Error(`スレッド ${a.thread_ts} が開かない(スレッドの URL・ts を確かめて)`);
+  const cb = `document.querySelector('${THREAD_PANE} input[type=checkbox][data-qa="threads_footer_broadcast_checkbox"], ${THREAD_PANE} [data-qa="threads_footer_broadcast_checkbox"] input[type=checkbox]')`;
+  if (await tab.ev(`(()=>{const c=${cb};return !!c&&c.checked})()`)) {
+    await tab.ev(`(${cb}).click()`); await sleep(300);
+    if (await tab.ev(`(()=>{const c=${cb};return !!c&&c.checked})()`)) throw new Error('「以下にも投稿する」が外れない(送らずに止めた)');
+  }
+}
+// Discord turns <@id> / <@!id> / <@&role> / <#channel> / <:emoji:id> into void
+// parts of the editor (shown as "@name" + a hidden username, 2026-11-23), so
+// both sides swap them for one mark \u0001 before comparing.
+const MARK = '\u0001';
+// Slack's <@U…> becomes a <ts-mention data-id="U…"> part of the box (slackMention below).
+const MENTION_RE = /<(?:@[!&]?|#|a?:\w+:)\d+>|<@[UW][A-Z0-9]{2,}>/g;
+const composerText = box => `(()=>{const e=${box};if(!e)return '';const c=e.cloneNode(true);` +
+  `c.querySelectorAll('[data-slate-void], ts-mention').forEach(v=>v.replaceWith('\\u0001'));c.style.position='fixed';c.style.left='-9999px';` +
+  `document.body.appendChild(c);const t=c.innerText;c.remove();return t})()`;
+const norm = s => String(s || '').replace(/\uFEFF/g, '').replace(MENTION_RE, MARK).replace(/\s+/g, '');
+const clearComposer = async (tab, box) => {
+  await tab.ev(`(()=>{const e=${box};if(!e)return 0;e.focus();document.execCommand('selectAll');return 1})()`);
+  await key(tab, 'Backspace', 'Backspace', 8);
+  await sleep(300);
+  return !await tab.ev(`(()=>{const e=${box};return e?e.innerText.trim().length:0})()`);
+};
+// Slack: <@U…> typed into the box stays as those characters (2026-11-24): type "@" + the
+// member's name (from the page's own saved state, no API), and click the
+// completion whose picture is that member's (its URL has "-U…-"). The box then
+// holds <ts-mention data-id="U…">; anything else stops before sending.
+const SLACK_MENTION = /<@([UW][A-Z0-9]{2,})>/;
+const memberNames = uid => `(async()=>{const db=await new Promise((res,rej)=>{const r=indexedDB.open('reduxPersistence');r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)});` +
+  `try{const st=db.transaction('reduxPersistenceStore','readonly').objectStore('reduxPersistenceStore');const P=x=>typeof x==='string'?JSON.parse(x):x;` +
+  `const keys=await new Promise(r=>{const q=st.getAllKeys();q.onsuccess=()=>r(q.result)});` +
+  `for(const k of keys){const top=P(await new Promise(r=>{const q=st.get(k);q.onsuccess=()=>r(q.result)}));if(!top||!top.members)continue;` +
+  `const m=P(top.members)[${JSON.stringify(uid)}];if(m)return [m.name||'',(m.profile&&m.profile.display_name)||'',m.real_name||''];}}finally{db.close()}return null})()`;
+const mentionCount = (box, uid) => `(()=>{const e=${box};return e?e.querySelectorAll('ts-mention[data-id="${uid}"]').length:0})()`;
+async function slackMention(tab, box, uid) {
+  const names = await tab.ev(memberNames(uid));
+  if (!Array.isArray(names)) throw new Error(`メンション <@${uid}> の名前がページに無い(送らずに止めた)`);
+  const queries = [...new Set(names.map(n => String(n).split(/[\s.\/／]/)[0].trim()).filter(Boolean))];
+  const n0 = await tab.ev(mentionCount(box, uid));
+  const option = `[...document.querySelectorAll('[role=option][data-qa="tab_complete_ui_item"]')].find(e=>e.outerHTML.includes('-${uid}-'))`;
+  for (const q of queries) {
+    await tab.send('Input.insertText', { text: '@' + q });
+    if (await waitFor(tab, `!!${option}`, 6000)) {
+      const r = await tab.ev(`(()=>{const o=${option};o.scrollIntoView({block:'nearest'});const b=o.getBoundingClientRect();return {x:b.left+b.width/2,y:b.top+b.height/2}})()`);
+      for (const type of ['mousePressed', 'mouseReleased']) await tab.send('Input.dispatchMouseEvent', { type, x: r.x, y: r.y, button: 'left', clickCount: 1 });
+      if (await waitFor(tab, `${mentionCount(box, uid)}>${n0}`, 3000)) return;
+      throw new Error(`メンション <@${uid}> が入らない(送らずに止めた)`);
+    }
+    for (let i = 0; i <= [...q].length; i++) await key(tab, 'Backspace', 'Backspace', 8);   // take the query back
+    await key(tab, 'Escape', 'Escape', 27);
+  }
+  throw new Error(`メンション <@${uid}> の候補が出ない(${queries.join('・')} で探した。送らずに止めた)`);
+}
+// Slack: the posted message first shows as pending (its key has "xxxxx", "送信しています…"),
+// and stays so if the tab closes before the files are up (2026-11-24, it never
+// went out). Wait, with the tab open, for a new message with the text, a real ts,
+// nothing pending and every file's name; if it stays pending, leave the tab open.
+const slackItems = a => `[...document.querySelectorAll('[data-item-key]')].filter(e=>e.closest('[data-qa="slack_kit_list"]')&&!!e.closest('${THREAD_PANE}')===${!!a.thread_ts})`;
+async function slackSent(tab, a, atts, before, head) {
+  const js = `(()=>{const before=new Set(${JSON.stringify(before)});const it=${slackItems(a)}.filter(e=>!before.has(e.getAttribute('data-item-key'))&&e.innerText.replace(/\\s+/g,'').includes(${JSON.stringify(head)})).pop();` +
+    `if(!it)return 'none';const k=it.getAttribute('data-item-key');` +
+    `if(!/^\\d+\\.\\d+$/.test(k)||it.querySelector('.c-message_kit__resend, .c-pending_files, [data-qa^="pending_file"]'))return 'pending';` +
+    `const t=it.innerText+' '+[...it.querySelectorAll('[aria-label],a[href]')].map(e=>(e.getAttribute('aria-label')||'')+' '+decodeURIComponent(e.getAttribute('href')||'')).join(' ');` +
+    `const miss=${JSON.stringify(atts.map(x => x.name))}.filter(n=>!t.includes(n)&&!t.includes(n.replace(/ /g,'_')));if(miss.length)return 'files:'+miss.join(', ');` +
+    `const n=it.querySelectorAll('[data-qa="message_file_link"]').length;return n>${atts.length}?'extra:'+n:'ok:'+k})()`;
+  const end = Date.now() + (atts.length ? 600000 : 60000);
+  let st = 'none';
+  while (Date.now() < end) { st = String(await tab.ev(js)); if (st.startsWith('ok:')) return st.slice(3); if (st.startsWith('extra:')) break; await sleep(1000); }
+  if (st === 'pending') { const e = new Error('送信中のまま終わらない(タブは開いたまま残した。画面で確かめて)'); e.keepOpen = true; throw e; }
+  if (st.startsWith('files:')) throw new Error(`送ったメッセージに添付 ${st.slice(6)} が見えない(画面で確かめて)`);
+  if (st.startsWith('extra:')) throw new Error(`送ったメッセージの添付が ${st.slice(6)} 個で、用意した ${atts.length} 個より多い(画面で確かめて)`);
+  throw new Error('送ったあとの画面に文が見えない(送れたかを画面で確かめて)');
+}
+// 添付を入力欄に入れる: ページの input[type=file](影の木の中も)に DOM.setFileInputFiles。入力欄の上に名前が出るのを待つ
+// (Discord は 2026-10-16 に箱で確かめた手順。Slack も同じ形で、チャンネルかスレッドの入力欄のものに入れる)
+const nameShown = (n, scope = '') => `(()=>{const r=${scope ? `document.querySelector('${scope.trim()}')` : 'document.body'};const t=r?r.innerText:'';` +
+  `return t.includes(${JSON.stringify(n)})||t.includes(${JSON.stringify(n.replace(/ /g, '_'))})})()`;
+// Slack keeps files put in the box as part of the draft, also over a reload
+// (2026-11-24: files of a stopped try went out again with the next, 4 instead of 2).
+// So: none may be there before, exactly ours after, and on a stop each is taken
+// out with its own button -- which takes only a real click, and Slack's tips
+// (coachmarks) may lie over it, so they are closed first.
+const SLACK_BOX_FILE = '.p-multi_file_upload__file_container';
+const boxFiles = scope => `document.querySelectorAll('${scope}${SLACK_BOX_FILE}').length`;
+async function closeTips(tab) {
+  for (let i = 0; i < 6; i++) {
+    if (!await tab.ev(`(()=>{const b=document.querySelector('button[data-qa="coachmark-close-button"]');if(!b)return false;b.click();return true})()`)) return;
+    await sleep(500);
+  }
+}
+async function dropSlackFiles(tab, scope) {
+  await closeTips(tab);
+  for (let i = 0; i < 2 * ATT_MAX && await tab.ev(boxFiles(scope)); i++) {
+    const r = await tab.ev(`(()=>{const c=document.querySelector('${scope}${SLACK_BOX_FILE}');const b=c&&c.querySelector('button[aria-label]');if(!b)return null;` +
+      `c.scrollIntoView({block:'nearest'});const q=c.getBoundingClientRect();return {cx:q.left+q.width/2,cy:q.top+q.height/2}})()`);
+    if (!r) break;
+    await tab.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: r.cx, y: r.cy }); await sleep(300);   // the button shows on hover
+    const b = await tab.ev(`(()=>{const b=document.querySelector('${scope}${SLACK_BOX_FILE} button[aria-label]');const q=b.getBoundingClientRect();return {x:q.left+q.width/2,y:q.top+q.height/2}})()`);
+    await tab.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: b.x, y: b.y });
+    for (const type of ['mousePressed', 'mouseReleased']) await tab.send('Input.dispatchMouseEvent', { type, x: b.x, y: b.y, button: 'left', clickCount: 1 });
+    await sleep(800);
+  }
+  return !await tab.ev(boxFiles(scope));
+}
+async function attach(tab, scope, d, atts) {
+  const { root } = await tab.send('DOM.getDocument', { depth: -1, pierce: true }).then(m => m.result || {});
+  if (!root) throw new Error('ページの DOM が取れない');
+  const q = await tab.send('DOM.querySelectorAll', { nodeId: root.nodeId, selector: scope + 'input[type=file]' });
+  const ids = (q.result && q.result.nodeIds) || [];
+  if (!ids.length) throw new Error('添付の入口(input[type=file])が見つからない');
+  const r = await tab.send('DOM.setFileInputFiles', { nodeId: ids[0], files: atts.map(x => path.join(d, x.file)) });
+  if (r.error) throw new Error('添付を入れられない: ' + r.error.message);
+  if (!scope) {
+    for (const x of atts) if (!await waitFor(tab, nameShown(x.name), 30000)) throw new Error(`入力欄に添付 ${x.name} が出ない`);
+    return;
+  }
+  // Slack: the thread's pane may show the same names in its messages, so look only at the box's files
+  if (!await waitFor(tab, `${boxFiles(scope)}===${atts.length}`, 30000)) throw new Error(`入力欄の添付の数が ${atts.length} にならない`);
+  const files = `[...document.querySelectorAll('${scope}${SLACK_BOX_FILE}')].map(e=>e.innerText).join(' ')`;
+  for (const x of atts) if (!await waitFor(tab, `(()=>{const t=${files};return t.includes(${JSON.stringify(x.name)})||t.includes(${JSON.stringify(x.name.replace(/ /g, '_'))})})()`, 30000))
+    throw new Error(`入力欄に添付 ${x.name} が出ない`);
+}
+async function post(kind, a, d) {
+  const tab = await cdpTab();
+  const box = COMPOSER(kind, a), scope = scopeOf(kind, a);
+  let dirty = false;   // we put text in the box and it has not been sent
+  let attached = false; // files are in the box and have not been sent
+  let keepOpen = false; // a Slack message still sending: closing the tab would stop it
+  try {
+    if (kind === 'slack') await openSlack(tab, a); else await tab.send('Page.navigate', { url: a.channel_url });
+    if (!await waitFor(tab, `!!${box}`, 30000)) throw new Error('入力欄が見つからない(ログインやチャンネルを確かめて)');
+    await sleep(1500);
+    if (a.thread_ts) await checkThread(tab, a);
+    if (await tab.ev(`(${box}).innerText.trim().length`)) throw new Error('入力欄に書きかけの文がある(消さずに止めた)');
+    if (kind === 'slack') {
+      await tab.send('Page.bringToFront'); await closeTips(tab);
+      if (await tab.ev(boxFiles(scope))) throw new Error('入力欄に前の添付が残っている(消さずに止めた。画面で取り除いて)');
+    }
+    const atts = a.attachments || [];
+    if (atts.length) { attached = true; await attach(tab, scope, d, atts); await sleep(1000); }
+    await tab.ev(`(${box}).focus()`);
+    dirty = true;
+    const lines = a.text.replace(/\r\n/g, '\n').split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      if (i) await key(tab, 'Enter', 'Enter', 13, 8);            // Shift+Enter: 改行
+      const parts = kind === 'slack' ? lines[i].split(SLACK_MENTION) : [lines[i]];   // text, id, text, id, ...
+      for (let j = 0; j < parts.length; j++) {
+        if (j % 2) await slackMention(tab, box, parts[j]);
+        else if (parts[j]) await tab.send('Input.insertText', { text: j && parts[j][0] === ' ' ? parts[j].slice(1) : parts[j] });   // Slack puts a space after a mention
+      }
+    }
+    await sleep(500);
+    const typed = await tab.ev(composerText(box));
+    if (norm(typed) !== norm(a.text)) throw new Error('入力欄の文が用意したものと違う(送らずに止めた)');
+    // Slack does not send on an Enter key event without its character (it
+    // stayed in the box, 2026-11-20): press its send button. Discord sends on Enter.
+    if (kind === 'slack') {
+      const btn = `document.querySelector('${scope}[data-qa="texty_send_button"]')`;
+      if (a.thread_ts) await checkThread(tab, a);
+      var before = await tab.ev(`${slackItems(a)}.map(e=>e.getAttribute('data-item-key'))`);
+      // with files, the button stays disabled until they are uploaded
+      await waitFor(tab, `(()=>{const b=${btn};return !!b&&!b.disabled})()`, atts.length ? 120000 : 3000);
+      if (!await tab.ev(`(()=>{const b=${btn};if(!b||b.disabled)return false;b.click();return true})()`))
+        throw new Error('送信のボタンが見つからない・押せない(入力欄に文が残っている)');
+    } else await key(tab, 'Enter', 'Enter', 13);
+    if (!await waitFor(tab, `!(${box}) || !(${box}).innerText.trim()`, 10000))
+      throw new Error('入力欄に文が残っている(送れていない。入力欄を画面で確かめて)');
+    dirty = false; attached = false;
+    // the posted message shows mentions as "@name": look for the longest plain run
+    const head = norm(a.text).split(MARK).reduce((x, y) => y.length > x.length ? y : x, '').slice(0, 30);
+    if (kind === 'slack') {
+      const ts = await slackSent(tab, a, atts, before || [], head).catch(e => { keepOpen = !!e.keepOpen; throw e; });
+      return `投稿した(ts ${ts}${atts.length ? `、添付 ${atts.length} 個` : ''})`;
+    }
+    if (!await waitFor(tab, `(${JSON.stringify(head)}) && String(${LAST(kind, a)}).replace(/\\s+/g,'').includes(${JSON.stringify(head)})`, 15000))
+      throw new Error('送ったあとの画面に文が見えない(送れたかを画面で確かめて)');
+    // the attachments (Discord): in the last message (the name, spaces may become _)
+    for (const x of atts) {
+      const js = `(()=>{const m=[...document.querySelectorAll('li[id^="chat-messages-"]')];const l=m[m.length-1];if(!l)return false;const t=l.innerText+' '+[...l.querySelectorAll('a[href]')].map(e=>decodeURIComponent(e.href)).join(' ');return t.includes(${JSON.stringify(x.name)})||t.includes(${JSON.stringify(x.name.replace(/ /g, '_'))})})()`;
+      if (!await waitFor(tab, js, 60000)) throw new Error(`送ったあとの画面に添付 ${x.name} が見えない(文は送った。添付を画面で確かめて)`);
+    }
+    return atts.length ? `投稿した(添付 ${atts.length} 個)` : '投稿した';
+  } catch (e) {
+    // do not leave the prepared text in the box as a draft (2026-11-23)
+    if (dirty) {
+      const ok = await clearComposer(tab, box).catch(() => false);
+      e.message += ok ? '。入力欄は空にした' : '。入力欄を空にできなかった(画面で消して)';
+    }
+    // files waiting above the box are dropped by loading the page again
+    if (attached && kind === 'slack') {
+      const ok = await dropSlackFiles(tab, scope).catch(() => false);
+      e.message += ok ? '。添付は入力欄から取り除いた' : '。添付を入力欄から取り除けなかった(画面で取り除いて)';
+    } else if (attached) { await tab.send('Page.reload', { ignoreCache: true }).catch(() => {}); e.message += '。添付はページを読み直して外した(画面で確かめて)'; }
+    throw e;
+  } finally { if (keepOpen) tab.leave(); else await tab.close(); }
+}
+async function form(a) {
+  const tab = await cdpTab();
+  try {
+    await tab.send('Page.navigate', { url: a.url });
+    if (!await waitFor(tab, `document.readyState==='complete'`)) throw new Error('ページが開かない');
+    await sleep(1500);
+    for (const f of a.fields) {
+      const r = await tab.ev(`(()=>{const e=document.querySelector(${JSON.stringify(f.selector)});if(!e)return 'none';const v=${JSON.stringify(f.value)};
+        if(e.type==='checkbox'||e.type==='radio'){e.checked=v==='true';}
+        else{const p=Object.getPrototypeOf(e);const d=Object.getOwnPropertyDescriptor(p,'value');d&&d.set?d.set.call(e,v):(e.value=v);}
+        e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));
+        return (e.type==='checkbox'||e.type==='radio')?String(e.checked)===v:e.value===v})()`);
+      if (r === 'none') throw new Error(`欄が見つからない: ${f.label || f.selector}`);
+      if (r !== true) throw new Error(`欄に入らない: ${f.label || f.selector}`);
+    }
+    const before = await tab.ev('location.href');
+    const ok = await tab.ev(`(()=>{const e=document.querySelector(${JSON.stringify(a.submit)});if(!e)return false;e.click();return true})()`);
+    if (!ok) throw new Error('送信のボタンが見つからない');
+    await sleep(5000);
+    const after = await tab.ev('location.href+" "+document.title');
+    return `送信した(送ったあと: ${String(after).slice(0, 200)}${String(after).startsWith(before) ? '。ページが変わっていないので画面で確かめて' : ''})`;
+  } finally { await tab.close(); }
+}
+async function run(id) {
+  if (!ID_RE.test(id || '')) die('run <id>');
+  const d = path.join(OUT, id), raw = fs.readFileSync(path.join(d, 'action.json')), h = sha(raw), a = JSON.parse(raw);
+  if (a.kind === 'mail' || a.kind === 'trash') {
+    // gmail.py が自分で aiza に確かめてから送る・消す
+    const r = spawnSync(GMAIL, ['out-run', id], { stdio: 'inherit', env: { ...process.env, AIZA_OUT_DIR: OUT } });
+    if (r.status === 3) process.exit(1);                       // the gate said no: nothing was tried
+    fs.writeFileSync(path.join(d, 'result.json'), JSON.stringify({ at: new Date().toISOString(), ok: r.status === 0 }));
+    process.exit(r.status === null ? 1 : r.status);
+  }
+  if (a.kind === 'slack' || a.kind === 'discord') try { checkAttachments(d, a); } catch (e) { die(e.message, 1); }
+  const c = await gate({ op: 'out-check', id, hash: h });
+  if (!c.ok) die(`実行しません: ${c.why}`, 1);
+  let ok = true, note;
+  try { note = a.kind === 'form' ? await form(a) : await post(a.kind, a, d); }
+  catch (e) { ok = false; note = String(e.message || e).slice(0, 280); }
+  await gate({ op: 'out-done', id, hash: h, ok, note });
+  fs.writeFileSync(path.join(d, 'result.json'), JSON.stringify({ at: new Date().toISOString(), ok, note }));
+  console.log(ok ? `実行しました: ${note}` : `実行できませんでした: ${note}`);
+  process.exit(ok ? 0 : 1);
+}
+
+const [cmd, ...rest] = process.argv.slice(2);
+if (!cmd || cmd === '-h' || cmd === '--help') { console.log(fs.readFileSync(new URL(import.meta.url), 'utf8').split('\n').filter(l => l.startsWith('//')).map(l => l.slice(3)).join('\n')); process.exit(0); }
+if (cmd === 'mail') {
+  const { id, d } = newDir(), eml = path.join(d, 'message.eml');
+  const r = spawnSync(GMAIL, ['compose', '--out', eml, ...rest], { encoding: 'utf8' });
+  if (r.status !== 0) { fs.rmSync(d, { recursive: true, force: true }); die('メールを組み立てられませんでした: ' + (r.stderr || '').trim().split('\n').pop(), 1); }
+  const info = JSON.parse(r.stdout.trim().split('\n').pop());
+  await prepare(id, d, { kind: 'mail', eml: 'message.eml', eml_sha256: sha(fs.readFileSync(eml)), thread: info.thread || '' });
+} else if (cmd === 'trash') {
+  if (!rest.length || !rest.every(t => /^[0-9a-f]{16}$/.test(t))) die('trash <threadId>...');
+  const threads = rest.map(t => {
+    const r = spawnSync(GMAIL, ['thread', t, '--max-body', '1'], { encoding: 'utf8' });
+    if (r.status !== 0) die(`スレッド ${t} を読めません`, 1);
+    const ms = JSON.parse(r.stdout).messages || [], last = ms[ms.length - 1] || {};
+    return { id: t, subject: String((ms[0] || {}).subject || '').slice(0, 500), from: String(last.from || '').slice(0, 500), date: String(last.date || '').slice(0, 500), count: ms.length };
+  });
+  const { id, d } = newDir(); await prepare(id, d, { kind: 'trash', threads });
+} else if (cmd === 'slack' || cmd === 'discord') {
+  const o = opts(rest, ['attach']);
+  if (!o['channel-url']) die('--channel-url が要ります');
+  let thread = o['thread-ts'] || '';
+  if (cmd === 'discord' && thread) die('Discord のスレッドは、スレッドを開いた URL を --channel-url に');
+  if (cmd === 'slack') {
+    const t = slackTarget(o['channel-url']);
+    if (thread && !TS_RE.test(thread)) die('--thread-ts は 1700000000.000100 の形');
+    if (thread && t.ts && t.ts !== thread) die(`--thread-ts ${thread} と URL のスレッド ${t.ts} が違う`);
+    thread ||= t.ts || '';
+    if (thread && !t.channel) die('スレッドに返すには --channel-url にチャンネルの URL(…/archives/<C>… か app.slack.com/client/<T>/<C>…)が要ります');
+  }
+  const text = readText(o['text-file']);
+  checkFiles(o.attach);
+  const { id, d } = newDir();
+  let attachments;
+  try { attachments = copyAttachments(d, o.attach); } catch (e) { fs.rmSync(d, { recursive: true, force: true }); die('添付を読めません: ' + e.message, 1); }
+  await prepare(id, d, { kind: cmd, channel_url: o['channel-url'], channel: o.channel || '', ...(thread ? { thread_ts: thread } : {}), text, ...(attachments.length ? { attachments } : {}) });
+} else if (cmd === 'form') {
+  const o = opts(rest);
+  if (!o.url || !o['fields-file'] || !o.submit) die('--url・--fields-file・--submit が要ります');
+  const fields = JSON.parse(fs.readFileSync(o['fields-file'], 'utf8'));
+  const { id, d } = newDir(); await prepare(id, d, { kind: 'form', url: o.url, fields: fields.map(f => ({ selector: String(f.selector), value: String(f.value ?? ''), label: String(f.label || '') })), submit: o.submit });
+} else if (cmd === 'run') await run(rest[0]);
+else if (cmd === 'cancel') {
+  const id = rest[0]; if (!ID_RE.test(id || '')) die('cancel <id>');
+  const r = await gate({ op: 'out-cancel', id }); if (!r.ok) die(r.why, 1); console.log(`取り下げました(${id})`);
+} else if (cmd === 'list') {
+  let ids = []; try { ids = fs.readdirSync(OUT).filter(x => ID_RE.test(x)); } catch {}
+  for (const id of ids.sort((x, y) => fs.statSync(path.join(OUT, x)).mtimeMs - fs.statSync(path.join(OUT, y)).mtimeMs)) {
+    let a = {}, res = null; try { a = JSON.parse(fs.readFileSync(path.join(OUT, id, 'action.json'))); } catch {}
+    try { res = JSON.parse(fs.readFileSync(path.join(OUT, id, 'result.json'))); } catch {}
+    console.log(`${id} ${a.kind || '?'} ${a.created || ''} ${res ? (res.ok ? '実行した' : '失敗: ' + (res.note || '')) : '許可を待つ(か、許可されていない)'}`);
+  }
+} else die('使い方: aiza-out --help');

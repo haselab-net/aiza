@@ -53,13 +53,21 @@ class TaskTest(unittest.TestCase):
         self.pushes = []
         self.timers = []
         self.saved = {n: getattr(B, n) for n in ("session_dir", "iter_session_dirs", "send_push_notification",
-                                                 "stop_session", "TASK_DECIDE_DELAY")}
+                                                 "stop_session", "TASK_DECIDE_DELAY",
+                                                 "_session_busy_in_background", "TASK_PUSH_DELAY",
+                                                 "send_push_payload")}
+        self.busy = set()
+        B._session_busy_in_background = lambda sid, meta, now: sid in self.busy
         B.session_dir = lambda sid: self.root / sid
         B.iter_session_dirs = lambda: sorted(p for p in self.root.iterdir() if p.is_dir())
         B.send_push_notification = lambda sid, msg: self.pushes.append((sid, msg))
         self.stopped = []
         B.stop_session = lambda sid: self.stopped.append(sid)
         B.TASK_DECIDE_DELAY = 0.01
+        B.TASK_PUSH_DELAY = 0.01
+        self.payloads = []
+        B.send_push_payload = lambda payload: self.payloads.append(payload)
+        B._task_pushed.clear()
         B._task_recent.clear()
 
     def tearDown(self):
@@ -122,8 +130,38 @@ class TaskTest(unittest.TestCase):
         self.assertEqual(self.pushes, [])
         B.task_hook("a6", {"hook_event_name": "Notification", "notification_type": "permission_prompt",
                            "message": "Claude needs your permission to use Bash"})
+        time.sleep(0.1)
         self.assertEqual(self.pushes, [("a6", "Claude needs your permission to use Bash")])
         self.assertEqual(B.load_task("a6")["state"], "you")
+
+    def test_push_waits_and_skips_a_turn_already_looked_at(self):
+        # the deployment notes: nothing at once; seen within the wait, nothing at all.
+        B.TASK_PUSH_DELAY = 0.3
+        self.sess("p1")
+        self.sess("p2")
+        B.task_hook("p1", {"hook_event_name": "Stop", "last_assistant_message": "状態: 要判断 — x"})
+        B.task_hook("p2", {"hook_event_name": "Stop", "last_assistant_message": "状態: 要判断 — y"})
+        time.sleep(0.1)
+        self.assertEqual(self.pushes, [])
+        B.task_update("p1", {"seen": True})
+        time.sleep(0.4)
+        self.assertEqual(self.pushes, [("p2", "要判断: y")])
+        self.assertEqual(self.payloads, [])
+
+    def test_push_taken_back_once_the_turn_moves_or_is_seen(self):
+        B.send_push_notification = lambda sid, msg: (self.pushes.append((sid, msg)), True)[1]
+        for sid in ("r1", "r2", "r3"):
+            self.sess(sid)
+            B.task_hook(sid, {"hook_event_name": "Stop", "last_assistant_message": f"状態: 要判断 — {sid}"})
+        time.sleep(0.15)
+        self.assertEqual(len(self.pushes), 3)
+        B.task_update("r1", {"seen": True})     # looked at on another device
+        B.task_user_sent("r2")                  # answered
+        time.sleep(0.05)
+        self.assertEqual(sorted(p["close"] for p in self.payloads), ["r1", "r2"])
+        B.task_user_sent("r1")                  # taken back once only
+        time.sleep(0.05)
+        self.assertEqual(len(self.payloads), 2)
 
     def test_snooze_fires_once_and_stops_devbox_session(self):
         self.sess("b1", tmux_location="container", preset="claude-tui")
@@ -138,6 +176,67 @@ class TaskTest(unittest.TestCase):
         self.assertEqual(self.pushes, [("b1", "寝かせの期限: 期限")])
         self.assertEqual(self.stopped, ["b3"])  # not the host one (passkey), not the due one
         self.assertTrue(B.load_task("b3")["auto_stopped"])
+
+    def test_snooze_date_wakes_the_session_itself(self):
+        # 2026-11-22, the user: 自分でタイマーを仕掛けるやつは危ない…クーロンで
+        # 起こすように. A 寝かせ the agent wrote: aiza resumes it if stopped and
+        # tells it; no push (its reply's state line decides). Set by hand, a
+        # root shell, or one that cannot be told: the old push.
+        names = ("_wake_for_talkto", "send_message", "_wait_prompt", "task_user_sent")
+        saved = {n: getattr(B, n) for n in names}
+        self.addCleanup(lambda: [setattr(B, n, v) for n, v in saved.items()])
+        sent, woke = [], []
+        B._wake_for_talkto = lambda sid, meta: woke.append(sid) or "n" + sid
+        B._wait_prompt = lambda sid: None
+        B.task_user_sent = lambda sid: None
+        def send(sid, text, submit=True, from_user=None):
+            if sid == "w5":
+                raise B.UnlockRequired("closed", tier="host")
+            sent.append((sid, from_user, text))
+        B.send_message = send
+        self.sess("w1", tmux_location="container", preset="claude-tui")
+        self.sess("w2", tmux_location="container", preset="claude-tui", stopped=True)
+        self.sess("w3", tmux_location="container", preset="claude-tui")
+        self.sess("w4", tmux_location="root", preset="root-shell")
+        self.sess("w5", tmux_location="container", preset="claude-tui")  # sending fails
+        now = time.time()
+        for sid in ("w1", "w2", "w4", "w5"):
+            B.save_task(sid, {"state": "snooze", "until": now - 5, "ts": now - 7200, "text": "返事", "declared": True})
+        B.save_task("w3", {"state": "snooze", "until": now - 5, "ts": now - 7200, "text": "手で", "by_hand": True})
+        B._task_check_once()
+        time.sleep(0.3)
+        B._task_check_once()
+        time.sleep(0.3)
+        self.assertEqual(woke, ["w2"])
+        self.assertEqual(sorted(s for s, _, _ in sent), ["nw2", "w1"])
+        self.assertTrue(all(f == "⏰ AI座" and "「返事」" in t for _, f, t in sent))
+        self.assertEqual(sorted(self.pushes), [("w3", "寝かせの期限: 手で"), ("w4", "寝かせの期限: 返事"),
+                                               ("w5", "寝かせの期限: 返事")])
+
+    def test_done_stops_devbox_session_soon(self):
+        # 2026-11-18, the user: "済になったらセッションを停止するわけには行きませんか？",
+        # then "30分待つ必要が無い" -- at the next check once a minute has passed,
+        # but not while something still runs under it ("２は見るように").
+        self.sess("d1", tmux_location="container", preset="claude-tui")
+        self.sess("d2", tmux_location="container", preset="claude-tui")
+        self.sess("d3", tmux_location="host", preset="claude-tui")
+        self.sess("d4", tmux_location="container", preset="claude-tui")
+        self.sess("d5", tmux_location="container", preset="claude-tui")
+        now = time.time()
+        B.save_task("d1", {"state": "done", "ts": now - 90, "text": "済んだ"})
+        B.save_task("d2", {"state": "done", "ts": now - 10, "text": "済んだばかり"})
+        B.save_task("d3", {"state": "done", "ts": now - 7200, "text": "ホスト"})
+        B.save_task("d4", {"state": "done", "ts": now - 7200, "text": "裏で動いている"})
+        B.save_task("d5", {"state": "snooze", "until": now + 86400, "ts": now - 90, "text": "寝かせは30分"})
+        self.busy.add("d4")
+        B._task_check_once()
+        B._task_check_once()
+        self.assertEqual(self.stopped, ["d1"])
+        self.busy.clear()
+        B._task_check_once()
+        self.assertEqual(self.stopped, ["d1", "d4"])
+        self.assertEqual(self.pushes, [])
+        self.assertTrue(B.load_task("d1")["auto_stopped"])
 
     def test_update_by_hand(self):
         self.sess("c1")

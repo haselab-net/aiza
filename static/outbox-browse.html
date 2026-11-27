@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>フォルダ</title>
+<title data-i18n="common.directory">ディレクトリ</title>
 <!-- Self-contained, no dependency on app.js/site-extras.js, same reasoning
      as viewer3d.html: opened in its own tab from a "folder" attachment
      card (the deployment notes), it should work even if the chat SPA's own
@@ -36,6 +36,8 @@
   }
   button.row { cursor: pointer; }
   .row .icon { font-size: 1.2rem; flex: none; }
+  /* A unix directory (a place on disk), not one of aiza's folders (📁): a gray folder with >_ (the user's pick, 2026-11-27). */
+  .dir-icon { display: inline-block; flex: none; font-style: normal; width: 1.2em; height: 1.2em; vertical-align: -0.22em; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M2 6a2 2 0 0 1 2-2h5.5l2 2.5H20a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2z' fill='%2364748b'/%3E%3Cpath d='M6.5 11.5l3 2.5-3 2.5' fill='none' stroke='%23fff' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M11.5 17h5' stroke='%23fff' stroke-width='1.8' stroke-linecap='round'/%3E%3C/svg%3E") center / contain no-repeat; }
   .row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #empty, #error { padding: 2rem 1rem; text-align: center; color: #8a96a3; }
   #error { color: #ea4335; display: none; }
@@ -44,11 +46,11 @@
 <body>
 <div id="crumbs"></div>
 <div id="list"></div>
-<div id="empty" style="display:none;">(空のフォルダです)</div>
+<div id="empty" style="display:none;" data-i18n="outbox.empty_folder">(空のフォルダです)</div>
 <div id="error"></div>
 <!-- Display language (the deployment notes). -->
 <script src="/agents/i18n.js"></script>
-<script>window.aigwI18n.apply(document.body);</script>
+<script>window.aizaI18n.apply(document.documentElement);</script>
 <script>
   const qs = new URLSearchParams(location.search);
   const sessionId = qs.get("session") || "";
@@ -96,7 +98,7 @@
       if (!isLast) b.addEventListener("click", () => navigate(targetDir));
       crumbsEl.appendChild(b);
     };
-    mkCrumb(rootName || t("フォルダ"), "", parts.length === 0);
+    mkCrumb(rootName || t("common.directory"), "", parts.length === 0);
     let acc = "";
     parts.forEach((seg, i) => {
       const sep = document.createElement("span");
@@ -112,7 +114,7 @@
     const b = document.createElement("button");
     b.className = "row";
     b.innerHTML = `<span class="icon"></span><span class="name"></span>`;
-    b.querySelector(".icon").textContent = icon;
+    if (icon === "dir") b.querySelector(".icon").innerHTML = `<span class="dir-icon"></span>`; else b.querySelector(".icon").textContent = icon;
     b.querySelector(".name").textContent = name;
     b.addEventListener("click", onClick);
     listEl.appendChild(b);
@@ -143,24 +145,24 @@
       }
       r = await res.json();
     } catch (e) {
-      errorEl.textContent = t("読み込めませんでした: {err}", { err: e.message });
+      errorEl.textContent = t("common.could_not_load_err", { err: e.message });
       errorEl.style.display = "block";
       return;
     }
     currentDir = r.dir;
-    document.title = rootName ? `${rootName} — ${t("フォルダ")}` : t("フォルダ");
+    document.title = rootName ? `${rootName} — ${t("common.directory")}` : t("common.directory");
     renderCrumbs(currentDir);
     const url = new URL(location.href);
     url.searchParams.set("dir", currentDir);
     history.replaceState(null, "", url);
 
     for (const name of r.subdirs) {
-      rowButton("📁", name, () => navigate(currentDir ? `${currentDir}/${name}` : name));
+      rowButton("dir", name, () => navigate(currentDir ? `${currentDir}/${name}` : name));
     }
     for (const f of r.files) {
       const fileUrl = outboxFilesUrl(currentDir, f.name);
       if (f.kind === "model3d") {
-        // f.mtl (the deployment notes, 2026-09-22): aigw-backend already
+        // f.mtl (the deployment notes, 2026-09-22): aiza-backend already
         // paired a same-stem .mtl into this .obj's own entry and left it
         // out of `files` -- switch viewer3d.html to its OBJ path and hand
         // it that .mtl's own outbox-files URL too. glb/gltf (no f.mtl)
@@ -178,7 +180,7 @@
   }
 
   if (!sessionId) {
-    errorEl.textContent = t("セッションが指定されていません。");
+    errorEl.textContent = t("outbox.no_session_given");
     errorEl.style.display = "block";
   } else {
     navigate(currentDir);

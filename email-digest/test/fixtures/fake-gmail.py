@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Fake gmail.py for tests. No network. Logs each call to $FAKE_LOG.
-As a script: link / list / archive / read / unarchive / show. As a module (ref-info.py, backfill.py): service() fails."""
+As a script: link / list (--held) / thread / archive / read / unarchive / hold / unhold. As a module (ref-info.py, backfill.py): service() fails."""
 import json, os, sys
 
 def _log(args):
@@ -26,9 +26,17 @@ if __name__ == "__main__":
         for t in a[1:]:
             print(thread_url(t))
     elif cmd == "list":
-        p = os.environ.get("FAKE_GMAIL_LIST")
+        p = os.environ.get("FAKE_GMAIL_HELD" if "--held" in a else "FAKE_GMAIL_LIST")
         if p and os.path.exists(p):
             sys.stdout.write(open(p).read())
+    elif cmd == "thread":  # $FAKE_GMAIL_THREADS/<threadId>.json (the shape gmail.py thread prints)
+        p = os.path.join(os.environ.get("FAKE_GMAIL_THREADS", "/nonexistent"), a[1] + ".json")
+        if not os.path.exists(p):
+            sys.exit("fake gmail: no thread " + a[1])
+        sys.stdout.write(open(p).read())
+    elif cmd in ("hold", "unhold"):
+        for t in a[1:]:
+            print(json.dumps({"ok": True, "thread": t}))
     elif cmd == "env-mailbox-dir":  # tests: what MAILBOX_DIR the caller passed
         print(os.environ.get("MAILBOX_DIR", ""))
     elif cmd in ("archive", "read", "unarchive"):

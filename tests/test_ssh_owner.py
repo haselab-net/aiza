@@ -1,5 +1,5 @@
 """Sessions on a shared ssh:<machine> (one remote account, one tmux server
-for every aigw user) carry their creator in @aigw_owner; someone else's
+for every aiza user) carry their creator in @aiza_owner; someone else's
 shows its owner in the untracked list and is adopted watch-only: no input,
 no resize, and stopping it leaves their pane alone (the deployment notes).
 
@@ -29,7 +29,7 @@ class SshOwnerTest(unittest.TestCase):
 
         def tmux_query(location, args, timeout=15):
             if args[:1] == ["list-sessions"]:
-                out = "".join(f"{n} {o}\n" for n, o in remote.items()) + "_aigw-ctl \n"
+                out = "".join(f"{n} {o}\n" for n, o in remote.items()) + "_aiza-ctl \n"
                 return subprocess.CompletedProcess(args, 0, stdout=out, stderr="")
             return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
 
@@ -39,6 +39,7 @@ class SshOwnerTest(unittest.TestCase):
 
         stubs = {
             "session_roots": lambda: [self.root],
+            "HOST_SESSIONS_DIR": self.root,      # ssh: sessions are made in the host-only store
             "SSH_MACHINES": {"m": {}},
             "ssh_reachable": lambda machine, wait=True: True,
             "tmux_query": tmux_query,
@@ -101,7 +102,7 @@ class SshOwnerTest(unittest.TestCase):
 
     def test_creation_tags_the_owner(self):
         B.tag_tmux_owner("ssh:m", "abc")
-        self.assertIn(("ssh:m", ["set-option", "-t", "abc", "@aigw_owner", ME]), self.execs)
+        self.assertIn(("ssh:m", ["set-option", "-t", "abc", "@aiza_owner", ME]), self.execs)
         B.tag_tmux_owner("container", "abc")
         self.assertEqual(len(self.execs), 1)
 

@@ -1,0 +1,172 @@
+#!/usr/bin/env python3
+"""aiza-record-check -- hold a session's record (the deployment notes) up against
+Claude Code's own conversation logs it was made from.
+
+    aiza-record-check <session-id> ...     (as the session's owner)
+
+For each session: the tool runs (ids), the tool results (ids), the usage
+summed by model (one per message id) and the person's messages, counted
+from the conversation logs over the stretch the record says it read (from
+each conversation's "conv" line to its last "upto"), against the same from
+record.jsonl. Prints numbers only -- nothing of the content, so it may be
+run on an Email session's record too. Exit 1 if any differ.
+
+Counted on its own here (not with aiza-backend's code), so a mistake in the
+backend's reading shows up as a difference.
+"""
+import json
+import os
+import sys
+from pathlib import Path
+
+HOME = Path.home()
+KINDS = ("tool_use", "tool_result", "user")
+TOKENS = ("input", "output", "cache_read", "cache_write_5m", "cache_write_1h")
+COMMAND_MARKS = ("<command-name>", "<local-command-", "<command-message>",
+                 "<bash-input>", "<bash-stdout>", "<bash-stderr>")
+
+
+def record_dirs(sid):
+    dirs = [HOME / ".aiza-state" / "records" / sid]
+    try:
+        box = json.loads(Path("/etc/aiza/mailbox.json").read_text())["dir"]
+        dirs.append(Path(os.path.expanduser(box)) / ".aiza-records" / sid)
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    return [d for d in dirs if (d / "record.jsonl").is_file()]
+
+
+def jsonl(path):
+    with open(path, "rb") as f:
+        for n, raw in enumerate(f, 1):
+            try:
+                yield n, json.loads(raw)
+            except ValueError:
+                yield n, None
+
+
+def empty():
+    return {"tool_use": set(), "tool_result": set(), "user": set(), "msg": {}}
+
+
+def from_record(rdir):
+    got, spans = empty(), {}
+    for _, r in jsonl(rdir / "record.jsonl"):
+        if not isinstance(r, dict):
+            continue
+        k, conv = r.get("k"), r.get("conv")
+        if k == "conv":
+            spans.setdefault(conv, [r.get("line", 1), r.get("line", 1) - 1])
+        elif k == "upto" and conv in spans:
+            spans[conv][1] = max(spans[conv][1], r.get("line", 0))
+        elif k == "tool_use":
+            got["tool_use"].add(r.get("id"))
+        elif k == "tool_result":
+            got["tool_result"].add(r.get("id"))
+        elif k == "user":
+            got["user"].add(r.get("uuid"))
+        elif k == "usage":
+            got["msg"].setdefault(r.get("msg"), (r.get("model"), tuple(r.get(t, 0) for t in TOKENS)))
+    return got, spans
+
+
+def person(content):
+    if isinstance(content, str):
+        text = content
+    elif isinstance(content, list):
+        text = "".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
+    else:
+        return False
+    text = text.lstrip()
+    return bool(text) and not text.startswith(COMMAND_MARKS)
+
+
+def tokens(u):
+    num = lambda k: u.get(k) if isinstance(u.get(k), int) and not isinstance(u.get(k), bool) and u.get(k) >= 0 else 0
+    cc = u.get("cache_creation") if isinstance(u.get("cache_creation"), dict) else {}
+    w1h = cc.get("ephemeral_1h_input_tokens") if isinstance(cc.get("ephemeral_1h_input_tokens"), int) else 0
+    w5m = cc.get("ephemeral_5m_input_tokens")
+    if not isinstance(w5m, int):
+        w5m = max(num("cache_creation_input_tokens") - w1h, 0)
+    return (num("input_tokens"), num("output_tokens"), num("cache_read_input_tokens"), w5m, w1h)
+
+
+def from_logs(rdir, spans):
+    want = empty()
+    state = json.loads((rdir / "state.json").read_text())
+    for conv, (first, last) in spans.items():
+        path = (state.get("convs") or {}).get(conv, {}).get("path")
+        if not path:
+            continue
+        for n, o in jsonl(path):
+            if n < first or n > last or not isinstance(o, dict):
+                continue
+            msg = o.get("message") if isinstance(o.get("message"), dict) else {}
+            content = msg.get("content")
+            blocks = content if isinstance(content, list) else []
+            if o.get("type") == "assistant":
+                if isinstance(msg.get("id"), str) and isinstance(msg.get("usage"), dict):
+                    want["msg"].setdefault(msg["id"], (str(msg.get("model") or "?")[:80], tokens(msg["usage"])))
+                want["tool_use"].update(b["id"] for b in blocks
+                                        if isinstance(b, dict) and b.get("type") == "tool_use" and isinstance(b.get("id"), str))
+            elif o.get("type") == "user":
+                res = [b for b in blocks if isinstance(b, dict) and b.get("type") == "tool_result"]
+                want["tool_result"].update(b["tool_use_id"] for b in res if isinstance(b.get("tool_use_id"), str))
+                if not res and not o.get("isMeta") and isinstance(o.get("uuid"), str) and person(content):
+                    want["user"].add(o["uuid"])
+    return want
+
+
+def by_model(msgs):
+    out = {}
+    for model, t in msgs.values():
+        acc = out.setdefault(model, [0] * len(TOKENS))
+        for i, v in enumerate(t):
+            acc[i] += v
+    return out
+
+
+def check(sid):
+    dirs = record_dirs(sid)
+    if not dirs:
+        print(f"{sid}: no record")
+        return False
+    rdir = dirs[0]
+    got, spans = from_record(rdir)
+    want = from_logs(rdir, spans)
+    ok = True
+    for k in KINDS:
+        g, w = got[k], want[k]
+        same = g == w
+        ok &= same
+        print(f"{sid}: {k:<11} record {len(g):>6}  logs {len(w):>6}  "
+              + ("ok" if same else f"DIFFER (only in record {len(g - w)}, only in logs {len(w - g)})"))
+    gm, wm = by_model(got["msg"]), by_model(want["msg"])
+    same = gm == wm and set(got["msg"]) == set(want["msg"])
+    ok &= same
+    print(f"{sid}: usage       record {len(got['msg']):>6}  logs {len(want['msg']):>6} messages  "
+          + ("ok" if same else "DIFFER"))
+    for model in sorted(set(gm) | set(wm)):
+        g, w = gm.get(model), wm.get(model)
+        if g != w:
+            print(f"{sid}:   {model}: record {g}  logs {w}")
+    print(f"{sid}: conversations {len(spans)}, lines read " + ", ".join(f"{a}-{b}" for a, b in spans.values()))
+    return ok
+
+
+def main():
+    if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
+        print(__doc__.strip())
+        return 0 if len(sys.argv) >= 2 else 2
+    ok = True
+    for sid in sys.argv[1:]:
+        try:
+            ok &= check(sid)
+        except (OSError, ValueError) as e:
+            print(f"{sid}: could not check ({type(e).__name__})")
+            ok = False
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

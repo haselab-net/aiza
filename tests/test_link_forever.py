@@ -25,7 +25,7 @@ class LinkForeverTest(unittest.TestCase):
         B.append_event = lambda sid, ev: self.events.append((sid, ev))
         for sid in ("aaaaaaaaaaa1", "aaaaaaaaaaa2", "aaaaaaaaaaa3", "aaaaaaaaaaa4"):
             (self.root / sid).mkdir()
-            (self.root / sid / "meta.json").write_text(json.dumps({"id": sid, "label": sid, "tmux_location": "root"}))
+            (self.root / sid / "meta.json").write_text(json.dumps({"id": sid, "label": sid, "preset": "root-shell", "tmux_location": "root"}))
 
     def tearDown(self):
         for n, v in self.saved.items():

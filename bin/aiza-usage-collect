@@ -1,0 +1,400 @@
+#!/usr/bin/env python3
+"""aiza-usage-collect -- who used aiza how much, for the work tree's
+"📊 利用" view (the deployment notes).
+
+Run as root by aiza-usage-collect.timer. For each member of the lab group it
+forks, drops to that user (no supplementary groups) and reads that user's own
+session directories -- never another user's files as root:
+
+  ~/sandhome/.aiza/<id>           container sessions
+  ~/.aiza-state/sessions/<id>     sessions outside the containers
+  ~/<mailbox>/.aiza/<id>          the Email box's (/etc/aiza/mailbox.json)
+
+From each it takes only numbers: messages a person sent (user_message events
+without "from" are the owner's; "from" naming a lab member is a collaborator's;
+anything else -- talkto, aiza's own reminders -- is not a person's), a new
+session, and Claude's token count and estimated $ (usage.json, kept by the
+backend). Messages are counted per week (Monday, local time) and never finer
+(the user, 2026-11-23: 時間帯までは出さない、プライバシーなので). usage.json
+has no times, so tokens are counted as they grow between runs; what a
+session had before the first run is in the "before" bucket.
+
+Root then reads the work tree's store to put each session under the node it
+is linked to: the node's id when the lab can see it, "private" when not.
+The result, /var/lib/aiza-usage/usage.json (root:<lab group> 0640), has only
+user names, node ids, weeks and counts; the backend hands it to lab members
+and the page names the nodes from the viewer's own view of the tree.
+"""
+import grp
+import json
+import os
+import pwd
+import re
+import select
+import signal
+import sys
+import time
+
+LAB_GROUP = "sandboxusers"
+OUT_DIR = os.environ.get("AIZA_USAGE_DIR", "/var/lib/aiza-usage")
+TREE_NODES = os.environ.get("AIZA_TREE_NODES", "/var/lib/aiza-tree/nodes.json")
+MAILBOX_CONFIG = "/etc/aiza/mailbox.json"
+SID_RE = re.compile(r"^[0-9a-f]{12}$")
+NODE_RE = re.compile(r"^n[0-9a-f]{12}$")
+WEEK_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+META_MAX = 256 * 1024
+USAGE_MAX = 8 * 1024 * 1024
+READ_CHUNK = 4 * 1024 * 1024
+CHILD_TIMEOUT = 120
+BIG = 10 ** 13
+
+# $ per million tokens: input, output, cache read (the backend's table).
+PRICES = {
+    "claude-fable-5-2": (8.0, 40.0, 0.20), "claude-mythos-5-2": (8.0, 40.0, 0.20),
+    "claude-fable-5-1": (10.0, 50.0, 1.0), "claude-mythos-5-1": (10.0, 50.0, 1.0), "claude-fable-5": (10.0, 50.0, 1.0),
+    "claude-opus-5-5": (4.0, 20.0, 0.20), "claude-opus-5": (5.0, 25.0, 0.50),
+    "claude-opus-4-8": (5.0, 25.0, 0.50), "claude-opus-4-7": (5.0, 25.0, 0.50), "claude-opus-4-6": (5.0, 25.0, 0.50),
+    "claude-sonnet-5-5": (2.0, 10.0, 0.10), "claude-sonnet-5": (2.0, 10.0, 0.20), "claude-sonnet-4-6": (3.0, 15.0, 0.30),
+    "claude-haiku-5-5": (0.10, 0.50, 0.01), "claude-haiku-4-5": (1.0, 5.0, 0.10),
+}
+
+
+def week_of(ts):
+    t = time.localtime(ts)
+    monday = time.mktime((t.tm_year, t.tm_mon, t.tm_mday - t.tm_wday, 12, 0, 0, 0, 0, -1))
+    return time.strftime("%Y-%m-%d", time.localtime(monday))
+
+
+def is_num(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and v == v and 0 <= v < BIG
+
+
+def tokens_and_cost(by_model):
+    tokens, cost = 0, 0.0
+    for model, u in (by_model or {}).items():
+        if not isinstance(u, dict):
+            continue
+        n = {k: (u.get(k) if is_num(u.get(k)) else 0) for k in
+             ("input", "output", "cache_read", "cache_write_5m", "cache_write_1h")}
+        tokens += int(sum(n.values()))
+        p = PRICES.get(re.sub(r"(\[1m\]|-\d{8})$", "", str(model)))
+        if p:
+            inp, out, read = p
+            cost += (n["input"] * inp + n["output"] * out + n["cache_read"] * read
+                     + n["cache_write_5m"] * inp * 1.25 + n["cache_write_1h"] * inp * 2) / 1e6
+    return tokens, round(cost, 4)
+
+
+# ---- the part that runs as the user --------------------------------------
+
+def open_dir(path, parent=None):
+    return os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+
+
+def read_small(dfd, name, limit):
+    try:
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dfd)
+    except OSError:
+        return None
+    try:
+        st = os.fstat(fd)
+        if not (st.st_mode & 0o170000 == 0o100000) or st.st_size > limit:
+            return None
+        with os.fdopen(fd, "rb", closefd=False) as f:
+            return f.read(limit + 1)
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+
+
+def scan_events(dfd, prev, owner, lab):
+    """New person-sent messages since prev {"ino", "off"}: ({week: {actor: n}}, ino, off)."""
+    got = {}
+    try:
+        fd = os.open("events.jsonl", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dfd)
+    except OSError:
+        return got, None, 0
+    try:
+        st = os.fstat(fd)
+        if st.st_mode & 0o170000 != 0o100000:
+            return got, None, 0
+        off = prev.get("off", 0) if prev.get("ino") == st.st_ino and prev.get("off", 0) <= st.st_size else 0
+        os.lseek(fd, off, os.SEEK_SET)
+        rest = b""
+        while True:
+            chunk = os.read(fd, READ_CHUNK)
+            if not chunk:
+                break
+            lines = (rest + chunk).split(b"\n")
+            rest = lines.pop()
+            for raw in lines:
+                off += len(raw) + 1
+                if b'"user_message"' not in raw:
+                    continue
+                try:
+                    e = json.loads(raw)
+                except ValueError:
+                    continue
+                if not isinstance(e, dict) or e.get("type") != "user_message" or e.get("moved_from") \
+                        or not is_num(e.get("ts")):
+                    continue
+                who = e.get("from")
+                actor = owner if who is None else who if who in lab else None
+                if actor is None:
+                    continue
+                w = got.setdefault(week_of(e["ts"]), {})
+                w[actor] = w.get(actor, 0) + 1
+        return got, st.st_ino, off
+    finally:
+        os.close(fd)
+
+
+def session_roots(home):
+    roots = [("c", os.path.join(home, "sandhome", ".aiza")), ("h", os.path.join(home, ".aiza-state", "sessions"))]
+    try:
+        with open(MAILBOX_CONFIG) as f:
+            d = str(json.load(f).get("dir") or "")
+        if d.startswith("~/") and d[2:].strip("/") and "/" not in d[2:].strip("/"):
+            roots.append(("m", os.path.join(home, d[2:].strip("/"), ".aiza")))
+    except (OSError, ValueError, AttributeError):
+        pass
+    return roots
+
+
+def scan_user(user, home, prev, lab):
+    out = []
+    for store, root in session_roots(home):
+        try:
+            rfd = open_dir(root)
+        except OSError:
+            continue
+        try:
+            for sid in sorted(os.listdir(rfd)):
+                if not SID_RE.match(sid):
+                    continue
+                try:
+                    dfd = open_dir(sid, rfd)
+                except OSError:
+                    continue
+                try:
+                    raw = read_small(dfd, "meta.json", META_MAX)
+                    try:
+                        meta = json.loads(raw) if raw else None
+                    except ValueError:
+                        meta = None
+                    if not isinstance(meta, dict):
+                        continue
+                    key = f"{store}/{sid}"
+                    p = prev.get(key) or {}
+                    msgs, ino, off = scan_events(dfd, p, user, lab)
+                    raw = read_small(dfd, "usage.json", USAGE_MAX)
+                    try:
+                        bm = (json.loads(raw) or {}).get("by_model") if raw else None
+                    except (ValueError, AttributeError):
+                        bm = None
+                    tokens, cost = tokens_and_cost(bm if isinstance(bm, dict) else {})
+                    out.append({"key": key, "sid": sid, "created": meta.get("created_ts"),
+                                "msgs": msgs, "ino": ino, "off": off, "tokens": tokens, "cost": cost})
+                finally:
+                    os.close(dfd)
+        finally:
+            os.close(rfd)
+    return out
+
+
+def as_user(pw, fn):
+    """fn() run in a child as that user; its JSON result, or None."""
+    r, w = os.pipe()
+    pid = os.fork()
+    if pid == 0:
+        try:
+            os.close(r)
+            os.setgroups([])
+            os.setgid(pw.pw_gid)
+            os.setuid(pw.pw_uid)
+            data = json.dumps(fn()).encode()
+            view = memoryview(data)
+            while view:
+                view = view[os.write(w, view):]
+            os._exit(0)
+        except BaseException:
+            os._exit(1)
+    os.close(w)
+    buf, deadline = b"", time.monotonic() + CHILD_TIMEOUT
+    try:
+        while True:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                os.kill(pid, signal.SIGKILL)
+                break
+            ready, _, _ = select.select([r], [], [], left)
+            if not ready:
+                continue
+            chunk = os.read(r, 1 << 20)
+            if not chunk:
+                break
+            buf += chunk
+    finally:
+        os.close(r)
+        _, status = os.waitpid(pid, 0)
+    if status != 0:
+        return None
+    try:
+        return json.loads(buf)
+    except ValueError:
+        return None
+
+
+# ---- root: merge, place under the tree, write ----------------------------
+
+def lab_members():
+    try:
+        g = grp.getgrnam(LAB_GROUP)
+    except KeyError:
+        return [], None
+    users = set(g.gr_mem)
+    for p in pwd.getpwall():
+        if p.pw_gid == g.gr_gid:
+            users.add(p.pw_name)
+    return sorted(users), g.gr_gid
+
+
+def tree_places():
+    """(user, session id) -> node id (lab-visible) or "private"."""
+    try:
+        with open(TREE_NODES) as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    nodes = data.get("nodes", data) if isinstance(data, dict) else data
+    nodes = nodes.values() if isinstance(nodes, dict) else nodes
+    out = {}
+    for n in nodes:
+        if not isinstance(n, dict) or not NODE_RE.match(str(n.get("id"))):
+            continue
+        sid = (n.get("links") or {}).get("session")
+        if not isinstance(sid, str) or not SID_RE.match(sid):
+            continue
+        who = n.get("session_owner") or n.get("owner")
+        out[(who, sid)] = n["id"] if n.get("visibility") == "lab" else "private"
+    return out
+
+
+def load_json(path, default):
+    try:
+        with open(path) as f:
+            v = json.load(f)
+        return v if isinstance(v, type(default)) else default
+    except (OSError, ValueError):
+        return default
+
+
+def write_json(path, obj, mode, gid=None):
+    tmp = path + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, mode)
+    try:
+        if gid is not None:
+            os.fchown(fd, 0, gid)
+        os.fchmod(fd, mode)
+        with os.fdopen(fd, "w", closefd=False) as f:
+            json.dump(obj, f, ensure_ascii=False, separators=(",", ":"))
+    finally:
+        os.close(fd)
+    os.replace(tmp, path)
+
+
+def merge(state, user, rows, lab, now_week):
+    """Fold one user's scan into the state: per session the place in the
+    events and the last token count; per (week, actor, owner, session) the
+    counts."""
+    seen = state.setdefault("sessions", {})
+    counts = state.setdefault("counts", {})
+    first = not state.get("since")
+
+    def add(week, actor, sid, k, v):
+        c = counts.setdefault(f"{week}|{actor}|{user}|{sid}", {})
+        c[k] = round(c.get(k, 0) + v, 4)
+
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict) or not SID_RE.match(str(row.get("sid"))) \
+                or not re.match(r"^[chm]/[0-9a-f]{12}$", str(row.get("key"))):
+            continue
+        sid, key = row["sid"], f"{user}/{row['key']}"
+        old = seen.get(key) or {}
+        for week, by in (row.get("msgs") or {}).items():
+            if not WEEK_RE.match(str(week)) or not isinstance(by, dict):
+                continue
+            for actor, n in by.items():
+                if actor in lab and is_num(n):
+                    add(week, actor, sid, "msgs", int(n))
+        if not old and is_num(row.get("created")):
+            add(week_of(row["created"]), user, sid, "sessions", 1)
+        tokens = row.get("tokens") if is_num(row.get("tokens")) else 0
+        cost = row.get("cost") if is_num(row.get("cost")) else 0
+        dt, dc = tokens - old.get("tokens", 0), cost - old.get("cost", 0)
+        if dt > 0 or dc > 0:
+            wk = "before" if first else now_week
+            if dt > 0:
+                add(wk, user, sid, "tokens", dt)
+            if dc > 0:
+                add(wk, user, sid, "cost", dc)
+        seen[key] = {"ino": row.get("ino") if is_num(row.get("ino")) else None,
+                     "off": row.get("off") if is_num(row.get("off")) else 0,
+                     "tokens": max(tokens, old.get("tokens", 0)), "cost": max(cost, old.get("cost", 0))}
+
+
+def main():
+    if os.geteuid() != 0:
+        sys.exit("aiza-usage-collect: run as root")
+    os.makedirs(OUT_DIR, mode=0o755, exist_ok=True)
+    state_path = os.path.join(OUT_DIR, "state.json")
+    state = load_json(state_path, {})
+    users, gid = lab_members()
+    lab = set(users)
+    now_week = week_of(time.time())
+    for user in users:
+        try:
+            pw = pwd.getpwnam(user)
+        except KeyError:
+            continue
+        if pw.pw_uid == 0 or not os.path.isdir(pw.pw_dir):
+            continue
+        prev = {k.split("/", 1)[1]: v for k, v in (state.get("sessions") or {}).items()
+                if k.startswith(user + "/")}
+        rows = as_user(pw, lambda: scan_user(user, pw.pw_dir, prev, lab))
+        if rows is None:
+            print(f"aiza-usage-collect: {user}: could not read", file=sys.stderr)
+            continue
+        merge(state, user, rows, lab, now_week)
+    if not state.get("since"):
+        state["since"] = time.time()
+    write_json(state_path, state, 0o600)
+
+    places = tree_places()
+    names = {}
+    for u in users:
+        try:
+            names[u] = (pwd.getpwnam(u).pw_gecos or "").split(",")[0][:40]
+        except KeyError:
+            pass
+    rows = []
+    for k, c in (state.get("counts") or {}).items():
+        week, actor, owner, sid = k.split("|")
+        rows.append({"week": week, "who": actor, "owner": owner,
+                     "node": places.get((owner, sid)), **c})
+    agg = {}
+    for r in rows:   # sessions themselves need not leave this host: sum them out
+        key = (r["week"], r["who"], r["owner"], r["node"])
+        a = agg.setdefault(key, {"week": r["week"], "who": r["who"], "owner": r["owner"], "node": r["node"]})
+        for k in ("msgs", "sessions", "tokens", "cost"):
+            if k in r:
+                a[k] = round(a.get(k, 0) + r[k], 4)
+    write_json(os.path.join(OUT_DIR, "usage.json"),
+               {"generated": time.time(), "since": state["since"], "names": names,
+                "rows": sorted(agg.values(), key=lambda a: (a["week"], a["who"], a["owner"], str(a["node"])))},
+               0o640, gid)
+
+
+if __name__ == "__main__":
+    main()

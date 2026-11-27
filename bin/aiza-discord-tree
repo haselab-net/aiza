@@ -1,0 +1,349 @@
+#!/usr/bin/env python3
+"""aiza-discord-tree -- a Discord channel for each shared root of the work
+tree, a thread in it for each branch right under the root (the deployment notes,
+the plan's Discord stage 2; the user agreed the shape on 2026-11-20).
+
+    aiza-discord-tree sync [--dry-run]    (root)
+
+Reads the tree (the store's nodes file) and the lab roster, and makes the lab
+server match:
+- a category for the tree, and one for what is over (done or no longer shared);
+- for each root shared with someone (lab, or members named), a text channel
+  in the category, seen only by who sees the root in aiza: the owner and the
+  members, or with "lab" everyone of the lab group -- those who have a
+  Discord ID in the roster. @everyone does not see it;
+- in it, a thread for each node right under the root, archived while that
+  node is done and opened again when it is not;
+- a root that is done, or no longer shared, or gone: its channel moves to the
+  "over" category. No longer shared or gone, only its owner keeps seeing it.
+Titles follow (channel and thread names); nothing is ever deleted.
+
+The channel's topic and each thread's first message link back to the node
+(/agents/#tree=<id>). The other way, the node -> its channel or thread link
+is written to LINKS (readable by the tree store, which hands it with the
+node to those who see it: the tree's 💬).
+
+The bot needs Manage Channels, Manage Roles (to set who sees a channel) and
+Manage Threads on the lab server; nobody is mentioned. The state (which
+channel is which node's) is root's, in STATE_DIR. Run by
+aiza-discord-tree.path whenever the tree or the roster changes; one run at a
+time (a lock), and a run reads everything afresh, so a missed trigger is
+made good by the next.
+"""
+import fcntl
+import importlib.machinery
+import importlib.util
+import json
+import os
+import re
+import socket
+import sys
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+
+
+def _load(name, path):
+    loader = importlib.machinery.SourceFileLoader(name, str(path))
+    mod = importlib.util.module_from_spec(importlib.util.spec_from_loader(name, loader))
+    loader.exec_module(mod)
+    return mod
+
+
+DM = _load("aiza_discord_dm", HERE / "aiza-discord-dm")        # roster, token, the HTTP call
+STORE = _load("aiza_tree_store", HERE / "aiza-tree-store")      # shared, in_lab, the nodes file
+
+STATE_DIR = Path(os.environ.get("AIZA_DISCORD_TREE_DIR", "/var/lib/aiza-discord-tree"))
+LINKS = STATE_DIR / "links.json"
+CATEGORY = "AI座の木"
+OVER = "AI座の木(済み)"
+NAME_MAX = 90
+LOG = Path("/var/log/aiza-discord-tree.log")
+
+# permission bits (Discord)
+VIEW, SEND, HISTORY = 1 << 10, 1 << 11, 1 << 16
+MANAGE_CHANNELS, MANAGE_THREADS = 1 << 4, 1 << 34
+PUBLIC_THREADS, IN_THREADS = 1 << 35, 1 << 38
+MEMBER = VIEW | SEND | HISTORY | PUBLIC_THREADS | IN_THREADS
+BOT = MEMBER | MANAGE_CHANNELS | MANAGE_THREADS
+
+
+def log(what):
+    try:
+        with LOG.open("a") as f:
+            f.write(json.dumps({"ts": int(time.time()), **what}) + "\n")
+    except OSError:
+        pass
+
+
+def name_of(title):
+    t = re.sub(r"[\x00-\x1f\x7f]", " ", str(title or "")).strip()
+    return (t or "無題")[:NAME_MAX]
+
+
+def link(nid):
+    host = os.uname().nodename.split(".")[0]
+    return f"https://{host}{DM.DOMAIN}/agents/#tree={nid}"
+
+
+def want(nodes, people, in_lab):
+    """{root id: {"name", "owner", "open", "viewers": [discord ids], "threads": {id: {"name", "open"}}}}:
+    what the server should have for the tree as it is now."""
+    did = {u: r["discord_id"] for u, r in people.items() if r.get("discord_id")}
+    out = {}
+    for r in nodes.values():
+        if r.get("parent") or not STORE.shared(r):
+            continue
+        if r.get("visibility") == "lab":
+            users = {u for u in did if in_lab(u)} | {r["owner"]}
+        else:
+            users = {r["owner"], *(r.get("members") or [])}
+        kids = sorted((n for n in nodes.values() if n.get("parent") == r["id"]),
+                      key=lambda n: (n.get("order", 0), n.get("created_ts", 0)))
+        out[r["id"]] = {
+            "name": name_of(r.get("title")),
+            "owner": did.get(r["owner"], ""),
+            "open": r.get("state") != "done",
+            "viewers": sorted(did[u] for u in users if u in did),
+            "threads": {k["id"]: {"name": name_of(k.get("title")), "open": k.get("state") != "done"} for k in kids},
+        }
+    return out
+
+
+class Discord:
+    def __init__(self, token):
+        self.token = token
+
+    def __call__(self, method, path, body=None):
+        for _ in range(5):
+            try:
+                return DM.call(self.token, method, path, body)
+            except urllib.error.HTTPError as e:
+                if e.code != 429:
+                    raise
+                try:
+                    wait = float(json.loads(e.read() or b"{}").get("retry_after", 1))
+                except ValueError:
+                    wait = 1.0
+                time.sleep(min(wait, 30) + 0.1)
+        raise RuntimeError("rate limited")
+
+
+def overwrites(guild, bot, viewers):
+    return ([{"id": guild, "type": 0, "allow": "0", "deny": str(VIEW)},
+             {"id": bot, "type": 1, "allow": str(BOT), "deny": "0"}]
+            + [{"id": v, "type": 1, "allow": str(MEMBER), "deny": "0"} for v in viewers if v != bot])
+
+
+def sync(api, state, wanted, dry=False, check=False):
+    """Make the server match `wanted`; `state` (what was made, and how it was
+    last set) is updated in place. Returns (what was done, the roots that
+    failed). Who sees what is narrowed first, for every root, before anything
+    else is made or renamed; a root that fails is logged and the others go on
+    (2026-11-24, the audit: one failing root used to stop the run, and the
+    roots after it kept people who should no longer see them). `check`: also
+    read each channel's overwrites and put them right where they differ from
+    what they should be (someone changed them by hand)."""
+    done, failed = [], []
+
+    def do(what, method, path, body=None):
+        done.append(what)
+        if dry:
+            return {"id": "dry-" + str(len(done))}
+        return api(method, path, body)
+
+    if not state.get("guild"):
+        guilds = api("GET", "/users/@me/guilds")
+        if len(guilds) != 1:
+            raise RuntimeError(f"the bot is in {len(guilds)} servers, not one")
+        state["guild"] = guilds[0]["id"]
+        state["bot"] = api("GET", "/users/@me")["id"]
+    guild, bot = state["guild"], state["bot"]
+    cats = state.setdefault("categories", {})
+    for key, name in (("tree", CATEGORY), ("over", OVER)):
+        if key not in cats:
+            cats[key] = do(f"category {key}", "POST", f"/guilds/{guild}/channels", {
+                "name": name, "type": 4, "permission_overwrites": overwrites(guild, bot, [])})["id"]
+    roots = state.setdefault("roots", {})
+
+    def each(rids, fn):
+        for rid in rids:
+            if rid in failed:
+                continue
+            try:
+                fn(rid)
+            except (urllib.error.URLError, OSError, RuntimeError, KeyError, ValueError) as e:
+                failed.append(rid)
+                log({"result": f"root-error:{type(e).__name__}:{getattr(e, 'code', '')}"})
+                if getattr(e, "code", None) == 404 and rid in roots and not dry:
+                    # its channel was deleted on Discord: made again by the next run
+                    roots.pop(rid)
+                    log({"result": "root-channel-missing"})
+
+    def retire(rid):
+        # no longer shared, or gone: over, and only its owner keeps seeing it
+        r = roots[rid]
+        if r.get("gone"):
+            return
+        viewers = [r["owner"]] if r.get("owner") else []
+        do(f"retire {rid}", "PATCH", f"/channels/{r['channel']}", {
+            "parent_id": cats["over"], "permission_overwrites": overwrites(guild, bot, viewers)})
+        r.update(gone=True, viewers=viewers, parent="over")
+
+    def narrow(rid):
+        # fewer people than before: their overwrites go now, before the rest
+        r, w = roots.get(rid), wanted[rid]
+        if r is None or r.get("gone") or not set(r.get("viewers") or []) - set(w["viewers"]):
+            return
+        do(f"channel {rid} narrow", "PATCH", f"/channels/{r['channel']}",
+           {"permission_overwrites": overwrites(guild, bot, w["viewers"])})
+        r["viewers"] = w["viewers"]
+
+    def recheck(rid):
+        # what Discord has, against what it should (a hand-made change)
+        r = roots.get(rid)
+        if r is None:
+            return
+        viewers = r.get("viewers") or []
+        want = {(o["id"], o["type"], o["allow"], o["deny"]) for o in overwrites(guild, bot, viewers)}
+        have = {(o.get("id"), o.get("type"), str(o.get("allow")), str(o.get("deny")))
+                for o in api("GET", f"/channels/{r['channel']}").get("permission_overwrites") or []}
+        if have != want:
+            do(f"channel {rid} overwrites", "PATCH", f"/channels/{r['channel']}",
+               {"permission_overwrites": overwrites(guild, bot, viewers)})
+
+    def make(rid):
+        w = wanted[rid]
+        r = roots.get(rid)
+        parent = "tree" if w["open"] else "over"
+        topic = f"{w['name']} — {link(rid)}"
+        if r is None:
+            ch = do(f"channel {rid}", "POST", f"/guilds/{guild}/channels", {
+                "name": w["name"], "type": 0, "parent_id": cats[parent], "topic": topic[:1024],
+                "permission_overwrites": overwrites(guild, bot, w["viewers"])})
+            r = roots[rid] = {"channel": ch["id"], "name": w["name"], "parent": parent,
+                              "viewers": w["viewers"], "owner": w["owner"], "threads": {}}
+        else:
+            change = {}
+            if r.get("name") != w["name"]:
+                change.update(name=w["name"], topic=topic[:1024])
+            if r.get("parent") != parent:
+                change["parent_id"] = cats[parent]
+            if r.get("viewers") != w["viewers"] or r.get("gone"):
+                change["permission_overwrites"] = overwrites(guild, bot, w["viewers"])
+            if change:
+                do(f"channel {rid} " + ",".join(sorted(change)), "PATCH", f"/channels/{r['channel']}", change)
+            r.update(name=w["name"], parent=parent, viewers=w["viewers"], owner=w["owner"])
+            r.pop("gone", None)
+        threads = r.setdefault("threads", {})
+        for tid, tw in w["threads"].items():
+            # a root that is over closes its threads too
+            is_open = tw["open"] and w["open"]
+            t = threads.get(tid)
+            if t is None:
+                th = do(f"thread {tid}", "POST", f"/channels/{r['channel']}/threads", {
+                    "name": tw["name"], "type": 11, "auto_archive_duration": 10080})
+                do(f"thread {tid} link", "POST", f"/channels/{th['id']}/messages", {
+                    "content": f"仕事の木の枝: {link(tid)}", "allowed_mentions": {"parse": []}})
+                t = threads[tid] = {"thread": th["id"], "name": tw["name"], "archived": False}
+            t.pop("moved", None)
+            change = {}
+            if t["name"] != tw["name"]:
+                change["name"] = tw["name"]
+            if t["archived"] == is_open:
+                change["archived"] = not is_open
+            if change and t["archived"] and "name" in change and "archived" not in change:
+                # an archived thread takes no other change: open it, rename, archive again
+                do(f"thread {tid} name", "PATCH", f"/channels/{t['thread']}", {"archived": False, "name": tw["name"]})
+                change = {"archived": True}
+            if change:
+                do(f"thread {tid} " + ",".join(sorted(change)), "PATCH", f"/channels/{t['thread']}", change)
+            t.update(name=tw["name"], archived=not is_open)
+        for tid in sorted(set(threads) - set(w["threads"])):
+            # moved away or removed: archived, kept, no longer linked
+            t = threads[tid]
+            if not t["archived"]:
+                do(f"thread {tid} archived", "PATCH", f"/channels/{t['thread']}", {"archived": True})
+                t["archived"] = True
+            t["moved"] = True
+
+    each(sorted(set(roots) - set(wanted)), retire)
+    each(sorted(set(wanted)), narrow)
+    if check:
+        each(sorted(roots), recheck)
+    each(list(wanted), make)
+    return done, failed
+
+
+def links(state):
+    """node id -> its channel or thread, for the tree's 💬 (open ones only)."""
+    g = state.get("guild")
+    out = {}
+    for rid, r in (state.get("roots") or {}).items():
+        if r.get("gone"):
+            continue
+        out[rid] = f"https://discord.com/channels/{g}/{r['channel']}"
+        for tid, t in (r.get("threads") or {}).items():
+            if not t.get("moved"):
+                out[tid] = f"https://discord.com/channels/{g}/{t['thread']}"
+    return out
+
+
+def write(path, data, mode):
+    tmp = path.with_suffix(".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+    with os.fdopen(fd, "w") as f:
+        f.write(json.dumps(data, ensure_ascii=False))
+    os.chmod(tmp, mode)
+    os.replace(tmp, path)
+
+
+def main(argv):
+    flags = argv[2:]
+    if os.geteuid() != 0 or len(argv) < 2 or argv[1] != "sync" or not set(flags) <= {"--dry-run", "--check"} \
+            or len(set(flags)) != len(flags):
+        print("usage: aiza-discord-tree sync [--dry-run] [--check]   (root)", file=sys.stderr)
+        return 2
+    dry, check = "--dry-run" in flags, "--check" in flags
+    STATE_DIR.mkdir(mode=0o700, exist_ok=True)
+    os.chmod(STATE_DIR, 0o700)   # also when it was there already
+    with open(STATE_DIR / "lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            state = json.loads((STATE_DIR / "state.json").read_text())
+        except (OSError, ValueError):
+            state = {}
+        try:
+            token = DM.TOKEN_FILE.read_text().strip()
+        except OSError:
+            token = ""
+        people = DM.roster()   # each with the Discord ID root approved (aiza-discord-dm ids)
+        if not token or not people:
+            log({"result": "no-token" if not token else "no-roster"})
+            return 0
+        pending = sum(1 for r in people.values() if r.get("pending"))
+        wanted = want(STORE.load(), people, STORE.in_lab)
+        try:
+            did, failed = sync(Discord(token), state, wanted, dry=dry, check=check)
+        except (urllib.error.URLError, OSError, RuntimeError, KeyError, ValueError) as e:
+            log({"result": f"error:{type(e).__name__}:{getattr(e, 'code', '')}"})
+            if not dry:
+                write(STATE_DIR / "state.json", state, 0o600)   # what was made before the error stays known
+            return 1
+        if dry:
+            for d in did:
+                print(d)
+            print(f"{len(did)} changes; {len(wanted)} shared roots; {len(failed)} failed; {pending} Discord IDs awaiting approval")
+            return 0
+        write(STATE_DIR / "state.json", state, 0o600)
+        write(LINKS, links(state), 0o600)
+        if did or failed or pending:
+            log({"result": "synced", "changes": len(did), "failed": len(failed), "pending": pending})
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

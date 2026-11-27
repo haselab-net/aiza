@@ -1,0 +1,667 @@
+#!/usr/bin/env python3
+"""aiza-discord-dm -- tell someone on Discord that a session was shared with
+them (the deployment notes). Run by the sharer's aiza backend through sudo:
+
+    sudo -n aiza-discord-dm share <to-user> <session-id>
+
+and by the work tree's store (root) when someone is newly named on a node:
+
+    aiza-discord-dm tree <from-user> <to-user> <node-id>
+
+(root only, not through sudo). It reads the node itself and sends only when
+<from-user> owns it and <to-user> is still named on it; the link opens that
+node in the tree (/agents/#tree=<id>).
+
+The roster and the bot's token are on one host only (the deployment notes,
+2026-11-21, the user chose: the token stays there). Elsewhere, `share` checks
+the share as above and leaves the notice in SPOOL (root's alone). The host
+with the roster runs `aiza-discord-dm pull-peers` (root, a timer, every
+minute): for each host in RELAY_PEERS it runs `sudo -n aiza-discord-dm
+spool-take` there over its own ssh, which prints the waiting notices and
+removes them, and sends each one as that host's, counted toward the
+sender's hourly limit. When it is run: a host that left a notice rings a
+doorbell on the roster host's web (DOORBELL_URL, a POST with nothing in
+it); nginx hands that to a socket where `aiza-discord-dm doorbell` (root,
+socket-activated) answers 204 and fetches -- at most once per
+DOORBELL_GAP seconds. Anyone may ring; it only makes this host look, and
+only what its own ssh brings back is believed. Nothing fetches on a
+schedule (the user: 取りこぼしへの配慮はなくして、エラーをなくしましょう):
+a ring is tried again until it is answered, a fetch that fails is tried
+again, and what still fails is logged (ring-failed, pull-failed).
+
+It acts for the caller only (SUDO_USER is the sender). It sends only when the
+caller's own session lists <to-user> among the people it is shared with, and
+it takes the title from that session, not from the caller. Who is who on
+Discord comes from the lab roster in the lab notes (one table; rows with an
+aiza user name and a Discord ID). The bot's token is root's alone. A few
+messages per sender per hour. Exit 0 when nothing needed sending (no roster
+row, no token): sharing must not fail because of this.
+
+It also serves `serve` (the deployment notes): the socket unit
+aiza-discord-dm.socket (/opt/aiza-ssh/discord-dm.sock, which containers see
+read-only; connect still works) starts one `aiza-discord-dm serve` per
+connection with the connection as stdin/stdout. The sender is the peer's uid
+(SO_PEERCRED; containers cannot change uid). One JSON line in
+{"to": [names], "text": "..."} or {"list": true}; one JSON line out. Each
+recipient gets a DM that starts with a mention of them and their name, then
+the sender's name, then the text; "@<name>" in the text becomes a mention of
+that roster member. Nobody is pinged by @everyone/@here or roles.
+"""
+import json
+import os
+import pwd
+import re
+import socket
+import stat
+import struct
+import subprocess
+import sys
+import time
+import unicodedata
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+ROSTER = Path(os.environ.get("AIZA_ROSTER", "/srv/labnotes/members.md"))
+TOKEN_FILE = Path("/etc/aiza/discord-bot.token")
+# Who is who on Discord, as root approved it (2026-11-24, after the audit: the
+# roster is writable by the whole lab, and a row naming someone else with
+# one's own Discord ID would have shown them that person's channels and
+# DMs). {unix name: Discord ID}, root's alone (0600). A roster's ID is only a
+# candidate: until `aiza-discord-dm approve <user>` takes it, the approved one
+# (or none) is used.
+APPROVED = Path(os.environ.get("AIZA_DISCORD_IDS", "/etc/aiza/discord-ids.json"))
+STATE = Path("/var/lib/aiza-discord-dm")
+LOG = Path("/var/log/aiza-discord-dm.log")
+API = "https://discord.com/api/v10"
+PER_HOUR = 20
+ID_RE = re.compile(r"^[a-f0-9]{8,32}$")
+USER_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
+SNOWFLAKE_RE = re.compile(r"^\d{15,21}$")
+NODE_RE = re.compile(r"^n[0-9a-f]{8,32}$")
+TREE_NODES = Path("/var/lib/aiza-tree/nodes.json")
+RELAY_PEERS = Path("/etc/aiza/discord-relay-peers")
+SPOOL = Path("/var/spool/aiza-discord-dm")
+SPOOL_MAX = 200
+DOORBELL_URL = Path("/etc/aiza/discord-doorbell-url")
+DOORBELL_GAP = 20
+DOORBELL_IDLE = 15
+RING_TRIES = (0, 2, 5, 10)      # seconds before each try; with the 8 s timeouts, under the caller's 60 s
+PULL_TRIES = 3
+HOST_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
+MODES = ("共同作業", "閲覧")
+
+# The hosts' domain for the links in a message ("host1" + ".example.org"): this
+# host's own (its name's part after the first dot), or AIZA_PUBLIC_DOMAIN.
+DOMAIN = "." + (os.environ.get("AIZA_PUBLIC_DOMAIN") or socket.getfqdn().partition(".")[2]).strip(".")
+
+
+def log(sender, to, result):
+    try:
+        with LOG.open("a") as f:
+            f.write(json.dumps({"ts": int(time.time()), "from": sender, "to": to, "result": result}) + "\n")
+    except OSError:
+        pass
+
+
+def approved_ids():
+    """{unix name: Discord ID} root approved (APPROVED); {} when there is none."""
+    try:
+        data = json.loads(APPROVED.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {u: d for u, d in data.items() if isinstance(u, str) and USER_RE.match(u)
+            and isinstance(d, str) and SNOWFLAKE_RE.match(d)}
+
+
+def roster():
+    """{unix name: {"name", "discord_name", "discord_id", "pending"}}: the
+    roster's rows, each with the Discord ID root approved for that name (not
+    the roster's own); "pending" when the roster names another, not yet
+    approved (`aiza-discord-dm ids`)."""
+    ok = approved_ids()
+    out = roster_rows()
+    for u, r in out.items():
+        r["pending"] = bool(r["discord_id"]) and r["discord_id"] != ok.get(u, "")
+        r["discord_id"] = ok.get(u, "")
+    return out
+
+
+def roster_rows():
+    """{unix name: {"name", "discord_name", "discord_id"}} from the roster's
+    table as it is written (anyone in the lab may write it: see APPROVED)."""
+    try:
+        lines = ROSTER.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return {}
+    out, cols = {}, None
+    for line in lines:
+        if not line.strip().startswith("|"):
+            cols = None
+            continue
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if cols is None:
+            if any("aiza" in c or "aigw" in c for c in cells) and any("Discord ID" in c for c in cells):  # aigw-legacy column name
+                cols = cells
+            continue
+        if set("".join(cells)) <= set("-: "):
+            continue
+        row = dict(zip(cols, cells))
+        unix = next((v for k, v in row.items() if "aiza" in k or "aigw" in k), "").strip("` ")
+        did = next((v for k, v in row.items() if "Discord ID" in k), "").strip("` ")
+        name = next((v for k, v in row.items() if k.startswith("名前")), "")
+        dname = next((v for k, v in row.items() if "Discord 名" in k), "").strip("` ")
+        if USER_RE.match(unix):
+            out[unix] = {"name": name, "discord_name": dname, "discord_id": did if SNOWFLAKE_RE.match(did) else ""}
+    return out
+
+
+def session_meta(user, sid):
+    """The user's own meta.json of that session, opened one folder at a time
+    from their home without following any link, and only when the file is
+    theirs (2026-11-24, the audit: a link on the way let root read another
+    user's session title into the caller's own DM)."""
+    pw = pwd.getpwnam(user)
+    for parts in ((".aiza-state", "sessions"), ("sandhome", ".aiza"), ("mailbox", ".aiza")):
+        fds = []
+        try:
+            fds.append(os.open(pw.pw_dir, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW))
+            for part in (*parts, sid):
+                fds.append(os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fds[-1]))
+            fd = os.open("meta.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fds[-1])
+            fds.append(fd)
+            st = os.fstat(fd)
+            if not stat.S_ISREG(st.st_mode) or st.st_uid != pw.pw_uid or st.st_size > 1 << 20:
+                continue
+            with os.fdopen(os.dup(fd), encoding="utf-8") as f:
+                return json.loads(f.read())
+        except (OSError, ValueError):
+            continue
+        finally:
+            for x in fds:
+                os.close(x)
+    return None
+
+
+def allowed(sender):
+    STATE.mkdir(mode=0o700, exist_ok=True)
+    p = STATE / f"{sender}.json"
+    now = time.time()
+    try:
+        times = [t for t in json.loads(p.read_text()) if now - t < 3600]
+    except (OSError, ValueError):
+        times = []
+    if len(times) >= PER_HOUR:
+        return False
+    p.write_text(json.dumps(times + [now]))
+    return True
+
+
+def call(token, method, path, body):
+    req = urllib.request.Request(API + path, data=None if body is None else json.dumps(body).encode(), method=method, headers={
+        "Authorization": "Bot " + token, "Content-Type": "application/json",
+        "User-Agent": "DiscordBot (https://github.com/haselab-net/aiza, 1)"})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        return json.loads(r.read() or b"{}")
+
+
+SAY_MAX_TO = 5
+SAY_MAX_TEXT = 1800
+
+
+def display(unix, row):
+    return (row or {}).get("name") or (row or {}).get("discord_name") or unix
+
+
+def find_member(people, key):
+    """aiza name, Discord name or the roster's name -> unix name."""
+    key = key.strip().lstrip("@")
+    if key in people:
+        return key
+    for unix, row in people.items():
+        if key and key in (row.get("discord_name"), row.get("name")):
+            return unix
+    return None
+
+
+def mentionize(people, text):
+    """"@<name>" of a roster member with a Discord ID -> <@id>. Returns (text, ids)."""
+    keys = []
+    for unix, row in people.items():
+        if row.get("discord_id"):
+            for k in {unix, row.get("discord_name") or "", row.get("name") or ""}:
+                if k:
+                    keys.append((k, row["discord_id"]))
+    ids = []
+    for k, did in sorted(keys, key=lambda kv: -len(kv[0])):
+        pat = re.compile("@" + re.escape(k) + r"(?![A-Za-z0-9_.-])")
+        if pat.search(text):
+            text = pat.sub(f"<@{did}>", text)
+            ids.append(did)
+    return text, ids
+
+
+def say(sender, req, people=None, token=None):
+    people = roster() if people is None else people
+    if req.get("list"):
+        return {"ok": True, "members": [
+            {"aiza": u, "name": display(u, r), "discord": r.get("discord_name") or ""}
+            for u, r in sorted(people.items()) if r.get("discord_id")]}
+    to = req.get("to") or []
+    text = req.get("text")
+    channel = req.get("channel")
+    if channel is not None and (not isinstance(channel, str) or not channel.strip()):
+        return {"ok": False, "error": "bad channel"}
+    if not isinstance(to, list) or (not to and not channel) or len(to) > SAY_MAX_TO \
+            or not all(isinstance(t, str) for t in to) or not isinstance(text, str) or not text.strip():
+        return {"ok": False, "error": f"need 1-{SAY_MAX_TO} recipients (or a channel) and a text"}
+    text = re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", " ", text).strip()[:SAY_MAX_TEXT]
+    if token is None:
+        try:
+            token = TOKEN_FILE.read_text().strip()
+        except OSError:
+            token = ""
+    if not token:
+        return {"ok": False, "error": "the bot has no token on this host"}
+    who = display(sender, people.get(sender))
+    body, ids = mentionize(people, text)
+    if channel:
+        return post_channel(sender, people, token, channel, to, who, body, ids)
+    sent, failed = [], {}
+    for t in to:
+        unix = find_member(people, t)
+        row = people.get(unix) if unix else None
+        if not row or not row.get("discord_id"):
+            failed[t] = "not in the lab roster with a Discord ID (labthe deployment notes)"
+            log(sender, unix or "?", "say-no-discord-id")
+            continue
+        if not allowed(sender):
+            failed[t] = "too many messages this hour"
+            log(sender, unix, "say-rate")
+            continue
+        dest = row["discord_id"]
+        content = f"<@{dest}> {display(unix, row)} さんへ — {who} さんより(AI座)\n{body}"
+        try:
+            ch = call(token, "POST", "/users/@me/channels", {"recipient_id": dest})
+            call(token, "POST", f"/channels/{ch['id']}/messages",
+                 {"content": content, "allowed_mentions": {"parse": [], "users": sorted(set(ids + [dest]))[:100]}})
+        except (urllib.error.URLError, OSError, KeyError, ValueError) as e:
+            failed[t] = f"Discord error ({type(e).__name__})"
+            log(sender, unix, f"say-error:{type(e).__name__}")
+            continue
+        log(sender, unix, "say-sent")
+        sent.append(unix)
+    return {"ok": not failed, "sent": sent, "failed": failed}
+
+
+def find_channel(token, name):
+    """A text channel of the lab server by name (with or without #) or ID."""
+    name = name.strip().lstrip("#")
+    guilds = call(token, "GET", "/users/@me/guilds", None)
+    for g in guilds:
+        for c in call(token, "GET", f"/guilds/{g['id']}/channels", None):
+            if c.get("type") in (0, 5) and name in (c.get("name"), c.get("id")):
+                return c
+    return None
+
+
+def post_channel(sender, people, token, channel, to, who, body, ids):
+    """the deployment notes: post in a channel. The recipients in `to` are mentioned at the top, by name."""
+    heads, failed = [], {}
+    for t in to:
+        unix = find_member(people, t)
+        row = people.get(unix) if unix else None
+        if not row or not row.get("discord_id"):
+            failed[t] = "not in the lab roster with a Discord ID (labthe deployment notes)"
+            continue
+        heads.append(f"<@{row['discord_id']}> {display(unix, row)} さん")
+        ids.append(row["discord_id"])
+    if failed:
+        return {"ok": False, "sent": [], "failed": failed}
+    if not allowed(sender):
+        log(sender, "#" + channel, "post-rate")
+        return {"ok": False, "error": "too many messages this hour"}
+    try:
+        ch = find_channel(token, channel)
+        if not ch:
+            log(sender, "#" + channel, "post-no-channel")
+            return {"ok": False, "error": f"no channel {channel!r} on the lab server"}
+        head = ("、".join(heads) + "へ — " if heads else "") + f"{who} さんより(AI座)"
+        call(token, "POST", f"/channels/{ch['id']}/messages",
+             {"content": f"{head}\n{body}", "allowed_mentions": {"parse": [], "users": sorted(set(ids))[:100]}})
+    except urllib.error.HTTPError as e:
+        log(sender, "#" + channel, f"post-error:{e.code}")
+        why = "the bot may not read or write that channel" if e.code in (403, 404) else f"HTTP {e.code}"
+        return {"ok": False, "error": f"Discord refused ({why})"}
+    except (urllib.error.URLError, OSError, KeyError, ValueError, TypeError) as e:
+        log(sender, "#" + channel, f"post-error:{type(e).__name__}")
+        return {"ok": False, "error": f"Discord error ({type(e).__name__})"}
+    log(sender, "#" + ch["name"], "post-sent")
+    return {"ok": True, "sent": ["#" + ch["name"]], "failed": {}}
+
+
+def serve():
+    conn = socket.socket(fileno=os.dup(0))
+    try:
+        uid = struct.unpack("3i", conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))[1]
+        conn.settimeout(10)
+        buf = b""
+        while not buf.endswith(b"\n") and len(buf) < 16384:
+            d = conn.recv(4096)
+            if not d:
+                break
+            buf += d
+        try:
+            sender = pwd.getpwuid(uid).pw_name
+        except KeyError:
+            sender = ""
+        if uid < 1000 or not USER_RE.match(sender):
+            out = {"ok": False, "error": "only lab accounts can send"}
+        else:
+            try:
+                req = json.loads(buf.decode("utf-8"))
+                out = say(sender, req) if isinstance(req, dict) else {"ok": False, "error": "bad request"}
+            except ValueError:
+                out = {"ok": False, "error": "bad request"}
+        conn.settimeout(30)
+        conn.sendall((json.dumps(out, ensure_ascii=False) + "\n").encode())
+    finally:
+        conn.close()
+    return 0
+
+
+def tree_node(nid):
+    try:
+        nodes = json.loads(TREE_NODES.read_text())
+    except (OSError, ValueError):
+        return None
+    n = nodes.get(nid) if isinstance(nodes, dict) else None
+    return n if isinstance(n, dict) else None
+
+
+def clean_title(t):
+    t = re.sub(r"[\x00-\x1f\x7f]", " ", str(t or ""))[:80]
+    return t.replace("@", "@\u200b").replace("`", "'")
+
+
+def send_dm(sender, to, people, text):
+    """The DM to <to>; 0 sent or nothing to send, 1 failed or over the limit."""
+    dest = (people.get(to) or {}).get("discord_id")
+    if not dest:
+        log(sender, to, "no-discord-id")
+        return 0
+    try:
+        token = TOKEN_FILE.read_text().strip()
+    except OSError:
+        token = ""
+    if not token:
+        log(sender, to, "no-token")
+        return 0
+    if not allowed(sender):
+        log(sender, to, "rate")
+        return 1
+    try:
+        ch = call(token, "POST", "/users/@me/channels", {"recipient_id": dest})
+        call(token, "POST", f"/channels/{ch['id']}/messages",
+             {"content": text, "allowed_mentions": {"parse": []}})
+    except (urllib.error.URLError, OSError, KeyError, ValueError) as e:
+        log(sender, to, f"error:{type(e).__name__}")
+        return 1
+    log(sender, to, "sent")
+    return 0
+
+
+def tree_share(sender, to, nid):
+    n = tree_node(nid)
+    if not n or n.get("owner") != sender or to not in (n.get("members") or []):
+        log(sender, to, "tree-not-shared")
+        return 1
+    people = roster()
+    who = (people.get(sender) or {}).get("name") or sender
+    host = os.uname().nodename.split(".")[0]
+    text = (f"AI座: {who} さんが、仕事の木の「{clean_title(n.get('title'))}」をあなたと共有しました。\n"
+            f"https://{host}{DOMAIN}/agents/#tree={nid}")
+    return send_dm(sender, to, people, text)
+
+
+def share_text(who, title, mode, host, sid):
+    return (f"AI座: {who} さんが、セッション「{clean_title(title)}」をあなたと共有しました({mode})。\n"
+            f"https://{host}{DOMAIN}/agents/#{sid}")
+
+
+def spool_put(req):
+    """On a host without the roster: leave the checked notice for pull-peers."""
+    try:
+        SPOOL.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if len(list(SPOOL.glob("*.json"))) >= SPOOL_MAX:
+            log(req["from"], req["to"], "spool-full")
+            return 1
+        p = SPOOL / f"{time.time():.6f}-{os.getpid()}.json"
+        fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(json.dumps(req, ensure_ascii=False))
+    except OSError as e:
+        log(req["from"], req["to"], f"spool-error:{type(e).__name__}")
+        return 1
+    log(req["from"], req["to"], "spooled")
+    return 0 if ring(req["from"], req["to"]) else 1
+
+
+def ring(sender="?", to="?"):
+    """Tell the roster's host there is something to fetch; nothing is sent with it."""
+    try:
+        url = DOORBELL_URL.read_text().strip()
+    except OSError:
+        log(sender, to, "ring-no-url")
+        return False
+    if not re.match(r"^https://[a-z0-9.-]+/[a-z0-9/_-]*$", url):
+        log(sender, to, "ring-bad-url")
+        return False
+    why = ""
+    for wait in RING_TRIES:
+        time.sleep(wait)
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, data=b"", method="POST"), timeout=8) as r:
+                if r.status == 204:
+                    return True
+                why = f"http-{r.status}"
+        except urllib.error.HTTPError as e:
+            why = f"http-{e.code}"
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            why = type(e).__name__
+    log(sender, to, f"ring-failed:{why}")
+    return False
+
+
+def doorbell():
+    """Socket-activated (fd 3, Accept=no): answer each ring, fetch, at most
+    once per DOORBELL_GAP seconds; exit after DOORBELL_IDLE quiet seconds."""
+    srv = socket.socket(fileno=3)
+    srv.settimeout(1.0)
+    rung, last_pull, quiet_since = False, 0.0, time.time()
+    while True:
+        try:
+            conn, _ = srv.accept()
+        except socket.timeout:
+            conn = None
+        if conn:
+            try:
+                conn.settimeout(2)
+                conn.recv(2048)
+                conn.sendall(b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n")
+            except OSError:
+                pass
+            finally:
+                conn.close()
+            rung, quiet_since = True, time.time()
+        now = time.time()
+        if rung and now - last_pull >= DOORBELL_GAP:
+            rung, last_pull = False, now
+            for i in range(PULL_TRIES):
+                if pull_peers() == 0:
+                    break
+                time.sleep(5 * (i + 1))
+            else:
+                log("?", "?", "pull-failed")
+            quiet_since = time.time()
+        if not rung and time.time() - quiet_since > DOORBELL_IDLE:
+            return 0
+
+
+def spool_take():
+    """Print the waiting notices (one JSON line each) and remove them."""
+    for p in sorted(SPOOL.glob("*.json")) if SPOOL.is_dir() else []:
+        try:
+            line = json.dumps(json.loads(p.read_text()), ensure_ascii=False)
+        except (OSError, ValueError):
+            line = None
+        if line:
+            print(line, flush=True)
+        p.unlink(missing_ok=True)
+    return 0
+
+
+def relay_one(host, req):
+    """A notice from <host>'s spool: checked again here, then sent."""
+    if not isinstance(req, dict):
+        return 2
+    sender, to, sid, mode = (req.get(k) for k in ("from", "to", "sid", "mode"))
+    if not (isinstance(sender, str) and USER_RE.match(sender) and sender != "root"
+            and isinstance(to, str) and USER_RE.match(to) and isinstance(sid, str) and ID_RE.match(sid)
+            and mode in MODES):
+        log("?", "?", "relay-refused")
+        return 2
+    people = roster()
+    who = (people.get(sender) or {}).get("name") or sender
+    return send_dm(sender, to, people, share_text(who, req.get("title"), mode, host, sid))
+
+
+def pull_peers():
+    try:
+        peers = RELAY_PEERS.read_text().split()
+    except OSError:
+        return 0
+    bad = 0
+    for host in peers:
+        if not HOST_RE.match(host):
+            continue
+        try:
+            r = subprocess.run(["ssh", "-n", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", host,
+                                "sudo -n /usr/local/sbin/aiza-discord-dm spool-take"],
+                               text=True, capture_output=True, timeout=60)
+        except (OSError, subprocess.TimeoutExpired):
+            bad = 1
+            continue
+        if r.returncode:
+            bad = 1
+        for line in r.stdout.splitlines()[:SPOOL_MAX]:
+            try:
+                relay_one(host, json.loads(line))
+            except ValueError:
+                log("?", "?", "relay-refused")
+    return bad
+
+
+def write_approved(ok):
+    tmp = APPROVED.with_suffix(".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump(ok, f, ensure_ascii=False, indent=1, sort_keys=True)
+    os.replace(tmp, APPROVED)
+
+
+def discord_name(did):
+    """What Discord calls that ID (its user name and display name), for root
+    to compare with the roster before approving; "" when it cannot be asked."""
+    try:
+        token = TOKEN_FILE.read_text().strip()
+        u = call(token, "GET", f"/users/{did}", None)
+    except (OSError, ValueError, urllib.error.URLError):
+        return ""
+    return " / ".join(printable(x) for x in (u.get("username"), u.get("global_name")) if x)
+
+
+def printable(text):
+    """Without control and format characters (Cc, Cf): what Discord or the
+    roster give is anyone's text, and these lines go to root's terminal."""
+    return "".join(c for c in str(text) if unicodedata.category(c) not in ("Cc", "Cf"))[:100]
+
+
+def ids(argv):
+    """root, on root's own terminal: `ids` -- each roster name, whether its
+    Discord ID is approved, and for one waiting: the roster's ID, the name
+    Discord gives that ID and the roster's Discord name, to check it is that
+    person's (2026-11-24, the audit: approving without seeing the ID took
+    whatever the roster said at that moment). `approve <user> <ID>` -- only
+    when the roster still names that very ID for that name. `revoke <user>`.
+    The log keeps who, what and the ID's last 4 digits."""
+    rows, ok = roster_rows(), approved_ids()
+    if argv[1] == "ids":
+        for u in sorted(set(rows) | set(ok)):
+            row = rows.get(u) or {}
+            did = row.get("discord_id", "")
+            state = ("approved" if did == ok[u] else "pending: changed in the roster" if did else "approved (not in the roster)") \
+                if u in ok else ("pending: new in the roster" if did else "")
+            if not state:
+                continue
+            if state.startswith("pending"):
+                state += f"\t{did}\tDiscord: {discord_name(did) or '?'}\troster: {printable(row.get('discord_name') or '-')}"
+            print(f"{u}\t{state}")
+        return 0
+    u = argv[2]
+    if argv[1] == "approve":
+        did = (rows.get(u) or {}).get("discord_id", "")
+        if not did or did != argv[3]:
+            print(f"{u}: the roster does not name that ID for {u} (now)", file=sys.stderr)
+            return 1
+        ok[u] = did
+    else:
+        did = ok.pop(u, "")
+    write_approved(ok)
+    log("root", u, f"{argv[1]} ...{did[-4:]}" if did else argv[1])
+    print(f"{u}: {argv[1]}d")
+    return 0
+
+
+def main(argv):
+    if len(argv) == 2 and argv[1] == "serve" and os.geteuid() == 0:
+        return serve()
+    # root's own approval of who is who (the members' sudo rule allows only `share`)
+    if os.geteuid() == 0 and (argv[1:] == ["ids"]
+                              or (len(argv) == 4 and argv[1] == "approve" and USER_RE.match(argv[2]) and SNOWFLAKE_RE.match(argv[3]))
+                              or (len(argv) == 3 and argv[1] == "revoke" and USER_RE.match(argv[2]))):
+        return ids(argv)
+    # root's own (members' sudo rule allows only `share`)
+    if len(argv) == 2 and argv[1] in ("pull-peers", "spool-take", "doorbell") and os.geteuid() == 0:
+        return {"pull-peers": pull_peers, "spool-take": spool_take, "doorbell": doorbell}[argv[1]]()
+    if len(argv) == 5 and argv[1] == "tree" and os.geteuid() == 0 and not os.environ.get("SUDO_USER"):
+        if not (USER_RE.match(argv[2]) and USER_RE.match(argv[3]) and NODE_RE.match(argv[4])):
+            return 2
+        return tree_share(argv[2], argv[3], argv[4])
+    if os.geteuid() != 0:
+        print("sudo aiza-discord-dm share <to-user> <session-id>", file=sys.stderr)
+        return 2
+    sender = os.environ.get("SUDO_USER") or ""
+    if len(argv) != 4 or argv[1] != "share" or not USER_RE.match(sender) or sender == "root" \
+            or not USER_RE.match(argv[2]) or not ID_RE.match(argv[3]):
+        print("usage: sudo aiza-discord-dm share <to-user> <session-id>", file=sys.stderr)
+        return 2
+    to, sid = argv[2], argv[3]
+    meta = session_meta(sender, sid)
+    if not meta or to not in (meta.get("shared_with") or []) + (meta.get("shared_read") or []):
+        log(sender, to, "not-shared")
+        return 1
+    mode = MODES[0] if to in (meta.get("shared_with") or []) else MODES[1]
+    host = os.uname().nodename.split(".")[0]
+    if not ROSTER.is_file():
+        return spool_put({"from": sender, "to": to, "sid": sid, "title": str(meta.get("label") or "")[:200],
+                          "mode": mode, "host": host})
+    people = roster()
+    who = (people.get(sender) or {}).get("name") or sender
+    return send_dm(sender, to, people, share_text(who, meta.get("label"), mode, host, sid))
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>aigw Tutorial: Try it with Docker</title>
+<title>AI-za Tutorial: Try it with Docker</title>
 <style>
   :root {
     --bg: #ffffff; --fg: #1d2330; --muted: #5b6575; --line: #dde2ea; --card: #f5f7fa;
@@ -70,13 +70,13 @@
 <body>
 <div class="wrap">
 
-<h1>aigw Tutorial: Try it with Docker</h1>
+<h1>AI-za Tutorial: Try it with Docker</h1>
 <nav class="langs" aria-label="Language"><a href="../docker.html" lang="ja">日本語</a><a href="docker.html" lang="en" class="here" aria-current="page">English</a><a href="../zh/docker.html" lang="zh-CN">简体中文</a></nav>
 <div class="editions"><a href="index.html">Start</a><a href="docker.html" class="here">Try with Docker</a><a href="basic.html">Basics</a><a href="advanced.html">Advanced</a></div>
 
-<p class="lead">How to run aigw in a single Docker container on your own PC (or a server you control) and try it out. No administrator needed: in about 15 minutes you can use shell and Claude Code sessions from your browser.</p>
+<p class="lead">How to run AI-za in a single Docker container on your own PC (or a server you control) and try it out. No administrator needed: in about 15 minutes you can use shell and Claude Code sessions from your browser.</p>
 
-<p>The Basics and Advanced parts describe a production server set up by an administrator (Google login, one container per user). This demo is a stand-in setup for running aigw for one person locally, and some features are not available (<a href="#limits">chapter 8</a>).</p>
+<p>The Basics and Advanced parts describe a production server set up by an administrator (Google login, one container per user). This demo is a stand-in setup for running AI-za for one person locally, and some features are not available (<a href="#limits">chapter 8</a>).</p>
 
 <nav class="toc">
 <strong>Contents</strong>
@@ -105,19 +105,19 @@
 
 <!-- ===================================================================== -->
 <h2 id="build">2. Get the code and build the image</h2>
-<pre><code>git clone https://github.com/haselab-net/aigw.git
-cd aigw
-docker build -f docker/Dockerfile -t aigw-demo .</code></pre>
-<p>This takes a few minutes (Debian, Python, tmux and the native build of Claude Code). Without Claude Code, <code>docker build --build-arg WITH_CLAUDE=0 -f docker/Dockerfile -t aigw-demo .</code> is smaller and faster.</p>
+<pre><code>git clone https://github.com/haselab-net/aiza.git
+cd aiza
+docker build -f docker/Dockerfile -t aiza-demo .</code></pre>
+<p>This takes a few minutes (Debian, Python, tmux and the native build of Claude Code). Without Claude Code, <code>docker build --build-arg WITH_CLAUDE=0 -f docker/Dockerfile -t aiza-demo .</code> is smaller and faster.</p>
 
 <!-- ===================================================================== -->
 <h2 id="run">3. Start it</h2>
-<pre><code>docker run -d --name aigw-demo -p 127.0.0.1:8878:8878 -v aigw-demo-home:/home/demo aigw-demo</code></pre>
+<pre><code>docker run -d --name aiza-demo -p 127.0.0.1:8878:8878 -v aiza-demo-home:/home/demo aiza-demo</code></pre>
 <div class="scroll"><table>
   <tr><th>Option</th><th>Meaning</th></tr>
-  <tr><td><code>-d --name aigw-demo</code></td><td>Run in the background, named <code>aigw-demo</code></td></tr>
+  <tr><td><code>-d --name aiza-demo</code></td><td>Run in the background, named <code>aiza-demo</code></td></tr>
   <tr><td><code>-p 127.0.0.1:8878:8878</code></td><td>Reachable on port <code>8878</code> from this PC only. <strong>Keep the <code>127.0.0.1:</code></strong> (without it, anyone on the same network can get into the demo)</td></tr>
-  <tr><td><code>-v aigw-demo-home:/home/demo</code></td><td>Keep the demo user's home (your files, the Claude Code login) in a Docker volume, so it survives recreating the container</td></tr>
+  <tr><td><code>-v aiza-demo-home:/home/demo</code></td><td>Keep the demo user's home (your files, the Claude Code login) in a Docker volume, so it survives recreating the container</td></tr>
 </table></div>
 <p>If port <code>8878</code> is taken, change the left number, e.g. <code>-p 127.0.0.1:18878:8878</code>, and use that number in the URLs below.</p>
 <div class="note"><strong>Running it on a remote server</strong>: do not publish the port; connect from your own PC with <code>ssh -L 8878:127.0.0.1:8878 &lt;server&gt;</code> and open it in your local browser.</div>
@@ -129,10 +129,10 @@ docker build -f docker/Dockerfile -t aigw-demo .</code></pre>
   <div class="side">
     <ol class="steps">
       <li>Open <code>http://localhost:8878/agents/</code> in your browser.</li>
-      <li>Press “<strong>Log in as the demo user</strong>” and the session list appears.</li>
+      <li>Press “<strong>Log in as the demo user</strong>” and the Work screen appears.</li>
     </ol>
     <div class="warn"><strong>The demo has no Google login.</strong> Anyone who can open this page becomes the single demo user (<code>demo</code>) and gets a shell inside the container. Do not let untrusted people use it, and do not keep untrusted pages open in the browser you logged into the demo with.</div>
-    <p>The login only works when opened as <code>localhost</code> or <code>127.0.0.1</code>. To open it under another name, add <code>-e AIGW_DEMO_HOSTS=name</code> to <code>docker run</code>.</p>
+    <p>The login only works when opened as <code>localhost</code> or <code>127.0.0.1</code>. To open it under another name, add <code>-e AIZA_DEMO_HOSTS=name</code> to <code>docker run</code>.</p>
     <p>Safari does not accept the login cookie over plain-http localhost, so after logging in you would land back on this page. Use Chrome, Edge or Firefox.</p>
   </div>
 </div>
@@ -140,45 +140,43 @@ docker build -f docker/Dockerfile -t aigw-demo .</code></pre>
 <!-- ===================================================================== -->
 <h2 id="shell">5. Use a shell session</h2>
 <div class="shot">
-  <figure><img src="img/22-docker-list.png" alt="The session list"><figcaption>The session list (after creating two)</figcaption></figure>
+  <figure><img src="img/22-docker-list.png" alt="The Work screen. Under the top row of buttons (＋ 🤖 AI and others), rows for a shell session and a Claude login session"><figcaption>The Work screen (after making two sessions)</figcaption></figure>
   <div class="side">
     <ol class="steps">
-      <li>In the top selector choose “<strong>Shell (inside sandbox)</strong>”, enter a name (or leave it empty) and press “<strong>Start</strong>”.</li>
-      <li>The session appears in the list. Tap its name to open it.</li>
+      <li>Press “<strong>＋ 🤖 AI</strong>” on the top row; the Start a session form opens right below it.</li>
+      <li>Set what to run to “<strong>Shell</strong>” and where to “<strong>devbox</strong>”, check the name (a suggestion is already filled in), and press “<strong>Start</strong>”.</li>
+      <li>The chat screen opens. Go back to Work with <code>←</code> and there is one more row. Press the row to open it again.</li>
     </ol>
-    <p>In the list, ✏️ renames, 🔗 connects it with another session (linking; see Advanced), 🗄 archives and 🗑 deletes. A session keeps running in the container until you stop it, so you can close the browser and pick it up later.</p>
+    <p>Of the places, only devbox works in the demo (host and root need the passkey unlock, which the demo does not have).</p>
+    <p>The ⋯ at the right of a row has rename, link to another session (Advanced), archive and delete. A session keeps running in the container until you stop it, and you can pick up where you left off even after closing the browser.</p>
   </div>
 </div>
 <div class="shot">
-  <figure><img src="img/23-docker-shell.png" alt="A shell session"><figcaption>After sending a command</figcaption></figure>
+  <figure><img src="img/23-docker-shell.png" alt="A shell session. The command you sent on the right, the output on the left"><figcaption>After sending a command</figcaption></figure>
   <div class="side">
     <ol class="steps">
-      <li>Type a command in the input box at the bottom and press “<strong>Run</strong>” (sends it with Enter). “Send” sends just the text, without Enter.</li>
-      <li>What you sent appears on the right and the terminal output on the left, like a chat.</li>
-      <li>The <kbd>Ctrl</kbd>, <kbd>Alt</kbd>, arrow and other buttons above the input box send special keys, even from a phone (<kbd>Ctrl</kbd> then <kbd>C</kbd>, for example).</li>
+      <li>Type a command in the box at the bottom and press “<strong>Run</strong>” (sends it with Enter). “Send” sends only the text, without Enter.</li>
+      <li>What you sent appears on the right and what the terminal printed on the left, like a chat.</li>
+      <li>The <kbd>Ctrl</kbd>, <kbd>Alt</kbd>, arrow and other buttons above the box send special keys, even from a phone (press <kbd>Ctrl</kbd>, then <kbd>C</kbd>, and so on).</li>
       <li>🖥️ at the top shows the terminal screen itself.</li>
     </ol>
-    <p>The shell runs inside the container as <code>demo</code>, with <code>/home/demo/sandhome</code> as its home (standing in for the per-user container of a production server).</p>
+    <p>The shell runs in the container as <code>demo</code>, with its home at <code>/home/demo/sandhome</code> (standing in for the “container of your own” on a real server).</p>
   </div>
 </div>
 
 <!-- ===================================================================== -->
 <h2 id="claude">6. Use Claude Code</h2>
 <div class="shot">
-  <figure><img src="img/24-docker-claude.png" alt="Claude Code's first screen"><figcaption>Claude Code on first start (screen opened with 🖥️)</figcaption></figure>
+  <figure><img src="img/24-docker-claude.png" alt="The “Claude ログイン” (Claude login) chat. Instructions at the top and the login URL below"><figcaption>The login chat that opens the first time you start Claude</figcaption></figure>
   <div class="side">
     <ol class="steps">
-      <li>Choose “<strong>Claude</strong>” in the top selector and press “<strong>Start</strong>”. The 📁 row below it picks a working folder (under <code>sandhome</code>).</li>
-      <li>Open the session and show the screen with 🖥️. <strong>The first time only</strong>, Claude Code asks for its setup:
-        <ul>
-          <li>Pick a text style: move with <kbd>↑</kbd> <kbd>↓</kbd> above the input box, and confirm with “Run” while the input box is empty.</li>
-          <li>Choosing a login method shows a URL. Open it in your browser, log in, paste the code it shows into the input box and press “Run”.</li>
-        </ul>
-      </li>
-      <li>From then on, write your instructions in the chat and press “Run”. Claude Code creates files and runs commands inside <code>sandhome</code>.</li>
+      <li>With “<strong>＋ 🤖 AI</strong>”, set what to run to “<strong>Claude</strong>” and where to “<strong>devbox</strong>” (the default pair) and press “<strong>Start</strong>”. The row with the gray <strong>&gt;_</strong> mark picks the working directory (under <code>sandhome</code>).</li>
+      <li><strong>The first time</strong>, Claude Code is not logged in yet, so a “<strong>Claude ログイン</strong>” (Claude login) chat opens instead. Tap the URL to open it in your browser, approve with your Claude account, then paste the code it shows into the chat’s input box and press “<strong>Run</strong>”.</li>
+      <li>Once logged in, start Claude again from “＋ 🤖 AI”. The first time, Claude Code may ask for some settings (such as the text style): open the screen with 🖥️, choose with <kbd>↑</kbd> <kbd>↓</kbd> above the input box, and press “Run” with the box empty.</li>
+      <li>From then on, just write instructions in the chat and press “Run”. Claude Code creates files and runs commands inside <code>sandhome</code>.</li>
     </ol>
-    <p>The login is stored under <code>/home/demo</code>, so with <code>-v aigw-demo-home:/home/demo</code> it survives recreating the container.</p>
-    <p>With “Skip permission prompts” ticked, Claude Code runs commands without asking each time. It only acts inside the container; untick it to be asked every time.</p>
+    <p>The login is kept in <code>/home/demo</code>, so with <code>-v aiza-demo-home:/home/demo</code> it survives recreating the container.</p>
+    <p>With “Don’t ask before each AI action” on, Claude Code runs commands without asking each time. It only acts inside the container, but if you turn it off it asks every time.</p>
   </div>
 </div>
 <p>Chapters 2, 3, 5 and 6 of <a href="basic.html">Basics</a> (the screens, key input, the chat and the terminal screen) apply as they are.</p>
@@ -187,20 +185,21 @@ docker build -f docker/Dockerfile -t aigw-demo .</code></pre>
 <h2 id="stop">7. Stopping, removing, and where your data lives</h2>
 <div class="scroll"><table>
   <tr><th>To</th><th>Command</th></tr>
-  <tr><td>Stop / start again</td><td><code>docker stop aigw-demo</code> / <code>docker start aigw-demo</code></td></tr>
-  <tr><td>Update to a new version</td><td><code>git pull</code>, then chapter 2's <code>docker build</code>, <code>docker rm -f aigw-demo</code>, and chapter 3's <code>docker run</code></td></tr>
-  <tr><td>Remove the container (keep the data)</td><td><code>docker rm -f aigw-demo</code></td></tr>
-  <tr><td>Remove the data too</td><td>The above, plus <code>docker volume rm aigw-demo-home</code></td></tr>
-  <tr><td>Get a shell in the container</td><td><code>docker exec -it -u demo aigw-demo bash</code></td></tr>
+  <tr><td>Stop / start again</td><td><code>docker stop aiza-demo</code> / <code>docker start aiza-demo</code></td></tr>
+  <tr><td>Update to a new version</td><td><code>git pull</code>, then chapter 2's <code>docker build</code>, <code>docker rm -f aiza-demo</code>, and chapter 3's <code>docker run</code></td></tr>
+  <tr><td>Remove the container (keep the data)</td><td><code>docker rm -f aiza-demo</code></td></tr>
+  <tr><td>Remove the data too</td><td>The above, plus <code>docker volume rm aiza-demo-home</code></td></tr>
+  <tr><td>Get a shell in the container</td><td><code>docker exec -it -u demo aiza-demo bash</code></td></tr>
 </table></div>
-<p>Your files are in <code>/home/demo/sandhome</code> (inside the <code>aigw-demo-home</code> volume). The session list and history are under <code>/home/demo</code> too, so keeping the volume lets you continue where you left off. Recreating the container logs you out; press “Log in as the demo user” again.</p>
+<p>Your files are in <code>/home/demo/sandhome</code> (inside the <code>aiza-demo-home</code> volume). The session list and history are under <code>/home/demo</code> too, so keeping the volume lets you continue where you left off. Recreating the container logs you out; press “Log in as the demo user” again.</p>
 
 <!-- ===================================================================== -->
 <h2 id="limits">8. What the demo cannot do</h2>
 <div class="scroll"><table>
   <tr><th>Feature</th><th>In the demo</th></tr>
   <tr><td>Google login, several users, self sign-up</td><td>None. There is one user, <code>demo</code></td></tr>
-  <tr><td>“Shell (outside sandbox, host)”, the root shell, passkeys</td><td>Not available (the passkey unlock is not installed). Buttons may show but fail</td></tr>
+  <tr><td>The “host” and “root” places, passkeys</td><td>Not available (the passkey unlock is not installed). They may be selectable but fail</td></tr>
+  <tr><td>The “mailbox” place</td><td>Not set up, so it does not appear</td></tr>
   <tr><td>Codex</td><td>Not in the image</td></tr>
   <tr><td>Other machines over ssh, the Windows machines board</td><td>Not shown (not configured)</td></tr>
   <tr><td>Phone notifications (Web Push)</td><td>Not sent (no keys)</td></tr>
@@ -217,7 +216,7 @@ docker build -f docker/Dockerfile -t aigw-demo .</code></pre>
   <li>To run a production setup, see “導入時に必要な設定” (setup) in the repository's <code>README.md</code>.</li>
 </ul>
 
-<footer>aigw Tutorial · Try it with Docker · 2026-11-14 · Screenshots taken at phone width, running this demo (<code>docker/</code>)</footer>
+<footer>AI-za Tutorial · Try it with Docker · 2026-11-27 · Screenshots taken at phone width, running this demo (<code>docker/</code>)</footer>
 </div>
 </body>
 </html>

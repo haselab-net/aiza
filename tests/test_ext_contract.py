@@ -59,6 +59,7 @@ class _ExtCase(unittest.TestCase):
         stubs = {
             "session_roots": lambda: [self.root],
             "SESSIONS_DIR": self.root,
+            "HOST_SESSIONS_DIR": self.root / "host-store",   # its own tree (the deployment notes)
             "_unlockd_call": lambda verb, **fields: {"ok": True, "unlocked": True, "tier": "root"},
             "list_tmux_sessions": lambda: [],
             "list_host_tmux_sessions": lambda: [],
@@ -198,9 +199,12 @@ class GatewayExtension(unittest.TestCase):
 # The core's files never name an extension's feature. Words that only an
 # extension uses; hexdigest/compare_digest are Python's own and fine.
 EXT_WORDS = re.compile(r"(?i)(?<![a-z_])(?<!hex)(?<!compare_)digest"
-                       r"|aigw_site_routes|site-extras|SiteExtras|SITE_CTX")   # the old site module (ext/site)
-CORE_FILES = ["bin/aigw-backend", "bin/aigw-gateway", "bin/aigw-reap-idle",
-              "static/app.js", "static/index.html", "static/i18n.js"]
+                       r"|aiza_site_routes|site-extras|SiteExtras|SITE_CTX")   # the old site module (ext/site)
+CORE_FILES = ["bin/aiza-backend", "bin/aiza-gateway", "bin/aiza-reap-idle",
+              "static/index.html", "static/i18n.js"]
+# The page's own scripts (the deployment notes): every static/*.js but sw.js.
+PAGE_SCRIPTS = sorted(p.name for p in (ROOT / "static").glob("*.js") if p.name != "sw.js")
+CORE_FILES += [f"static/{n}" for n in PAGE_SCRIPTS if n not in ("i18n.js", "ext.js")]
 
 
 class CorePurity(unittest.TestCase):
@@ -213,16 +217,19 @@ class CorePurity(unittest.TestCase):
         self.assertEqual(lines, [], f"{rel}: lines naming an extension's feature: {lines[:20]}")
 
     def test_backend(self):
-        self.check("bin/aigw-backend")
+        self.check("bin/aiza-backend")
 
     def test_gateway(self):
-        self.check("bin/aigw-gateway")
+        self.check("bin/aiza-gateway")
 
     def test_reap_idle(self):
-        self.check("bin/aigw-reap-idle")
+        self.check("bin/aiza-reap-idle")
 
-    def test_app_js(self):
-        self.check("static/app.js")
+    def test_page_scripts(self):
+        for n in PAGE_SCRIPTS:
+            if n not in ("i18n.js", "ext.js"):
+                with self.subTest(n):
+                    self.check(f"static/{n}")
 
     def test_index_html(self):
         self.check("static/index.html")

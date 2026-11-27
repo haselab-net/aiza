@@ -143,6 +143,10 @@ def cmd_login(_args):
     _save_token({"access_token": c.token, "refresh_token": c.refresh_token, "client_id": cfg["client_id"],
                  "client_secret": cfg["client_secret"], "scopes": SCOPES})
     print(f"Logged in. Token saved to {TOKEN_PATH} (0600)")
+    try:
+        print(f"Account: {_record_account()}")
+    except Exception as e:  # the login itself worked; only the note of which account is missing
+        print(f"(could not read the account: {e})")
 
 
 def service():
@@ -259,7 +263,21 @@ def _print(o):
 
 # ---- commands ----
 
+def _record_account():
+    """The primary calendar's id is the logged-in account's address: kept in
+    .gcal/account (the setup page shows it; organizer checks use it)."""
+    a = _exec(service().calendarList().get(calendarId="primary"))["id"]
+    p = MAILBOX_DIR / ".gcal" / "account"
+    fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=".account-")
+    with os.fdopen(fd, "w") as f:
+        f.write(a + "\n")
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, p)
+    return a
+
+
 def cmd_whoami(_args):
+    _record_account()
     c = _exec(service().calendarList().get(calendarId="primary"))
     _print({"calendar": c["id"], "timeZone": c.get("timeZone"), "accessRole": c.get("accessRole"),
             "scopes": json.loads(TOKEN_PATH.read_text()).get("scopes"), "token_path": str(TOKEN_PATH)})

@@ -1,0 +1,2 @@
+acorn 8.15.0 (dist/acorn.js and its LICENSE, MIT), for tests/page_scopes.js:
+the page tests parse static/*.js with it. Not served; the page does not use it.

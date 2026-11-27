@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""talkto "message" -- send a message to whichever aigw session (aigw
+"""talkto "message" -- send a message to whichever aiza session (aiza
 workspace doc, `the deployment notes`) this one is currently linked to.
 
-Deliberately explicit, not automatic: aigw does not relay everything this
+Deliberately explicit, not automatic: aiza does not relay everything this
 session says, only what is passed to this command.
 
-Talks to the backend by appending one JSON line to $AIGW_TALKTO -- a file
+Talks to the backend by appending one JSON line to $AIZA_TALKTO -- a file
 under this session's own directory, not a socket or a port, the same
-share-nothing-except-the-bind-mount trick $AIGW_OUTBOX already uses. Each
+share-nothing-except-the-bind-mount trick $AIZA_OUTBOX already uses. Each
 line carries an "id"; the backend appends what became of it to
 talkto_status.jsonl next to that file, and this waits for it and says so
 (2026-10-28). It never talks over the network itself.
@@ -18,11 +18,20 @@ the help and sends nothing; any other leading "-x" is an error, not a
 message (`--` ends the options); several words are joined with spaces;
 with no message argument (or "-"), the message is read from stdin.
 """
+import os as _aiza_os  # aigw-legacy: sessions started before the rename (2026-11-23) only have AIGW_*
+for _k in [k for k in _aiza_os.environ if k.startswith("AIGW_")]:
+    _aiza_os.environ.setdefault("AIZA_" + _k[5:], _aiza_os.environ[_k].replace("/.aigw/", "/.aiza/").replace("/.aigw-state/", "/.aiza-state/"))
 import json
 import os
 import secrets
 import sys
 import time
+from pathlib import Path
+_lib = Path(__file__).resolve().parent.parent / 'lib'
+if not (_lib / 'aiza_session_io.py').is_file():
+    _lib = Path('/opt/sandbox-shared/tools/lib')
+sys.path.insert(0, str(_lib))
+from aiza_session_io import open_output_directory, open_private, open_talkto
 
 WAIT_SECONDS = 12
 
@@ -32,17 +41,21 @@ HELP = """\
         複数行の文
         END
 
-aigw の「セッション連携」でこのセッションとつながっている相手のセッション
+aiza の「セッション連携」でこのセッションとつながっている相手のセッション
 (別の Claude Code など)に、文を1つ送ります。送られるのは talkto に渡した文だけで、
 あなたの応答が自動で転送されることはありません。
 3つ以上つながっているときは、ほかの全員に届きます(相手には誰からかが付きます)。
-1人だけに送るときは --to にその名前(aigw の一覧の名前)を付けます。
-相手のセッションが止まっていても連携は残り、再開されればまた送れます。
+1人だけに送るときは --to にその名前(aiza の一覧の名前)を付けます。
+相手はあとから加わったり、別の連携とまとめられたりします(そのとき知らせは来ません)。
+今つながっている相手の名前・種類・動いているかは talkto --list で分かります(何も送りません)。
+相手のセッションが止まっていても連携は残ります。devbox のセッションなら aiza が続きから
+再開して送ります(ホスト・root・Email など、再開に解錠が要るものは再開されるまで届きません)。
 
-送ったあと、aigw が転送した結果を最大{wait}秒待って表示します:
+送ったあと、aiza が転送した結果を最大{wait}秒待って表示します:
   届きました(…)            相手の入力欄に入った(終了コード 0)
+  …は止まっていたので…再開   相手を再開した。立ち上がったら入力に入る(終了コード 0)
   つながっている相手がいない…  連携が無い、または切れている(終了コード 1)
-  …は止まっているので…      相手が止まっている。再開されればまた送れる(終了コード 1)
+  …は止まっていて…          ここからは再開できない。再開されればまた送れる(終了コード 1)
   解錠が閉じている…          相手が sandbox の外で、解錠を待っている(終了コード 1)
   まだ確認できません          時間内に結果が来なかった。あとで届くことがあるので、
                              同じ文を送り直さないでください(終了コード 0)
@@ -51,6 +64,7 @@ aigw の「セッション連携」でこのセッションとつながってい
 オプション:
   -h, --help, -help   この説明を表示する(何も送らない)
   --to 名前           つながっている相手のうち、その名前の1人だけに送る
+  --list              今つながっている相手(--to に渡す名前・種類・動いているか)を表示する(何も送らない)
   --no-wait           結果を待たずに終わる
   -                   文を標準入力から読む(文の引数が無いときも同じ)
   --                  ここから後はオプションでなく文として扱う(- で始まる文を送るとき)
@@ -66,8 +80,12 @@ def usage_error(msg):
     return 2
 
 
+LIST = object()
+
+
 def parse(argv):
-    """(text or None to read stdin, no_wait, to) or an int exit code."""
+    """(text or None to read stdin, no_wait, to) or an int exit code; text
+    is LIST for `talkto --list`."""
     no_wait = False
     to = None
     words = []
@@ -80,6 +98,10 @@ def parse(argv):
         if a in ("-h", "--help", "-help"):
             print(HELP, end="")
             return 0
+        if a == "--list":
+            if len(argv) > 1:
+                return usage_error("--list にはほかの引数を付けられません")
+            return LIST, False, None
         if a == "--no-wait":
             no_wait = True
         elif a == "--to" or a.startswith("--to="):
@@ -110,7 +132,12 @@ def wait_for_status(status_path, item_id):
     deadline = time.time() + WAIT_SECONDS
     while time.time() < deadline:
         try:
-            with open(status_path) as f:
+            target = Path(status_path)
+            dfd = open_output_directory(target.parent)
+            try:
+                fd = open_private(dfd, target.name, os.O_RDONLY, allow_root=True, preserve_mode=True)
+            finally: os.close(dfd)
+            with os.fdopen(fd) as f:
                 for raw in f:
                     try:
                         obj = json.loads(raw)
@@ -118,7 +145,7 @@ def wait_for_status(status_path, item_id):
                         continue
                     if isinstance(obj, dict) and obj.get("id") == item_id:
                         return obj
-        except OSError:
+        except (OSError, ValueError):
             pass
         time.sleep(0.3)
     return None
@@ -129,28 +156,47 @@ def main():
     if isinstance(parsed, int):
         return parsed
     text, no_wait, to = parsed
-    path = os.environ.get("AIGW_TALKTO")
+    path = os.environ.get("AIZA_TALKTO")
     if not path:
-        print("talkto: $AIGW_TALKTO is not set -- this shell was not started by aigw, "
+        print("talkto: $AIZA_TALKTO is not set -- this shell was not started by AI-za, "
               "or this preset does not support session links", file=sys.stderr)
         return 1
-    if text is None:
+    if text is LIST:
+        item_id = secrets.token_hex(8)
+        item = {"ts": time.time(), "id": item_id, "list": True}
+    elif text is None:
         if sys.stdin.isatty():
             return usage_error("送る文がありません")
         text = sys.stdin.read()
-    if not text.strip():
-        return usage_error("送る文が空です")
-    item_id = secrets.token_hex(8)
-    item = {"ts": time.time(), "id": item_id, "text": text}
-    if to:
-        item["to"] = to
+    if text is not LIST:
+        if not text.strip():
+            return usage_error("送る文が空です")
+        item_id = secrets.token_hex(8)
+        item = {"ts": time.time(), "id": item_id, "text": text}
+        if to:
+            item["to"] = to
     line = json.dumps(item)
-    with open(path, "a") as f:
-        f.write(line + "\n")
-    if no_wait:
+    try:
+        target = Path(path)
+        if target.name != 'talkto_out.jsonl': raise ValueError('invalid target')
+        dfd = open_output_directory(target.parent)
+        try:
+            fd = open_talkto(dfd, os.O_WRONLY | os.O_APPEND | os.O_CREAT)
+            with os.fdopen(fd, 'a') as f: f.write(line + "\n")
+        finally: os.close(dfd)
+    except (OSError, ValueError):
+        print('talkto: セッションの送信先を安全に開けませんでした。', file=sys.stderr)
+        return 1
+    if no_wait and text is not LIST:
         print("talkto: 送りました(結果は待っていません)")
         return 0
     st = wait_for_status(os.path.join(os.path.dirname(path), "talkto_status.jsonl"), item_id)
+    if text is LIST:
+        if st is None:
+            print("talkto: 相手の一覧を受け取れませんでした(aiza の応答がありません)。", file=sys.stderr)
+            return 1
+        print(st.get("msg") or st.get("status"))
+        return 0 if st.get("status") == "list" else 1
     if st is None:
         print("talkto: 受け付けましたが、届いたかはまだ確認できません。あとで届くことがあるので、"
               "同じ文を送り直さないでください。")

@@ -2,10 +2,10 @@
 
 状態: **実装済み**(テストの pending は全部外した)。
 
-aigw 本体の分け方(`ext/README.md`)と同じ考え方にする:
+aiza 本体の分け方(`ext/README.md`)と同じ考え方にする:
 
 - **芯は、拡張が1つも無くても動く。** 芯 = まとめのページとサーバー、項目の置き場、設定の読み込み、
-  aigw への通知、aigw へのセッションの受け渡し、Gmail(API とコネクタ)、Google カレンダー(API)、手順書。
+  aiza への通知、aiza へのセッションの受け渡し、Gmail(API とコネクタ)、Google カレンダー(API)、手順書。
 - **拡張は、決まった口からだけ差し込む。** 拡張は `digest/private/` に置ける。**この写しには含まれていない。**
 - **純度のテストが、芯が拡張の名前を書いていないことを確かめる**(語の一覧は拡張の側にあり、無ければ飛ばす)。
 
@@ -23,7 +23,7 @@ email-digest/
     PROCEDURE.in.md  CLAUDE.in.md  prompts/regular.md  prompts/quick.md     型
     config.example.json  RULES.example.md  .claude/settings.json  .gitignore(組み立てた PROCEDURE.md・CLAUDE.md)
     server.mjs client.js speak.js conf.mjs lib.mjs digestconf.py add.mjs set-status.mjs item.mjs wait.mjs
-    autostart.mjs session-end.mjs done-sync.mjs quick-raw.mjs check-denials.py backfill.py ref-info.py gmail-link.py
+    autostart.mjs match.mjs watch.mjs keys.mjs cover.mjs session-end.mjs done-sync.mjs quick-raw.mjs check-denials.py backfill.py ref-info.py gmail-link.py
     run-check.sh quick-check.sh start.sh
     private/             拡張を置ける場所(この写しには無い)
 ```
@@ -56,7 +56,7 @@ email-digest/
 
 - `~/gmail.py`・`~/gcal.py`: `MAILBOX_DIR=<HOME>` を渡して共用のコピーの gmail.py・gcal.py を起動するだけのもの。
   シンボリックリンクにはしない(gmail.py は自分の場所(`__file__`)の隣にトークンを探すので、リンクだと共用のフォルダを見てしまう)。
-- `~/digest/<道具>`(add.mjs・set-status.mjs・item.mjs・wait.mjs・done-sync.mjs・autostart.mjs・conf.mjs・session-end.mjs・
+- `~/digest/<道具>`(add.mjs・set-status.mjs・item.mjs・wait.mjs・watch.mjs・done-sync.mjs・autostart.mjs・conf.mjs・session-end.mjs・
   quick-raw.mjs・backfill.py・ref-info.py・gmail-link.py・check-denials.py・run-check.sh・quick-check.sh・start.sh と、拡張が `entries` で足す名前):
   `DIGEST_DATA` を自分のフォルダにして、共用のコピーの同じ名前を同じ引数で起動するだけのもの(.mjs は node で、.py は python で、.sh は sh で動く形)。
 - 入口は1行目に「entries.mjs が作った入口。直さない」と書く。入口でないファイルは上書きしない(写し方式の本物のコードを守る)。
@@ -95,8 +95,13 @@ email-digest/
 | `markRead(items, ctx)` | done-sync.mjs | 既決にした項目を元の場所で片付ける。`ctx` = `{conf, DATA, load, mark, within, log}` |
 | `prepare` | run-check.sh・quick-check.sh | 読む前に動かすコマンド `[{cmd, timeout, when}]`(`when` は regular・quick・both) |
 | `quick` | quick-check.sh | 今すぐチェックの取り込み `[{out, cmd, slow}]`。`slow` は裏で走らせ、2段目の前に待つ |
+| `fetch` | run-check.sh | 定期チェックの取り込み(形は `quick` と同じ)。Claude より前に `<data>/in/` へ取り、終了コードが 0 でなければ `.failed-sources` |
 | `quickTag` | server.mjs | 「今すぐチェック(…)」のボタンの文字 |
 | `quickRaw(read)` | quick-raw.mjs | 1段目の速報の行 `{source,time,from,title,text,link}` |
+| `keys(item)` | keys.mjs(match.mjs・add.mjs) | 項目のスレッドの印の配列(取り込みの `key`・`dm` と照らす) |
+| `inbound(read)` | match.mjs | 取ってきたファイルの新着 `{key?, key2?, also?, dm?, time, from, text, link, forMe?, me?}`。`key` は機械で当てる印(当たらなければ `key2`)、`also` はそのメッセージ自身の印(当たったら項目の `marks` に残り、返信への返信も当たる)、`dm` は話題で決める会話(候補を Claude へ) |
+| `watch(items, conf)` | match.mjs | 新着の一覧に出ない返信を、項目のスレッドを見て足す(async。形は inbound と同じ) |
+| `fetched(read)` | cover.mjs | 回の後の点検の単位 `[{unit, id, needle, loose?}]`。`needle` が項目(link・refs・まとめの文)のどこにも無ければ「未処理」として数える。`loose` が対応不要のまとめ(`misc:noaction`)にだけ出ていれば、未処理ではなく「まとめに粗く」として別に数える |
 | `after` | run-check.sh・quick-check.sh | 終わってから動かすコマンド `{regular, quick}`(lock を放してから) |
 | `entries` | entries.mjs | 共用方式で箱に入口を作る道具の名前(`private/` からの相対) |
 
@@ -153,7 +158,7 @@ Claude が読む文書(`PROCEDURE.md`・`CLAUDE.md`)と claude -p への依頼�
 ## 6. テスト
 
 一つのコマンドで全部: `email-digest/` で `sh test.sh`(node の `node:test` と python の `unittest`)。偽のデータだけを使う。
-各テストは一時フォルダに `HOME/digest/`(コードの写し)・偽の `gmail.py`・偽の `~/.aigw/viewer.key`・偽の `local/config.json` と、
+各テストは一時フォルダに `HOME/digest/`(コードの写し)・偽の `gmail.py`・偽の `~/.aiza/viewer.key`・偽の `local/config.json` と、
 `claude`・`uuidgen`・`curl` の偽物を `PATH` の先頭に置いて動かす。外へは何も送らない。
 
 | ファイル | 中身 | 状態 |
@@ -166,6 +171,8 @@ Claude が読む文書(`PROCEDURE.md`・`CLAUDE.md`)と claude -p への依頼�
 | `test/require.test.mjs` | `ext.require`: 足りなければ conf check が 1、run-check.sh・quick-check.sh が claude を呼ばずに止まって知らせる、空・見出しだけの断片は足りない、壊れた拡張で止まる、書かなければ今どおり | 通る |
 | `test/entries.test.mjs` | 入口: `~/gmail.py` が `MAILBOX_DIR` を渡して共用の gmail.py を呼ぶ、`node ~/digest/item.mjs` が共用のコードを DATA で動かす、入口でないファイルは上書きしない、手で変えた入口は戻す、2回動かしても同じ | 通る |
 | `digest/private/test/`(この写しには無い) | 拡張がある形の写し取り | — |
+
+拡張の読む先を本物のアカウントで流す試し(`sh test.sh` には入らない。手で流す)は `digest/private/` の側にある(この写しには無い)。
 
 写し取り(golden)は分ける前のコードから `UPDATE_GOLDEN=1 sh test.sh` で作った。作り直さない。分けたことで変わってよい差は、テストの中の置き換えの表に書いてある。
 

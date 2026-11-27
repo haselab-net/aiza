@@ -7,8 +7,8 @@
 import fs from 'fs'; import path from 'path'; import { fileURLToPath } from 'url';
 const CODE = path.dirname(fileURLToPath(import.meta.url));
 const MARK = 'entries.mjs が作った入口。直さない';
-export const PUBLIC = ['add.mjs', 'set-status.mjs', 'item.mjs', 'wait.mjs', 'done-sync.mjs', 'autostart.mjs', 'conf.mjs', 'session-end.mjs', 'quick-raw.mjs',
-  'compose.mjs', 'backfill.py', 'ref-info.py', 'gmail-link.py', 'check-denials.py', 'run-check.sh', 'quick-check.sh', 'start.sh'];
+export const PUBLIC = ['add.mjs', 'set-status.mjs', 'set-prep.mjs', 'item.mjs', 'wait.mjs', 'watch.mjs', 'done-sync.mjs', 'autostart.mjs', 'conf.mjs', 'session-end.mjs', 'quick-raw.mjs',
+  'compose.mjs', 'setup.mjs', 'backfill.py', 'ref-info.py', 'gmail-link.py', 'check-denials.py', 'run-check.sh', 'quick-check.sh', 'start.sh'];
 const q = JSON.stringify;
 // reader: 読む先の道具(拡張の readers)の入口は、0 以外で終わったら <DATA>/.failed-sources に「<拡張の名前>: <道具> rc=<n>」を足す
 // (定期チェックが知らせて時刻を進めない。Claude が書き忘れても、落ちたことが残る)

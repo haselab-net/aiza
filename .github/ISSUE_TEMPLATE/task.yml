@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        起票すると Project「AIGW」に入る。Status・Worker・Area は Project 側で設定する。
+        起票すると Project「AIZA」に入る。Status・Worker・Area は Project 側で設定する。
         大きな作業の一部なら、起票後に親 Issue の「Sub-issues」からこの Issue をぶら下げる。
   - type: textarea
     id: goal

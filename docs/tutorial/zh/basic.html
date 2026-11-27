@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>aigw 教程</title>
+<title>AI座 教程</title>
 <style>
   :root {
     --bg: #ffffff; --fg: #1d2330; --muted: #5b6575; --line: #dde2ea; --card: #f5f7fa;
@@ -70,14 +70,13 @@
 <body>
 <div class="wrap">
 
-<h1>aigw 教程 基础篇</h1>
+<h1>AI座 教程 基础篇</h1>
 <nav class="langs" aria-label="Language"><a href="../basic.html" lang="ja">日本語</a><a href="../en/basic.html" lang="en">English</a><a href="../zh/basic.html" lang="zh-CN" class="here" aria-current="page">简体中文</a></nav>
 <div class="editions"><a href="index.html">入口</a><a href="docker.html">用 Docker 试用</a><a href="basic.html" class="here">基础篇</a><a href="advanced.html">进阶篇</a></div>
-<div class="note">聊天、终端、设置和共享界面的截图显示的是日文界面。aigw 本身可以在 设置 → 语言 中切换为简体中文。</div>
 
 <p class="lead">这是一份指南，介绍如何在手机或电脑的浏览器中使用服务器上的 AI 代理（Claude Code 等）。基础篇说明从创建账号到能够进行日常 AI 编程的过程。各服务器安装的功能略有不同，不清楚的地方请向管理员确认。</p>
 
-<p>aigw 是在 <code>https://&lt;サーバー&gt;/agents/</code> 打开的聊天式界面。你在聊天中写下的指令，会发送给在服务器上你专属容器中运行的 Claude Code，回复会返回到聊天中。</p>
+<p>AI座 是在 <code>https://&lt;サーバー&gt;/</code> 打开的聊天式界面。你在聊天中写下的指令，会发送给在服务器上你专属容器中运行的 Claude Code，回复会返回到聊天中。</p>
 
 <nav class="toc">
 <strong>目录</strong>
@@ -91,15 +90,15 @@
   <li><a href="#faq">遇到问题时</a></li>
 </ol>
 </nav>
-<p>文件夹、巡览、通知、通行密钥、主机和 root 的 shell、其他机器等内容在<a href="advanced.html">进阶篇</a>中。</p>
+<p>文件夹与工作树、按轮次、巡览、通知、通行密钥、主机和 root 的会话、其他机器等内容在<a href="advanced.html">进阶篇</a>中。</p>
 
 <!-- ===================================================================== -->
 <h2 id="account">1. 创建账号</h2>
 
-<p>如果你有管理员允许的域名下的 Google 账号，就可以在 aigw 界面上自己创建账号（仅限启用了此功能的服务器）。否则请让管理员为你创建。</p>
+<p>如果你有管理员允许的域名下的 Google 账号，就可以在 AI座 界面上自己创建账号（仅限启用了此功能的服务器）。否则请让管理员为你创建。</p>
 
 <ol class="steps">
-  <li>在浏览器中打开 <code>https://&lt;サーバー&gt;/agents/</code>，通过“使用 Google 登录”选择<strong>允许的域名下的账号</strong>。</li>
+  <li>在浏览器中打开 <code>https://&lt;サーバー&gt;/</code>，通过“使用 Google 登录”选择<strong>允许的域名下的账号</strong>。</li>
   <li>如果还没有账号，会出现“创建账号”的表单。确定<strong>用户名</strong>后提交。
     <ul>
       <li>可用字符为小写英文字母、数字、<code>-</code>、<code>_</code>。开头必须是小写英文字母或 <code>_</code>。最多 32 个字符。</li>
@@ -107,12 +106,12 @@
     </ul>
   </li>
   <li>提交后，<strong>SSH 私钥只会显示一次</strong>。关闭界面前请务必保存。它不会再次显示。</li>
-  <li>这样就可以使用 aigw 了。下次起只需用 Google 登录即可。</li>
+  <li>这样就可以使用 AI座 了。下次起只需用 Google 登录即可。</li>
 </ol>
 
 <h3>设置 SSH 登录（注册通行密钥时需要）</h3>
-<p>如果只用 aigw，则不需要 SSH。不过，<a href="advanced.html#passkey">注册用于 Email 和主机 shell 的通行密钥</a>需要用 SSH 登录一次，所以尽早完成会比较省事。请根据你使用的电脑，按下面其中一种步骤操作。</p>
-<div class="note">有些服务器只接受来自组织内部网络的 SSH。这种情况下，从外部 SSH 时，请先按管理员指引的方法进入内部网络。aigw 的界面（浏览器）在外部也可以直接使用。</div>
+<p>如果只用 AI座，则不需要 SSH。不过，<a href="advanced.html#passkey">注册用于 mailbox 和主机会话的通行密钥</a>需要用 SSH 登录一次，所以尽早完成会比较省事。请根据你使用的电脑，按下面其中一种步骤操作。</p>
+<div class="note">有些服务器只接受来自组织内部网络的 SSH。这种情况下，从外部 SSH 时，请先按管理员指引的方法进入内部网络。AI座 的界面（浏览器）在外部也可以直接使用。</div>
 
 <h4>Mac、Linux，以及 Windows 的 MSYS2（Git Bash 也一样）</h4>
 <pre><code># 在自己的电脑上：保存收到的密钥并收紧权限
@@ -142,76 +141,130 @@ ssh -i $key <ユーザー名>@&lt;サーバー&gt;</code></pre>
 <p>在这次首次登录设置密码之前，密码处于谁都无法使用的状态。从第二次起用同样的命令即可登录。</p>
 
 <h4>不必每次都写 <code>-i</code></h4>
-<p>把以下内容写进配置文件，只需 <code>ssh aigw</code> 就能登录。配置文件在 Mac、Linux、MSYS2 中是 <code>~/.ssh/config</code>，在 Windows 自带的 OpenSSH 中是 <code>C:\Users\&lt;Windowsの名前&gt;\.ssh\config</code>（无扩展名）。<code>IdentityFile</code> 中的 <code>~</code> 在两者中都会被 <code>ssh</code> 解释为自己的主目录。</p>
-<pre><code>Host aigw
+<p>把以下内容写进配置文件，只需 <code>ssh aiza</code> 就能登录。配置文件在 Mac、Linux、MSYS2 中是 <code>~/.ssh/config</code>，在 Windows 自带的 OpenSSH 中是 <code>C:\Users\&lt;Windowsの名前&gt;\.ssh\config</code>（无扩展名）。<code>IdentityFile</code> 中的 <code>~</code> 在两者中都会被 <code>ssh</code> 解释为自己的主目录。</p>
+<pre><code>Host aiza
     HostName &lt;サーバー&gt;
     User <ユーザー名>
     IdentityFile ~/.ssh/id_ed25519_<ユーザー名></code></pre>
 
-<div class="note">如果用管理员创建的账号无法登录 aigw，请用 SSH 登录后执行一次 <code>aigw-set-email you@example.com</code>。之后就可以用该邮箱地址的 Google 账号登录了。</div>
+<div class="note">如果用管理员创建的账号无法登录 AI座，请用 SSH 登录后执行一次 <code>aiza-set-email you@example.com</code>。之后就可以用该邮箱地址的 Google 账号登录了。</div>
 
 <!-- ===================================================================== -->
 <h2 id="screens">2. 界面说明</h2>
 
-<p>aigw 的界面有“会话列表”和“聊天”两个。会话是指在服务器上持续运行的一个工作场所（Claude Code 或 shell）。</p>
+<p>AI座 界面顶部有三个标签页：<strong>工作</strong>（会话和工作树）、<strong>新消息</strong>（邮件等新消息的汇总，仅限使用此功能的人）、<strong>设置</strong>。会话是指在服务器上持续运行的一个工作场所（Claude Code 或 shell），打开后就是<strong>聊天</strong>界面。在浏览器中打开 <code>https://&lt;サーバー&gt;/</code> 会显示“工作”。</p>
 
-<h3>会话列表（首页）</h3>
+<h3>工作（首页）</h3>
 <div class="shot">
-  <figure><img src="../img/01-top.png" alt="aigw 的首页。顶部是机器选择和用户名，下面是新建会话的创建栏和会话列表"><figcaption>首页。在上方的创建栏中选择了“Claude”</figcaption></figure>
+  <figure><img src="img/01-top.png" alt="AI座 的工作界面。顶部是标签页（工作、设置），下面是视图标签页（树、按轮次、周、使用）、工具行、显示内容的切换，文件夹“研究”中有工作树“准备学会”和会话"><figcaption>工作的 🌳 树。文件夹“研究”中放着工作树（🌳）和会话</figcaption></figure>
   <div class="side">
     <table>
       <tr><th>位置</th><th>含义</th></tr>
-      <tr><td><code>server</code> 选择栏</td><td>在哪台机器上运行（如果有通过 ssh 连接的其他机器，会列在这里）。<strong>设置</strong>界面也从这里选择</td></tr>
-      <tr><td>用户名</td><td>点按即退出登录</td></tr>
-      <tr><td><code>Doc</code></td><td>阅读服务器文档的界面（有的服务器没有）</td></tr>
-      <tr><td>🔍 📋 🔔</td><td>搜索聊天、Windows 机器黑板、通知列表（<a href="advanced.html">进阶篇</a>）</td></tr>
-      <tr><td><code>⟳</code></td><td>重新加载（在顶部栏向下滑动也一样）</td></tr>
-      <tr><td>🔑 / 🔓</td><td>用通行密钥解锁中的标志。🔑 表示解锁到主机，🔓 表示解锁到 root。点按立即锁定</td></tr>
-      <tr><td>创建栏</td><td>选择类型、文件夹、名称后点<strong>开始</strong></td></tr>
-      <tr><td>名称前的图标</td><td>会话的类型。🛠️ 沙箱（日常的 Claude 等）、📫 Email、🏠 主机、🔒 root、💻 通过 ssh 连接的其他机器</td></tr>
-      <tr><td>📁 行</td><td>文件夹。点按展开或收起（<a href="advanced.html#folders">进阶篇</a>）</td></tr>
+      <tr><td>标志</td><td>什么是 AI座（说明）</td></tr>
+      <tr><td>工作、新消息、设置</td><td>标签页。“工作”上的数字是“轮到你”的数量。浏览器的“返回”不会在标签页之间切换</td></tr>
+      <tr><td>📖</td><td>阅读服务器文档的界面（有的服务器没有）</td></tr>
+      <tr><td>麦克风</td><td>朗读 / 语音模式（<a href="advanced.html">进阶篇</a>）</td></tr>
+      <tr><td>🌳 树、🙋 按轮次、📅 周、📊 使用</td><td>工作的视图。🌳 树显示文件夹、工作树和会话，🙋 按轮次是按轮到谁排列的列表（<a href="advanced.html#tree">进阶篇</a>）</td></tr>
+      <tr><td>＋ 🤖 AI</td><td>开始新会话（<a href="#coding">第 3 章</a>）</td></tr>
+      <tr><td>＋ 📁 / ＋ 🌳</td><td>新建文件夹 / 新建工作（树）。选中了树的分支时，在它下面添加分支</td></tr>
+      <tr><td>🔍 搜索</td><td>搜索聊天内容</td></tr>
+      <tr><td>↕</td><td>排序。拖动行左侧的 ⠿，把它移到文件夹或树的项目中（<a href="advanced.html#folders">进阶篇</a>）</td></tr>
+      <tr><td>＋ 或 ↕ 的下方</td><td>所按按钮的输入栏会在工具行正下方打开，所按的按钮显示蓝框。再按一次同一按钮或按 <kbd>Esc</kbd> 关闭</td></tr>
+      <tr><td>显示</td><td>全部 / 🙋 轮到你 / ⏳ 停滞 3 天。勾选“也显示已停止的会话”会把已停止的会话也显示出来</td></tr>
+      <tr><td>文件夹、树的行</td><td><strong>按一次是选中</strong>（边框发蓝光）。<strong>再按一次选中的行是展开 / 收起</strong>（按 📁 或 🌳 右下角的 ▶/▼ 也能展开收起）。工具行的 ＋ 会在选中的文件夹或分支中创建</td></tr>
+      <tr><td>📁、🌳</td><td>📁 是文件夹，🌳 是工作树的根。右下角的小标记：▶ 已收起、▼ 已展开（树的 ▽ 表示连已完成的分支也显示）。🌳 左下角的 🔒 表示没有与任何人共享的树。嵌套用边框围起来表示。灰色的 <strong>&gt;_</strong> 标记是<strong>目录</strong>（服务器上的位置，如工作目录），与 AI座 的文件夹不同</td></tr>
+      <tr><td>名称前的图标</td><td>会话运行的位置。🛠️ devbox（日常的 Claude 等）、📫 mailbox、🏠 主机、🔒 root、💻 通过 ssh 连接的其他机器（行的第二行显示 🖥 机器名）</td></tr>
       <tr><td>每行的 ● </td><td>绿色表示运行中，灰色表示已停止的会话。<strong>点按绿色的会停止，点按带蓝色圆环的灰色的会继续</strong>（都会弹出确认）</td></tr>
-      <tr><td>⠿ ✏️ 🔗 🗄 🗑</td><td>排序、重命名、与其他会话连接、归档（只是从列表中隐藏）、删除</td></tr>
-      <tr><td>👥 共享记录</td><td>别人共享给你的会话。按所有者分别放在各自的文件夹中（<a href="#share">第 4 章</a>）</td></tr>
+      <tr><td>行右侧的 ⋯</td><td>会话：重命名、与其他会话联动、归档（只是从列表中隐藏）、删除。文件夹：重命名、工作目录、共享整个文件夹、归档、删除（仅限空文件夹）。树的分支：标为完成、共享等（<a href="advanced.html#tree">进阶篇</a>）</td></tr>
+      <tr><td>最下方</td><td>🗄 归档、🧑‍🤝‍🧑 共享记录（别人共享给你的会话，<a href="#share">第 4 章</a>）、🖥 机器（Windows 机器黑板）</td></tr>
     </table>
+  </div>
+</div>
+
+<h3 id="tree-intro">工作树(概要)</h3>
+<p><strong>工作树</strong>把一项工作(例如“准备学会”)分成若干分支(“练习报告”“准备答疑”…)来写，并让每个分支都能看出<strong>现在轮到谁</strong>(🙋 人・🤖 AI・💤 等待・✓ 完成)。用于查看人和 AI 一起推进的工作卡在哪里。</p>
+<ul>
+  <li><strong>在哪里</strong>: 在工作的 🌳 树中，带 🌳 的行就是树的根(上图中的“准备学会”“整理实验数据”)。树可以放在文件夹里。用上方一排的“＋ 🌳”创建。</li>
+  <li><strong>与会话相连</strong>: 分支可以关联会话。关联的会话显示在分支下方，分支的轮次会随会话的状态(等待确认・工作中・完成等)自动变化。选中分支后用“＋ 🤖 AI”开始的会话会关联到该分支。Claude 也会在会话中自己添加分支或标记完成。</li>
+  <li><strong>共享树时</strong>: 能看到树的人，可以以只读方式打开树上关联的 <strong>devbox</strong> 会话(自动共享)。mailbox、主机、root 的会话不会通过树共享，想让别人看时请另外共享(<a href="#share">第 4 章</a>)。</li>
+</ul>
+<p>分支的创建方法、🧭 负责与 🤝 协助、谁能看到树等，见<a href="advanced.html#tree">进阶篇</a>。</p>
+
+<h3>设置</h3>
+<div class="shot">
+  <figure><img src="img/07-settings.png" alt="设置界面。显示（显示语言）、AI 登录（Claude、Codex、其他机器按位置分行）、朗读与语音的卡片"><figcaption>设置标签页。devbox 和 gpu-1 的 Claude 已登录，其他还没有</figcaption></figure>
+  <div class="side">
+    <p>卡片纵向排列：<strong>显示</strong>（显示语言）、<strong>AI 登录</strong>、<strong>朗读与语音</strong>、<strong>通知</strong>（是否通知此设备）、<strong>账户</strong>（退出登录）。</p>
+    <p><strong>请先在 AI 登录卡片中登录 devbox 的 Claude</strong>（<a href="#login">见下文“登录 Claude”</a>）。在没有登录的位置，Claude 无法运行。</p>
   </div>
 </div>
 
 <h3>聊天界面</h3>
 <div class="shot">
-  <figure><img src="../img/02-chat.png" alt="聊天界面。顶部是返回按钮和会话名称，中间是对话，底部是按键行和输入框"><figcaption>让 Claude 创建 hello.py 的情形</figcaption></figure>
+  <figure><img src="img/02-chat.png" alt="聊天界面。顶部是返回按钮和会话名称、麦克风、🖥️、⋯，其下是巡览栏，中间是对话，底部是按键行和输入框"><figcaption>让 Claude 创建 hello.py 的情形</figcaption></figure>
   <div class="side">
     <table>
       <tr><th>位置</th><th>含义</th></tr>
-      <tr><td><code>←</code></td><td>返回列表（向右滑动界面也能返回）。长按时，也可以作为在新标签页中打开列表的链接使用</td></tr>
+      <tr><td><code>←</code></td><td>返回打开前所在的标签页（向右滑动界面，或用浏览器的“返回”也能返回）</td></tr>
       <tr><td>●（名称左侧）</td><td>是否在运行。<strong>绿色时点按会停止，灰色时点按会继续</strong>（会弹出确认）</td></tr>
+      <tr><td>麦克风</td><td>语音输入、朗读（<a href="advanced.html">进阶篇</a>）</td></tr>
       <tr><td>🖥️</td><td>打开或关闭终端画面（画面面板）。见<a href="#screen-vs-chat">第 6 章</a></td></tr>
-      <tr><td>🧑‍🤝‍🧑</td><td>与他人共享此会话（<a href="#share">第 4 章</a>）。保存对话（💾）也在这里面</td></tr>
+      <tr><td>⋯</td><td>此会话的菜单：🔗 与其他会话联动、💾 保存对话记录、📨 移到 Email、📮 提交给窗口（故障・需求）、与他人共享（<a href="#share">第 4 章</a>）</td></tr>
+      <tr><td>巡览栏</td><td>标题下方的栏。用 ‹ 上一个、下一个 › 切换到列表中前后的会话。✏️ 重命名、🗄 归档、🗑 删除也在这里（<a href="advanced.html#patrol">进阶篇</a>）</td></tr>
       <tr><td>按键行</td><td><kbd>Ctrl</kbd> <kbd>⇧</kbd> <kbd>Alt</kbd> <kbd>↑</kbd> <kbd>↓</kbd> … 可以横向滚动，最右边是 📎（添加附件）。见<a href="#keys">第 5 章</a></td></tr>
       <tr><td><strong>发送</strong> / <strong>执行</strong></td><td>执行会带 Enter，发送不带 Enter。见<a href="#keys">第 5 章</a></td></tr>
     </table>
-    <p>点按聊天的名称（🛠️ 右侧），会打开切换到前后会话的“巡览”栏（<a href="advanced.html#patrol">进阶篇</a>）。关闭浏览器后会话也会继续运行。从列表重新打开，就能接着看后续内容。在手机上先“添加到主屏幕”，收到回复时就会收到通知（iPhone 上这是必需的）。</p>
+    <p>巡览栏一开始就是打开的。点按聊天的名称（🛠️ 右侧）会关闭，再点一次会打开。关闭浏览器后会话也会继续运行。从列表重新打开，就能接着看后续内容。在手机上先“添加到主屏幕”，收到回复时就会收到通知（iPhone 上这是必需的）。</p>
   </div>
 </div>
 
 <!-- ===================================================================== -->
 <h2 id="coding">3. 日常 AI 编程的方法</h2>
 
-<p>平时只需选择 <strong>Claude</strong> 创建会话，然后在聊天中下指令。Claude 在你专属的容器（沙箱）中创建文件、执行命令。</p>
+<p>平时只需选择 <strong>Claude</strong> 创建会话，然后在聊天中下指令。Claude 在你专属的容器（<strong>devbox</strong>）中创建文件、执行命令。</p>
+
+<h3 id="login">登录 Claude（仅第一次）</h3>
+<p>使用 Claude 之前，要用 Claude 账号<strong>在每个使用位置各登录一次</strong>。平时使用的 devbox，请最先完成登录。</p>
+<div class="shot">
+  <figure><img src="img/20-login.png" alt="“Claude ログイン”的聊天。上方是步骤说明，下面是登录用的 URL"><figcaption>在设置中按“登录”后打开的聊天。点按 URL 打开</figcaption></figure>
+  <div class="side">
+<ol class="steps">
+  <li>按顶部标签页的<strong>设置</strong>，查看<strong>AI 登录</strong>卡片。<strong>Claude</strong> 标题下有按位置分的行（devbox、主机，获许可的人还有 root）；如果有其他机器，<strong>Other hosts</strong> 下会有每台机器的行。</li>
+  <li>行的右侧显示当前状态。已登录时显示<strong>账号的邮箱地址</strong>（以及认证方式、组织、套餐），未登录时显示黄色的<strong>“未登录”</strong>。查询期间显示“检查中…”，不能使用该位置的人会看到“无权限”。</li>
+  <li>按 <strong>devbox</strong> 那一行的<strong>登录</strong>。会打开名为“Claude ログイン”的聊天。</li>
+  <li>点按聊天中显示的 URL，在浏览器中打开，用要使用的 Claude 账号登录并<strong>授权</strong>。</li>
+  <li>复制显示的代码，回到 AI座 的聊天，粘贴到输入框中并点<strong>执行</strong>。粘贴的代码不会出现在聊天中，这是正常的。</li>
+  <li>会显示一行成功或失败的结果，登录用的聊天会自动从列表中消失。用 <code>←</code> 回到设置，devbox 那一行显示出邮箱地址就完成了。如果没有马上变化，用标题旁的 ⟳ 重新获取。</li>
+</ol>
+  </div>
+</div>
+<ul>
+  <li><strong>每个位置分别登录</strong>：devbox、主机、root、其他机器要各自登录。在主机或其他机器上使用 Claude 时，也要在那一行按同样的步骤操作（<a href="advanced.html#settings">进阶篇</a>）。</li>
+  <li><strong>在未登录的 devbox 或主机上开始会话时</strong>：会打开登录的聊天，而不是会话。完成上面的第 4～6 步后，请重新开始会话。</li>
+  <li><strong>中途放弃时</strong>：同一位置一次只能有一个登录。再按一次“登录”，会直接打开进行到一半的登录聊天。<strong>用之前打开的其他 URL 得到的代码不能用</strong>，请重新打开该聊天中显示的 URL。</li>
+  <li><strong>更换账号</strong>：按那一行的<strong>退出登录</strong>（会弹出确认）后，重新登录。</li>
+  <li><strong>Codex</strong>（ChatGPT 账号）也从同一卡片中 Codex 的行以同样方式登录。不过方向相反：要在打开 URL 后的页面中，<strong>输入 AI座 聊天中显示的代码</strong>。</li>
+  <li>用卡片最下方的<strong>🧑‍🤝‍🧑 所有人的登录</strong>，可以查看本服务器上所有人在哪里登录了哪个账号（仅供查看。root 的登录只对正在解锁 root 的人显示）。</li>
+</ul>
 
 <h3>创建会话</h3>
+<div class="shot">
+  <figure><img src="img/17-start.png" alt="开始会话的界面。放置位置、运行什么（Claude）、在哪里运行（devbox）、名称（claudeD2）和开始、工作目录（sandhome）、继续一栏（新建）、权限确认的选项"><figcaption>选中文件夹“研究”后按“＋ 🤖 AI”的样子。界面在工具行正下方打开，放置位置已填入“研究”</figcaption></figure>
+  <div class="side">
 <ol class="steps">
-  <li>在创建栏的类型中选择 <strong>Claude</strong>。</li>
-  <li>在 📁 行中选择工作目录。一开始是 <code>sandhome</code>（容器中的主目录）。
-    <ul>
-      <li>用“打开子文件夹…”逐级向下，用 <code>↑</code> 向上移动。</li>
-      <li>用 <code>＋</code> 可以在当前位置新建文件夹。</li>
-    </ul>
-  </li>
+  <li>如果有要放入的文件夹，先按一次那一行选中它（边框发蓝光）。选中工作树的分支，就会成为做该分支工作的会话。</li>
+  <li>按工作 🌳 树上方工具行的 <strong>＋ 🤖 AI</strong>。开始会话的界面会在工具行正下方打开（再按一次 ＋ 🤖 AI 或按 ✕ 关闭）。</li>
+  <li>“运行什么”选择 <strong>Claude</strong>，“在哪里运行”选择 <strong>devbox</strong>（一开始就是这个组合）。“在哪里运行”中也会列出通过 ssh 连接的其他机器。</li>
+  <li>名称一开始就填好了 <code>claudeD</code> 这样的候选（AI 的名称加上位置的一个字母，已有同名时会加上编号）。也可以改写。</li>
+  <li>📍 放置位置中已预先填入选中的文件夹或分支。也可以在这里更改（什么都没选时为“不放入文件夹”）。</li>
+  <li>在带灰色 <strong>&gt;_</strong> 标记的行中选择<strong>工作目录</strong>（服务器上的位置）。一开始是 <code>sandhome</code>（容器中的主目录）。用“打开子目录…”逐级向下，用 <code>↑</code> 向上，用 <code>＋</code> 在当前位置新建目录。</li>
   <li>⏱ 栏平时保持“新建”即可。想接着之前的对话时在这里选择（见下文“继续”）。</li>
-  <li>“跳过权限确认”平时保持开启即可。因为是在容器中，即使 Claude 改写文件也不会影响外部。</li>
-  <li>起个名字（可选）后按<strong>开始</strong>，就会进入聊天界面。</li>
+  <li>“不逐一确认 AI 的操作”平时保持开启即可。因为是在容器中，即使 Claude 改写文件也不会影响外部。</li>
+  <li>按<strong>开始</strong>，就会进入聊天界面。在聊天中“返回”，会回到打开前所在的标签页。</li>
+  <li>在还没有登录 Claude 的 devbox 或主机上开始时，会改为打开登录的界面。登录后请重新开始（<a href="#login">见上文“登录 Claude”</a>）。</li>
 </ol>
+  </div>
+</div>
 
 <h3>下指令、接收结果</h3>
 <ul>
@@ -223,7 +276,7 @@ ssh -i $key <ユーザー名>@&lt;サーバー&gt;</code></pre>
 
 <h3>稍后继续</h3>
 <ul>
-  <li>会话一直在运行，从列表打开即可继续。不用的会话用 🗄 归档，列表会更清爽（归档的会话可以在列表下方的“🗄 打开归档”中查看，用 📤 恢复）。</li>
+  <li>会话一直在运行，从工作 🌳 树打开即可继续。不用的会话用行上 ⋯（或聊天的巡览栏）中的 🗄 归档，列表会更清爽（归档的会话可以在最下方的“🗄 打开归档”中查看，用 📤 恢复）。已停止的会话一开始是隐藏的，勾选“也显示已停止的会话”后会显示。</li>
   <li><strong>停止</strong>：点按绿色的 ● 并确认即可停止。会像平常结束 Claude 一样发送两次 <kbd>Ctrl</kbd>+<kbd>C</kbd>，所以对话会被保存（如果后台有正在运行的命令，也会停止）。</li>
   <li><strong>继续</strong>：点按已停止会话的灰色 ●（带蓝色圆环）并确认，就会在同一文件夹中<strong>继续</strong>。还是同一个会话，之前的聊天也会保留。在 shell 中运行 Claude 的会话，也会从 Claude 的后续继续。</li>
   <li>即使删除了会话，对话依然保留。新建会话时选择同一文件夹，在 ⏱ 栏中按日期时间和内容摘要选择，就能接着继续。</li>
@@ -232,21 +285,21 @@ ssh -i $key <ユーザー名>@&lt;サーバー&gt;</code></pre>
 <!-- ===================================================================== -->
 <h2 id="share">4. 与他人共享</h2>
 <div class="shot">
-  <figure><img src="../img/09-share.png" alt="共享面板。有保存对话记录的按钮、只读的说明、对象（所有人）和类型（只读）的选择栏以及“共享”按钮"><figcaption>用 🧑‍🤝‍🧑 打开的共享面板。默认为“所有人、只读”</figcaption></figure>
+  <figure><img src="img/09-share.png" alt="聊天的 ⋯ 菜单。有与其他会话联动、保存对话记录、移到 Email、提交给窗口的按钮，只读的说明，对象（所有人）和类型（只读）的选择栏以及“共享”按钮"><figcaption>用聊天的 ⋯ 打开的菜单。下半部分是共享。默认为“所有人、只读”</figcaption></figure>
   <div class="side">
     <ul>
-      <li>按聊天界面的 🧑‍🤝‍🧑，选择对象和类型后点<strong>共享</strong>。默认为<strong>所有人、只读</strong>。</li>
-      <li><strong>只读</strong>：对方只能看到聊天记录，不能使用画面面板、发送或停止。<strong>所有人</strong>是指本服务器上 aigw 的全部用户。</li>
-      <li><strong>协作</strong>：只有在“指定用户”中填写了名字时才能选择。对方也可以发送消息、按键输入、停止。以协作方式共享主机 shell 后，对方可以用你的权限执行命令。</li>
-      <li>root 的 shell 只能以只读方式共享。Email 会话不能共享。</li>
+      <li>按聊天界面右上角的 <strong>⋯</strong>，在下半部分选择对象和类型后点<strong>共享</strong>。默认为<strong>所有人、只读</strong>。</li>
+      <li><strong>只读</strong>：对方只能看到聊天记录，不能使用画面面板、发送或停止。<strong>所有人</strong>是指本服务器上 AI座 的全部用户。</li>
+      <li><strong>协作</strong>：只有在“指定用户”中填写了名字时才能选择。对方也可以发送消息、按键输入、停止。以协作方式共享主机的会话后，对方可以用你的权限执行命令。</li>
+      <li>root 的会话只能以只读方式共享。mailbox 的会话<strong>只能共享给指定的用户</strong>（不能选“所有人”）。只读只能看聊天记录，协作还可以发送和停止。只有你能回答允许对外发送的卡片。</li>
       <li>要取消时，按面板中列出的对象的<strong>取消</strong>。</li>
     </ul>
   </div>
 </div>
 <div class="shot">
-  <figure><img src="../img/10-shared.png" alt="打开会话列表下方“共享记录”的样子。有按所有者分的文件夹（alice、bob），alice 的文件夹中有只读的会话"><figcaption>别人共享给你的会话会放在“👥 共享记录”中</figcaption></figure>
+  <figure><img src="img/10-shared.png" alt="打开工作最下方“共享记录”的样子。有按所有者分的文件夹（v），其中有只读的会话“论文草稿”"><figcaption>别人共享给你的会话会放在“🧑‍🤝‍🧑 共享记录”中</figcaption></figure>
   <div class="side">
-    <p>别人共享给你的会话，会放在列表下方的<strong>👥 打开共享记录</strong>中（与归档一样，默认是收起的）。打开后会列出按所有者分的文件夹（📁），打开文件夹就能看到那个人的会话。打开只读的会话时没有输入框，顶部会显示“〇〇 的共享记录(只读)”。</p>
+    <p>别人共享给你的会话，会放在最下方的<strong>🧑‍🤝‍🧑 打开共享记录</strong>中（与归档一样，默认是收起的）。打开后会列出按所有者分的文件夹（📁），打开文件夹就能看到那个人的会话。打开只读的会话时没有输入框，顶部会显示“〇〇 的共享记录(只读)”。</p>
   </div>
 </div>
 
@@ -264,8 +317,8 @@ ssh -i $key <ユーザー名>@&lt;サーバー&gt;</code></pre>
 
 <h3>按键行（软键盘）</h3>
 <div class="shot">
-  <figure><img src="../img/05-menu-down.png" alt="画面面板中显示着 Claude 的模型选择菜单，光标符号位于第 3 项"><figcaption>在 <code>/model</code> 菜单中按 <kbd>↓</kbd> 后的样子。❯ 的移动只能在画面面板中看到</figcaption></figure>
-  <figure><img src="../img/06-ctrl.png" alt="按下 Ctrl 后变为蓝色，并列出英文字母和数字键的状态"><figcaption>按 <kbd>Ctrl</kbd> 后会列出英文字母和数字。接着按 <kbd>c</kbd> 即为 Ctrl+C</figcaption></figure>
+  <figure><img src="img/05-menu-down.png" alt="画面面板中显示着 Claude 的模型选择菜单，光标符号位于第 2 项"><figcaption>在 <code>/model</code> 菜单中按 <kbd>↓</kbd> 后的样子。❯ 的移动只能在画面面板中看到</figcaption></figure>
+  <figure><img src="img/06-ctrl.png" alt="按下 Ctrl 后变为蓝色，并列出英文字母和数字键的状态"><figcaption>按 <kbd>Ctrl</kbd> 后会列出英文字母和数字。接着按 <kbd>c</kbd> 即为 Ctrl+C</figcaption></figure>
   <div class="side">
     <ul>
       <li><kbd>↑</kbd> <kbd>↓</kbd> <kbd>←</kbd> <kbd>→</kbd> <kbd>Tab</kbd> <kbd>⇧Tab</kbd> <kbd>Esc</kbd> <kbd>⏎</kbd>（Enter）<kbd>⌫</kbd> <kbd>Del</kbd> <kbd>🏡</kbd>（Home）<kbd>End</kbd> <kbd>PgU</kbd> <kbd>PgD</kbd> <kbd>Spc</kbd> 点按后立即发送。</li>
@@ -287,7 +340,7 @@ ssh -i $key <ユーザー名>@&lt;サーバー&gt;</code></pre>
 <!-- ===================================================================== -->
 <h2 id="screen-vs-chat">6. 终端画面与聊天的关系</h2>
 
-<p>在服务器上，Claude 和 shell 是在<strong>真正的终端中</strong>运行的。aigw 以两种形式展示其情况。</p>
+<p>在服务器上，Claude 和 shell 是在<strong>真正的终端中</strong>运行的。AI座 以两种形式展示其情况。</p>
 
 <div class="diagram" role="img" aria-label="终端的内容会作为记录追加到聊天中，并原样显示在画面面板中">
 <svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg" font-size="13">
@@ -312,10 +365,10 @@ ssh -i $key <ユーザー名>@&lt;サーバー&gt;</code></pre>
 </div>
 
 <div class="shot">
-  <figure><img src="../img/03-screen.png" alt="打开画面面板的聊天界面。上半部分是等宽的终端画面，下半部分是聊天气泡"><figcaption>按 🖥️ 后上方会打开画面面板，下方是平常的聊天</figcaption></figure>
+  <figure><img src="img/03-screen.png" alt="打开画面面板的聊天界面。上半部分是等宽的终端画面，下半部分是聊天气泡"><figcaption>按 🖥️ 后上方会打开画面面板，下方是平常的聊天</figcaption></figure>
   <div class="side">
     <ul>
-      <li><strong>聊天</strong>是记录。新的输出会作为气泡依次堆叠，之后可以回看，也可以用 🧑‍🤝‍🧑 中的 💾 保存。</li>
+      <li><strong>聊天</strong>是记录。新的输出会作为气泡依次堆叠，之后可以回看，也可以用 ⋯ 中的 💾 保存。</li>
       <li><strong>画面面板</strong>是当前画面本身。选择菜单中 ❯ 的移动、进度显示的变化等“原地改写”不会出现在聊天中，要在画面面板中查看。</li>
       <li>按键对两者都有效。出现菜单时，请打开画面面板，用按键行操作。</li>
       <li>把画面面板滚动到最上方，可以回溯过去已经滚出的画面。点左上角的“● 返回实时”回到当前画面。</li>
@@ -328,21 +381,21 @@ ssh -i $key <ユーザー名>@&lt;サーバー&gt;</code></pre>
 <h2 id="faq">7. 遇到问题时</h2>
 <div class="scroll"><table>
   <tr><th>症状</th><th>处理方法</th></tr>
-  <tr><td>无法登录 aigw</td><td>确认选择的是允许的域名下的账号。如果是管理员创建的账号，用 SSH 执行 <code>aigw-set-email</code>（<a href="#account">第 1 章</a>）</td></tr>
+  <tr><td>无法登录 AI座</td><td>确认选择的是允许的域名下的账号。如果是管理员创建的账号，用 SSH 执行 <code>aiza-set-email</code>（<a href="#account">第 1 章</a>）</td></tr>
   <tr><td>SSH 连不上、超时、被询问未知主机的密钥</td><td>可能是只允许从内部网络 SSH 的服务器。按管理员指引的方法进入内部网络后再 SSH（<a href="#account">第 1 章</a>）。如果从外部连接时保存了错误的密钥，用 <code>ssh-keygen -R &lt;サーバー&gt;</code> 删除</td></tr>
-  <tr><td>Claude 没有任何回复、要求登录</td><td>在设置界面确认该位置那一行是否显示“未登录”，然后登录（<a href="advanced.html#settings">进阶篇</a>）</td></tr>
+  <tr><td>Claude 没有任何回复、要求登录</td><td>在设置界面确认该位置那一行是否显示“未登录”（黄色），然后登录（<a href="#login">第 3 章</a>）。登录后仍不工作时，用卡片标题旁的 ⟳ 重新获取，并看看是否登录成了别的账号</td></tr>
   <tr><td>聊天看起来停住了</td><td>用 🖥️ 打开画面面板。多数情况是停在菜单或确认提问上，用按键行回答</td></tr>
-  <tr><td>点了执行但 Claude 没有动作（输入框中还留着文字）</td><td>aigw 会在几秒内发现并在聊天中显示 ⚠，每 30 秒重新发送一次 Enter。被接收后会显示“受け付けました”（已接收）。着急时，不输入文字直接按<strong>执行</strong>也一样</td></tr>
-  <tr><td>想把界面改成英文或中文</td><td>在设置界面标题旁边的选择栏中选择（<a href="advanced.html#settings">进阶篇</a>）</td></tr>
+  <tr><td>点了执行但 Claude 没有动作（输入框中还留着文字）</td><td>AI座 会在几秒内发现并在聊天中显示 ⚠，每 30 秒重新发送一次 Enter。被接收后会显示“受け付けました”（已接收）。着急时，不输入文字直接按<strong>执行</strong>也一样</td></tr>
+  <tr><td>想把界面改成英文或中文</td><td>在设置标签页的“显示”中选择（<a href="advanced.html#settings">进阶篇</a>）</td></tr>
   <tr><td>按了键却看不到反应</td><td>因为原地改写不会出现在聊天中。请在画面面板中确认（<a href="#screen-vs-chat">第 6 章</a>）</td></tr>
-  <tr><td>Email 或主机 shell 要求“解锁”而无法继续</td><td>确认是否注册了通行密钥、是否在这台设备上注册的（<a href="advanced.html#passkey">进阶篇</a>）。如果出现了锁定中的提示条，点按它</td></tr>
+  <tr><td>mailbox 或主机的会话要求“解锁”而无法继续</td><td>确认是否注册了通行密钥、是否在这台设备上注册的（<a href="advanced.html#passkey">进阶篇</a>）。如果出现了锁定中的提示条，点按它</td></tr>
   <tr><td>想停止 Claude 的工作</td><td><kbd>Esc</kbd>。如果要停止整个会话，点按名称左侧绿色的 ● 停止（对话会被保存，点按灰色的 ● 可以继续）</td></tr>
-  <tr><td>界面一直是旧的</td><td>点右上角的 ⟳，或在顶部栏向下滑动</td></tr>
-  <tr><td>找不到会话在哪里</td><td>可能在文件夹中。点按 📁 行展开。如果记得归档过，看列表下方的“🗄 打开归档”（<a href="advanced.html#folders">进阶篇</a>）</td></tr>
+  <tr><td>界面一直是旧的</td><td>重新加载页面（如果是添加到主屏幕的应用，先关闭再重新打开）</td></tr>
+  <tr><td>找不到会话在哪里</td><td>可能在文件夹或工作树的分支下。点按 📁 行展开。已停止的会话勾选“也显示已停止的会话”后会显示。如果记得归档过，看最下方的“🗄 打开归档”（<a href="advanced.html#folders">进阶篇</a>）</td></tr>
   <tr><td>还是不清楚</td><td>找管理员商量</td></tr>
 </table></div>
 
-<footer>aigw 教程 基础篇 · 2026-11-06 · 截图按手机宽度拍摄。用户名、机器名等已替换，或是在装入模拟数据的同一界面上拍摄的</footer>
+<footer>AI座 教程 基础篇 · 2026-11-27 · 截图按手机宽度拍摄。用户名、机器名等已替换，或是在装入模拟数据的同一界面上拍摄的</footer>
 </div>
 </body>
 </html>

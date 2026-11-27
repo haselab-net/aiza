@@ -18,14 +18,26 @@ self.addEventListener("push", (event) => {
   } catch (e) {
     // ignore malformed payloads
   }
+  // Taking back a push about a turn that is no longer the user's, or was
+  // already looked at (the deployment notes): close it, show nothing. Chrome may
+  // then put up its own "updated in the background" notice now and then;
+  // the user would rather have that than a stale one.
+  if (typeof payload.close === "string") {
+    event.waitUntil(
+      self.registration.getNotifications({ tag: payload.close })
+        .then((ns) => ns.forEach((n) => n.close()))
+    );
+    return;
+  }
   // A push not tied to a session (POST /notify, the deployment notes) carries its
   // own title and a same-site path to open on tap.
   const url = sameSitePath(payload.url);
   event.waitUntil(
-    self.registration.showNotification(payload.title || "aigw", {
+    self.registration.showNotification(payload.title || "AI座", {
       body: payload.message || "New activity",
+      icon: "/agents/icons/aiza-192.png",
       data: { session_id: payload.session_id, url },
-      tag: payload.session_id || (url ? `aigw-url:${url}` : "aigw"),
+      tag: payload.session_id || (url ? `aiza-url:${url}` : "aiza"),
     })
   );
 });
@@ -54,12 +66,14 @@ self.addEventListener("notificationclick", (event) => {
     return;
   }
   const sessionId = event.notification.data && event.notification.data.session_id;
-  const url = sessionId ? `/agents/#${sessionId}` : "/agents/";
+  // The tabs' addresses (the deployment notes, 2026-11-25): a session over 仕事.
+  const url = sessionId ? `/work#${sessionId}` : "/work";
+  const isApp = (c) => /^\/(work(\/[a-z]+)?|inbox|settings)\/?$/.test(new URL(c.url).pathname) || new URL(c.url).pathname === "/agents/";
   event.waitUntil((async () => {
     const clientsArr = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
     // Prefer the app itself (/agents/) over its helper pages
     // (outbox-browse.html, docs.html, ...) that share this scope.
-    const app = clientsArr.find((c) => new URL(c.url).pathname === "/agents/")
+    const app = clientsArr.find(isApp)
       || clientsArr.find((c) => new URL(c.url).pathname.startsWith("/agents/"));
     if (!app) return self.clients.openWindow(url);
     try { await app.focus(); } catch (e) { /* not focusable: still try to open the session */ }
@@ -72,7 +86,9 @@ self.addEventListener("notificationclick", (event) => {
     // hashchange finds the session already open and does nothing.
     app.postMessage({ type: "open-session", session_id: sessionId });
     if (typeof app.navigate === "function") {
-      try { await app.navigate(url); } catch (e) { /* message above already handled it */ }
+      // Over the tab it is on (only the #<id> changes).
+      const here = isApp(app) ? new URL(app.url).pathname : "/work";
+      try { await app.navigate(`${here}#${sessionId}`); } catch (e) { /* message above already handled it */ }
     }
   })());
 });

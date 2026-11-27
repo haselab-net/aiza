@@ -1,4 +1,4 @@
-"""/agents/login starts an OAuth login (new aigw_oauth_state / aigw_next
+"""/agents/login starts an OAuth login (new aiza_oauth_state / aiza_next
 cookies) only for a real page navigation: an image or fetch() that nginx's
 auth_request bounced there must not replace a login the user is in the
 middle of (2026-10-17).
@@ -14,16 +14,16 @@ import unittest
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
-GATEWAY = Path(__file__).resolve().parent.parent / "bin" / "aigw-gateway"
+GATEWAY = Path(__file__).resolve().parent.parent / "bin" / "aiza-gateway"
 
 
 def load_gateway():
-    loader = importlib.machinery.SourceFileLoader("aigw_gateway_under_test", str(GATEWAY))
+    loader = importlib.machinery.SourceFileLoader("aiza_gateway_under_test", str(GATEWAY))
     spec = importlib.util.spec_from_loader(loader.name, loader)
     mod = importlib.util.module_from_spec(spec)
     loader.exec_module(mod)
     # No extension: not whatever this host has installed (ext/README.md).
-    mod.EXT_DIR = Path(tempfile.mkdtemp(prefix="aigw-test-gw-")) / "no-extensions"
+    mod.EXT_DIR = Path(tempfile.mkdtemp(prefix="aiza-test-gw-")) / "no-extensions"
     return mod
 
 

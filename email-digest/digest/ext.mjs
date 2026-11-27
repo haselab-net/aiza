@@ -1,6 +1,9 @@
 // 拡張の口(ARCHITECTURE.md 3)。EXT($DIGEST_EXT、無ければこのフォルダの private/)の ext/*.mjs を order の順に読む。
 //   無ければ黙って空(芯だけで動く)。有って読めない・形が違うときは例外(黙って飛ばさない)。
 // 使い方(シェルから): node ext.mjs cmds prepare|quick|after regular|quick    台本が動かすコマンドを行で出す
+//                     node ext.mjs cmds fetch regular   定期チェックの取り込み(「遅い 0/1<TAB>出力のファイル<TAB>コマンド」)
+//                     node ext.mjs cmds gate regular|quick   取り込みの後・突き合わせと Claude の前の関門(1行1コマンド。0 でなければこの回は Claude に渡さない)
+//                     node ext.mjs cmds held release|keep    ページの保留の項目のボタン(1行1コマンド。$ID に項目の id)
 //                     node ext.mjs verify [--notify]   設定の ext.require を確かめる(足りなければ 1。--notify でスマホに知らせる)
 //                     node ext.mjs notify <題> <本文>
 //                     node ext.mjs list                読んだ拡張の名前
@@ -9,7 +12,7 @@ import { CODE, conf } from './conf.mjs'; import { notifyText } from './lib.mjs';
 export const EXT = process.env.DIGEST_EXT || path.join(CODE, 'private');
 const KEYS = { name: 'string', order: 'number', label: 'string', icon: 'string', color: 'string', quickTag: 'string',
   hostRe: RegExp, urlRe: RegExp, refRe: RegExp, refTime: 'function', refLabel: 'function', markRead: 'function', quickRaw: 'function',
-  prepare: Array, quick: Array, after: 'object', entries: Array, readers: Array };
+  prepare: Array, quick: Array, fetch: Array, after: 'object', gate: 'object', held: 'object', entries: Array, readers: Array, loginUrl: 'string', whoami: 'function' };
 function check(m, file) {
   if (!m || typeof m !== 'object') throw new Error(`${file}: export default が無い`);
   if (typeof m.name !== 'string' || !/^[a-z][\w-]*$/.test(m.name)) throw new Error(`${file}: name が無いか形が違う`);
@@ -31,7 +34,10 @@ async function load() {
   }
   return out.sort((a, b) => (a.order ?? 50) - (b.order ?? 50) || a.name.localeCompare(b.name));
 }
-export const exts = await load();
+// 設定の sources(読む先の名前の配列。setup.mjs が書く)があれば、表示名のある拡張(読む先)はそこに挙げたものだけ。無ければ全部
+export const allExts = await load();
+export const enabled = (e, c = conf) => !e.label || !Array.isArray(c.sources) || c.sources.includes(e.name);
+export const exts = allExts.filter(e => enabled(e));
 // 読む先(表示名のあるもの)
 export const sources = exts.filter(e => e.label);
 export const byName = Object.fromEntries(sources.map(s => [s.name, s]));
@@ -61,7 +67,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     for (const e of exts) {
       if (a === 'prepare') for (const p of e.prepare || []) { if ((p.when || 'both') === 'both' || p.when === b) console.log(`${Number(p.timeout) || 0}\t${p.cmd}`); }
       else if (a === 'quick' && b !== 'regular') for (const q of e.quick || []) console.log(`${q.slow ? 1 : 0}\t${q.out}\t${q.cmd}`);
+      // 定期チェックの取り込み(Claude より前に機械で取る。2026-11-18): 今すぐチェックと同じ行の形
+      else if (a === 'fetch' && b === 'regular') for (const q of e.fetch || []) console.log(`${q.slow ? 1 : 0}\t${q.out}\t${q.cmd}`);
       else if (a === 'after' && e.after && e.after[b]) console.log(e.after[b]);
+      else if (a === 'gate' && e.gate && e.gate[b]) console.log(e.gate[b]);
+      else if (a === 'held' && e.held && e.held[b]) console.log(e.held[b]);
     }
   } else if (cmd === 'verify') {
     const miss = missingRequired();
@@ -73,5 +83,5 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     console.log(`拡張: ${exts.map(e => e.name).join(', ') || 'なし'}${((conf.ext && conf.ext.require) || []).length ? '(ext.require は揃っている)' : ''}`);
   } else if (cmd === 'notify') await notifyText(a || '新着チェック', b || '');
   else if (cmd === 'list') console.log(exts.map(e => e.name).join('\n'));
-  else { console.error('usage: ext.mjs cmds prepare|quick|after regular|quick | verify [--notify] | notify <title> <message> | list'); process.exit(2); }
+  else { console.error('usage: ext.mjs cmds prepare|quick|fetch|after|gate regular|quick | cmds held release|keep | verify [--notify] | notify <title> <message> | list'); process.exit(2); }
 }

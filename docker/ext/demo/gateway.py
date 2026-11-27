@@ -2,14 +2,14 @@
 
 A real deployment logs people in with Google OAuth and maps the address to a
 Unix account. The demo has neither, so GET /agents/demo-login logs whoever
-asks in as the one account named by $AIGW_DEMO_USER. Anyone who can reach
+asks in as the one account named by $AIZA_DEMO_USER. Anyone who can reach
 the gateway is that user -- which is why the demo publishes the port on the
 host's loopback only, and why this extension is installed by the demo image
-and never by a real deployment. Without $AIGW_DEMO_USER it registers nothing.
+and never by a real deployment. Without $AIZA_DEMO_USER it registers nothing.
 
 The login is given only to a request whose Host is this machine's loopback
 name (localhost, 127.0.0.1, [::1], any port) or one listed in
-$AIGW_DEMO_HOSTS (comma-separated, for opening it under another name). A
+$AIZA_DEMO_HOSTS (comma-separated, for opening it under another name). A
 page that points its own name at 127.0.0.1 (DNS rebinding) then gets a 403
 instead of a session -- not merely a Secure cookie the browser happens to
 drop on plain http.
@@ -27,19 +27,19 @@ def host_name(host):
 
 
 def register(api):
-    user = os.environ.get("AIGW_DEMO_USER")
+    user = os.environ.get("AIZA_DEMO_USER")
     if not user:
         return
     pwd.getpwnam(user)              # a missing account fails the load, loudly
     ctx = api.ctx
     allowed = {"localhost", "127.0.0.1", "[::1]"}
-    allowed |= {x.strip().lower() for x in os.environ.get("AIGW_DEMO_HOSTS", "").split(",") if x.strip()}
+    allowed |= {x.strip().lower() for x in os.environ.get("AIZA_DEMO_HOSTS", "").split(",") if x.strip()}
 
     def demo_login(h, path, qs):
         if path != f"{ctx.base_path}/demo-login":
             return False
         if host_name(h.headers.get("Host", "")) not in allowed:
-            h._send_json(403, {"error": "demo login only for localhost (or AIGW_DEMO_HOSTS)"})
+            h._send_json(403, {"error": "demo login only for localhost (or AIZA_DEMO_HOSTS)"})
             return True
         value, exp = ctx.make_session_cookie(user)
         h._send_redirect(f"{ctx.base_path}/",

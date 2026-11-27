@@ -5,7 +5,8 @@
 //   node ~/digest/wait.mjs list                                                   成立前の待ち(定期チェックが条件を照らす)
 //   node ~/digest/wait.mjs tick                                                   日時を過ぎた待ちを成立させる(server.mjs が1分ごとに呼ぶ)
 // --at は JST。--cond と --at は少なくとも一方。両方なら先に来た方で成立する
-// 成立すると status を未決にし、wait.fired・wait.why を付けて通知する。続きから開くと client.js が「待っていた条件が成立しました」を送り、wait.told を付ける
+// 成立すると status を未決にし、wait.fired・wait.why を付けて通知する。セッションがあれば autostart.mjs が同じセッションを起こして「待っていた条件が成立しました」を送り、
+// wait.told を付ける(tick は自分で autostart を呼ぶ。fire は定期チェックの後の autostart)。起きなかったときは、続きから開くと client.js が送る
 import { loadItems, saveItems, nowJst, notify } from './lib.mjs'; import { CODE } from './conf.mjs';
 import { execFileSync } from 'child_process'; import os from 'os';
 const [cmd, id, ...rest] = process.argv.slice(2);
@@ -13,8 +14,11 @@ const usage = () => { console.error('usage: wait.mjs set <id> [--at YYYY-MM-DDTH
 const d = loadItems();
 const find = () => { const it = d.items.find(x => x.id === id); if (!it) { console.error('no such item: ' + id); process.exit(1); } return it; };
 function fire(it, why) {
-  it.wait.fired = nowJst(); it.wait.why = why; it.status = '未決'; it.byUser = true; it.changed = new Date().toISOString();
+  // byUser は付けない(付けると autostart.mjs がセッションを起こさなかった。2026-11-17)
+  it.wait.fired = nowJst(); it.wait.why = why; it.status = '未決'; it.changed = new Date().toISOString();
 }
+// 成立したら、セッションのある項目は同じセッションを起こす(autostart.mjs。起こす数の上限と同じ版を二度起こさない守りは autostart のもの)
+const wake = () => { try { execFileSync(process.execPath, [`${CODE}/autostart.mjs`], { stdio: 'inherit', timeout: 120e3 }); } catch (e) { console.error('autostart: ' + e.message.split('\n')[0]); } };
 if (cmd === 'set') {
   const it = find(), o = {};
   for (let i = 0; i < rest.length; i += 2) { const k = rest[i].replace(/^--/, ''); if (!['at', 'cond', 'task'].includes(k)) usage(); o[k] = rest[i + 1]; }
@@ -41,4 +45,5 @@ if (cmd === 'set') {
   for (const it of due) fire(it, `${it.wait.at.replace('T', ' ')} になりました`);
   saveItems(d);
   for (const it of due) { console.log(`${it.id}: 日時で成立`); await notify(it); }
+  wake();
 } else usage();

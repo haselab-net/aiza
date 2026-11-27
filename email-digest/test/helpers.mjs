@@ -1,4 +1,4 @@
-// Test helpers: build a throw-away box (HOME with digest/, fake gmail.py, fake aigw key, fake local config, stub tools)
+// Test helpers: build a throw-away box (HOME with digest/, fake gmail.py, fake aiza key, fake local config, stub tools)
 // and talk to it. Only fake data. Nothing leaves 127.0.0.1.
 import fs from 'fs'; import os from 'os'; import path from 'path'; import crypto from 'crypto';
 import { spawn, spawnSync } from 'child_process'; import { fileURLToPath } from 'url';
@@ -34,8 +34,8 @@ export function makeBox(opts = {}) {
   fs.mkdirSync(path.join(home, '.gmail'), { recursive: true });
   fs.writeFileSync(path.join(home, '.gmail', 'account'), 'test@example.com\n');
   fs.writeFileSync(path.join(home, '.gmail', 'token.json'), JSON.stringify({ scopes: ['https://www.googleapis.com/auth/gmail.modify'] }));
-  fs.mkdirSync(path.join(home, '.aigw'), { recursive: true });
-  fs.writeFileSync(path.join(home, '.aigw', 'viewer.key'), 'fake-viewer-key\n');
+  fs.mkdirSync(path.join(home, '.aiza'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.aiza', 'viewer.key'), 'fake-viewer-key\n');
   fs.mkdirSync(path.join(code, 'local'), { recursive: true });
   fs.writeFileSync(path.join(code, 'local', 'config.json'), JSON.stringify(merge(FAKE_CONF, opts.conf || {}), null, 1));
   if (opts.items) fs.writeFileSync(path.join(code, 'items.json'), JSON.stringify(opts.items, null, 1));
@@ -43,7 +43,7 @@ export function makeBox(opts = {}) {
   for (const s of [...STUBS, ...(opts.publicOnly ? [] : privateStubs())]) { fs.copyFileSync(path.join(FIX, 'stub.sh'), path.join(bin, s)); fs.chmodSync(path.join(bin, s), 0o755); }
   const log = path.join(root, 'calls.log'); fs.writeFileSync(log, '');
   const env = { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}`, FAKE_LOG: log, TZ: 'Asia/Tokyo', LANG: 'C.UTF-8' };
-  for (const k of ['DIGEST_DATA', 'DIGEST_LOCAL', 'DIGEST_EXT', 'MAILBOX_HOME', 'MAILBOX_DIR', 'AIGW_BOX_TAG', 'CLAUDE_CODE_SESSION_ID', 'CLAUDE_PID', 'AIGW_OUTBOX']) delete env[k];
+  for (const k of ['DIGEST_DATA', 'DIGEST_LOCAL', 'DIGEST_EXT', 'MAILBOX_HOME', 'MAILBOX_DIR', 'AIZA_BOX_TAG', 'CLAUDE_CODE_SESSION_ID', 'CLAUDE_PID', 'AIZA_OUTBOX']) delete env[k];
   return { root, home, code, bin, src, log, env,
     run: (cmd, args, o = {}) => spawnSync(cmd, args, { cwd: code, env: { ...env, ...(o.env || {}) }, encoding: 'utf8', timeout: o.timeout || 60e3, input: o.input }),
     node: (file, args = [], o = {}) => spawnSync(process.execPath, [path.join(code, file), ...args], { cwd: code, env: { ...env, ...(o.env || {}) }, encoding: 'utf8', timeout: o.timeout || 60e3 }),
@@ -56,7 +56,7 @@ export function makeBox(opts = {}) {
 
 export const merge = (a, b) => { const o = { ...a }; for (const [k, v] of Object.entries(b || {})) o[k] = v && typeof v === 'object' && !Array.isArray(v) && a[k] && typeof a[k] === 'object' && !Array.isArray(a[k]) ? merge(a[k], v) : v; return o; };
 
-// Start server.mjs in the box on a free port; returns {get, post, stop}. Requests carry valid aigw signature headers
+// Start server.mjs in the box on a free port; returns {get, post, stop}. Requests carry valid aiza signature headers
 export async function startServer(box) {
   const port = await freePort();
   const p = spawn(process.execPath, [path.join(box.code, 'server.mjs')], { cwd: box.code, env: { ...box.env, DIGEST_PORT: String(port) }, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -67,9 +67,9 @@ export async function startServer(box) {
     await new Promise(r => setTimeout(r, 50));
   }
   if (!/digest: /.test(out)) { p.kill(); throw new Error('server did not start: ' + out); }
-  const key = fs.readFileSync(path.join(box.home, '.aigw', 'viewer.key'), 'utf8').trim();
+  const key = fs.readFileSync(path.join(box.home, '.aiza', 'viewer.key'), 'utf8').trim();
   const user = os.userInfo().username, exp = Math.floor(Date.now() / 1000) + 3600;
-  const headers = { 'x-aigw-user': user, 'x-aigw-exp': String(exp), 'x-aigw-sig': crypto.createHmac('sha256', key).update(`${user}\n${exp}`).digest('hex') };
+  const headers = { 'x-aiza-user': user, 'x-aiza-exp': String(exp), 'x-aiza-sig': crypto.createHmac('sha256', key).update(`${user}\n${exp}`).digest('hex') };
   const base = `http://127.0.0.1:${port}`;
   return {
     port, output: () => out,

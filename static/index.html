@@ -3,8 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
-<title>aigw</title>
+<title data-i18n="common.ai_za">AI座</title>
 <link rel="manifest" href="/agents/manifest.json">
+<link rel="icon" href="/agents/icons/aiza.svg" type="image/svg+xml">
+<link rel="icon" href="/agents/icons/aiza-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/agents/icons/aiza-180.png">
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
@@ -38,6 +41,96 @@
   header::-webkit-scrollbar { display: none; }
   .header-left, .header-right { flex-shrink: 0; }
   header h1 { font-size: 1.1rem; margin: 0; }
+  /* The tabs (the deployment notes): underlined, the chosen one bold. */
+  #top-header { padding-top: 0; padding-bottom: 0; align-items: stretch; }
+  #top-header .header-left, #top-header .header-right { align-self: center; }
+  #tabs { display: flex; flex: 1; min-width: 0; justify-content: center; gap: 0.2rem; }
+  #tabs .tab, #ext-slot-tabs .tab { position: relative; display: flex; align-items: center; padding: 0 0.9rem; min-height: 3rem;
+    font-size: 0.95rem; color: #9aa5b1; text-decoration: none; border-bottom: 3px solid transparent; white-space: nowrap; }
+  #ext-slot-tabs { display: contents; }
+  #tabs .tab.on { color: #e6ebf0; font-weight: 700; border-bottom-color: #4f9be8; }
+  #tabs .tab .n { position: absolute; top: 0.35rem; right: 0.1rem; background: #e8a33d; color: #1b1300; border-radius: 8px;
+    font-size: 0.6rem; line-height: 1; padding: 0.15rem 0.3rem; font-weight: 700; }
+  #tabs .tab .n[hidden] { display: none; }
+  #work-views { display: flex; background: #0f141a; border-bottom: 1px solid #26303b; flex-shrink: 0; }
+  #work-views[hidden] { display: none; }
+  #work-views a { flex: 1; text-align: center; min-height: 2.6rem; display: flex; align-items: center; justify-content: center;
+    font-size: 0.85rem; color: #9aa5b1; text-decoration: none; border-bottom: 2px solid transparent; white-space: nowrap; }
+  #work-views a.on { color: #e6ebf0; font-weight: 600; border-bottom-color: #4f9be8; }
+  /* 仕事's tree (the deployment notes 段4): a folder's trees, indented as its rows. */
+  .wtree { margin: 0.2rem 0 0.4rem calc(var(--wd, 0) * 0.45rem); }
+  /* An open folder with what it holds, in a frame drawn over the list (list.js drawFolderFrames). */
+  .folder-frames { position: absolute; inset: 0 auto auto 0; width: 0; height: 0; pointer-events: none; }
+  .folder-frame { position: absolute; box-sizing: border-box; border: 1px solid #34465d; border-radius: 10px; }
+  body:has(.session-row.dragging) .folder-frames { display: none; }
+  /* An item's session in 仕事's tree, indented as the item's children. */
+  .wtree .tsession { padding-left: calc(0.5rem + var(--d, 0) * 1.1rem); }
+  .wtree .tsession .session-row { margin: 0.2rem 0; }
+  /* What a drop there does (a caption on the target), and ✕ where it cannot (2026-11-27) */
+  .wtree :is(.tnode, .tsession-wrap)[data-drop] { position: relative; }
+  .wtree :is(.tnode, .tsession-wrap)[data-drop]::after { content: attr(data-drop); position: absolute; right: 0.4rem; top: 50%; transform: translateY(-50%); z-index: 6;
+    padding: 0.15rem 0.5rem; border-radius: 6px; background: #2b5fb8; color: #fff; font-size: 0.8rem; white-space: nowrap; pointer-events: none; }
+  .wtree :is(.tnode, .tsession-wrap).drop-into.drop-no { background: #3a2226; box-shadow: inset 0 0 0 2px #e06c75; }
+  .wtree :is(.tnode, .tsession-wrap).drop-no::after { background: #8b2f38; }
+  /* The same caption on a folder a drop goes into (its name, or anywhere in its frame) */
+  #sessions > .folder-row[data-drop] { position: relative; }
+  #sessions > .folder-row[data-drop]::after { content: attr(data-drop); position: absolute; right: 0.4rem; top: 50%; transform: translateY(-50%); z-index: 6;
+    padding: 0.15rem 0.5rem; border-radius: 6px; background: #2b5fb8; color: #fff; font-size: 0.8rem; white-space: nowrap; pointer-events: none; }
+  #sessions > .folder-row[data-drop]:not(.drop-into) { box-shadow: inset 0 0 0 2px #5b9cff; }
+  .wtree .tsession-wrap.drop-into { border-radius: 10px; box-shadow: inset 0 0 0 2px #5b9cff; background: #23324a; }
+  .wtree .trole { font-size: 0.72rem; color: #9aa5b1; padding: 0.3rem 0.5rem 0; }
+  .wtree .trole.tcan { cursor: pointer; }   /* a closed item's lead: › / ⌄ shows its helpers (aiza-tree-closed-lead) */
+  .wtree .tpeek .tt { opacity: 0.75; grid-column: 1 / -1; }   /* a closed item's lead item: its title only, from the left (aiza-tree-closed-lead) */
+  :is(#todo-modal, .wtree) .tteam { white-space: normal; }
+  .list-section.sub { margin-top: 0.4rem; font-size: 0.8rem; color: #c5ccd4; }
+  .list-section { font-size: 0.78rem; color: #9aa5b1; margin: 1rem 0.2rem 0.3rem; letter-spacing: 0.03em; }
+  /* A session row (段4): 64px tall, the dot and ⋯ 44px targets, its actions in ⋯. */
+  #sessions .session-row, #archived-list .session-row { min-height: 64px; position: relative; }
+  .session-row .dot.stoppable, .session-row .dot.resumable { box-shadow: 0 0 0 14px transparent; }
+  .row-more { min-width: 44px; min-height: 44px; background: none; border: none; color: #c5ccd4; font-size: 1.2rem; cursor: pointer; border-radius: 8px; flex: none; }
+  .row-more:hover { background: #ffffff10; }
+  .row-acts { position: absolute; right: 0.4rem; top: calc(100% - 0.4rem); z-index: 20; background: #1f2933; border: 1px solid #3a4654; border-radius: 10px;
+    box-shadow: 0 6px 18px #0009; display: flex; flex-direction: column; padding: 0.3rem; min-width: 12rem; }
+  .row-acts[hidden] { display: none; }
+  .row-acts button { display: flex; gap: 0.6rem; align-items: center; text-align: left; min-height: 44px; padding: 0 0.6rem; background: none; border: none; color: #e6e6e6; font: inherit; font-size: 0.95rem; border-radius: 8px; cursor: pointer; }
+  .row-acts button:hover { background: #ffffff10; }
+  .row-acts button span { flex: 1; }
+  /* Stays at the top while the list scrolls (2026-11-27, 選んだものに働く固定の道具の段); its ＋ work on the selected row */
+  #tree-tools { display: flex; flex-wrap: wrap; gap: 0.3rem; align-items: center; margin: -1rem -1rem 0.5rem; padding: 1rem 1rem 0.4rem;
+    position: sticky; top: -1rem; z-index: 8; background: #0b0f14; }
+  #tree-tools > button:disabled { opacity: 0.4; cursor: default; }
+  /* The selected folder or tree item */
+  #sessions > .folder-row.sel, .wtree .tnode.tsel { box-shadow: inset 0 0 0 2px #5b9cff, 0 0 8px #5b9cff88; border-radius: 8px; }
+  /* ...and, when it has one, its whole frame instead (an open folder's, a root's group, an open branch's box) */
+  .folder-frame.sel, .wtree :is(.tbox, .tgroup).tsel-box { border-color: #5b9cff; box-shadow: 0 0 0 1px #5b9cff, 0 0 10px #5b9cff88; }
+  #sessions > .folder-row.sel[data-open="1"], .wtree .tsel-box > .tnode.tsel { box-shadow: none; background: #1c2a3d; }
+  #tree-tools > button, #tool-panel .tool-row button { flex: none; height: 2.5rem; padding: 0 0.5rem; border-radius: 8px; border: 1px solid #2a3542; background: transparent; color: #e6e6e6; font: inherit; font-size: 0.85rem; cursor: pointer; white-space: nowrap; }
+  /* ＋ 🤖 AI looks like the others (2026-11-27, the user: AIのボタンだけ色が違うのを直して);
+     the button whose form is open in #tool-panel shows pressed, as ↕ did. */
+  #tree-tools > button.on { border-color: #8ab4f8; color: #8ab4f8; }
+  /* ↕ as wide as a tap wants (2026-11-27, the user: ↕️のボタンが小さすぎる) */
+  #tree-tools #list-arrange-btn { min-width: 2.75rem; font-size: 1.15rem; }
+  #tree-search { flex: 1; min-width: 4.5rem; height: 2.5rem; box-sizing: border-box; padding: 0 0.6rem; border-radius: 8px; border: 1px solid #2a3542; background: #131a22; color: #e6e6e6; font: inherit; font-size: 0.9rem; }
+  #tool-panel { flex: 1 0 100%; max-height: 60vh; overflow-y: auto; }
+  #tool-panel[hidden] { display: none; }
+  #tool-panel .tool-row { display: flex; align-items: center; gap: 0.4rem; }
+  #tool-panel .tool-row[hidden] { display: none; }
+  #tool-panel .tool-row input { flex: 1; min-width: 0; height: 2.5rem; box-sizing: border-box; padding: 0 0.6rem; border-radius: 8px; border: 1px solid #2a3542; background: #131a22; color: #e6e6e6; font: inherit; }
+  #tool-panel .tool-row .what { flex: 1; min-width: 0; font-size: 0.85rem; color: #c5ccd4; }
+  #tree-tools #tool-panel .tool-row button { background: #1c2531; padding: 0 0.8rem; }
+  /* ＋ 🤖 AI's start form, in the panel instead of over the page */
+  #start-modal.inline { position: static; inset: auto; background: none; padding: 0; z-index: auto; display: block; overflow: visible; }
+  #start-modal.inline[hidden] { display: none; }
+  #start-modal.inline .box { width: 100%; }
+  #tree-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.6rem; margin-bottom: 0.6rem; }
+  #tree-filter .lbl { font-size: 0.78rem; color: #9aa5b1; }
+  #tree-filter .stopped { margin-left: auto; font-size: 0.8rem; color: #c5ccd4; display: flex; align-items: center; gap: 0.3rem; }
+  #tree-filter .seg { flex: 1 1 100%; display: flex; gap: 0.3rem; }
+  #tree-filter .seg button { flex: 1; white-space: nowrap; padding: 0.4rem 0.3rem; border-radius: 8px; border: 1px solid #2a3542; background: transparent; color: #9aa5b1; font: inherit; font-size: 0.82rem; cursor: pointer; }
+  #tree-filter .seg button.on { background: #1a222c; color: #e6e6e6; font-weight: 600; }
+  #machine-btn { display: block; margin: 0.8rem 0 0; }
+  #machine-btn { background: #1c2531; border: 1px solid #2a3542; color: #e6e6e6; border-radius: 8px; padding: 0.35rem 0.7rem; font: inherit; font-size: 0.85rem; cursor: pointer; }
+
   .header-left { display: flex; align-items: center; gap: 0.6rem; }
   .header-right { display: flex; align-items: center; gap: 0.7rem; }
   /* Tappable (2026-08-28, at the user's request): logging out moved from
@@ -47,13 +140,37 @@
   header a { color: #9aa5b1; font-size: 0.8rem; text-decoration: none; }
   /* Native pull-to-refresh has no scroll context to trigger from -- the
      page itself never scrolls (see the html/body rule above) -- so this is
-     the only way to reload aigw on a phone without a browser chrome bar.
+     the only way to reload aiza on a phone without a browser chrome bar.
      #reload-btn lives in #chat-header (2026-08-15) since #top-header is
      hidden while chatting anyway; #top-reload-btn (2026-08-28, at the
      user's request) is #top-header's own copy, same look. */
   #search-toggle-btn { background: none; border: none; font-size: 1rem; padding: 0.2rem 0.4rem; cursor: pointer; }
+  #ext-slot-header-links a { font-size: 1rem; padding: 0.2rem 0.4rem; text-decoration: none; }
+  /* セッションを始める (the deployment notes 段3): a sheet over the tab. */
+  #start-modal { position: fixed; inset: 0; background: #0008; z-index: 61; display: flex; align-items: flex-start; justify-content: center; padding: 16px; overflow-y: auto; }
+  #start-modal[hidden] { display: none; }
+  #start-modal .box { background: #0f141a; border: 1px solid #2a3542; border-radius: 12px; padding: 0.8rem; width: min(560px, 100%); box-sizing: border-box; }
+  #start-modal .start-head { display: flex; align-items: center; gap: 0.5rem; font-weight: 700; margin-bottom: 0.6rem; }
+  #start-modal .start-head span { flex: 1; }
+  #start-modal .start-head .close { background: none; border: none; color: #e6e6e6; font-size: 1.1rem; cursor: pointer; min-width: 44px; min-height: 44px; }
+  #start-note { background: #172230; border: 1px solid #2a3a50; border-radius: 8px; padding: 0.5rem 0.7rem; margin-bottom: 0.6rem; font-size: 0.9rem; display: flex; flex-direction: column; gap: 0.3rem; }
+  #start-note[hidden] { display: none; }
+  #start-modal #nsb-folder { display: none; }   /* 置く場所 says it */
+  #start-place-row { margin-bottom: 0.4rem; }
+  #start-place { flex: 1; min-width: 0; }
+  #start-note .what { white-space: pre-line; }
   #board-modal { position: fixed; inset: 0; background: #0008; z-index: 60; display: flex; align-items: flex-start; justify-content: center; padding: 16px; }
   #board-modal[hidden] { display: none; }
+  #about-btn { background: none; border: none; padding: 0; cursor: pointer; display: flex; align-items: center; }
+  #about-btn img { display: block; width: 28px; height: 28px; border-radius: 6px; }
+  #about-modal { position: fixed; inset: 0; background: #0008; z-index: 60; display: flex; align-items: flex-start; justify-content: center; padding: 16px; }
+  #about-modal[hidden] { display: none; }
+  #about-modal .box { background: #131a22; color: #d7dde5; border: 1px solid #2a3542; border-radius: 10px; padding: 0.8rem 0.9rem;
+    width: 100%; max-width: 34rem; font-size: 0.9rem; line-height: 1.6; max-height: calc(100vh - 32px); overflow: auto; }
+  #about-modal .banner { display: block; width: 100%; height: auto; border-radius: 8px; }
+  #about-modal ul { margin: 0.8rem 0; padding-left: 1.2rem; }
+  #about-modal li { margin-bottom: 0.4rem; }
+  #about-modal .close { padding: 0.4rem 0.9rem; border-radius: 8px; border: 1px solid #2a3542; background: #1c2531; color: #e6e6e6; cursor: pointer; }
   #board-modal .box { background: #131a22; color: #d7dde5; border: 1px solid #2a3542; border-radius: 10px; padding: 0.8rem 0.9rem;
     width: 100%; max-width: 44rem; font-size: 0.85rem; max-height: calc(100vh - 32px); overflow: auto; }
   #board-modal .head { display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.4rem; }
@@ -98,10 +215,6 @@
   #voice-bar.busy .st::after { content: " …"; }
   #voice-bar label { font-size: 0.75rem; white-space: nowrap; }
   #voice-bar .off { background: none; border: none; color: #e6e6e6; font-size: 1rem; cursor: pointer; }
-  #todo-btn { background: none; border: none; font-size: 1rem; padding: 0.2rem 0.4rem; cursor: pointer; position: relative; text-decoration: none; }
-  #todo-badge { position: absolute; top: -0.1rem; right: -0.2rem; background: #e8453c; color: #fff; border-radius: 8px;
-    font-size: 0.6rem; line-height: 1; padding: 0.15rem 0.3rem; }
-  #todo-badge[hidden] { display: none; }
   #todo-modal { position: fixed; inset: 0; background: #0008; z-index: 60; display: flex; align-items: flex-start; justify-content: center; padding: 16px; }
   #todo-modal[hidden] { display: none; }
   #todo-modal .box { background: #131a22; color: #d7dde5; border: 1px solid #2a3542; border-radius: 10px; padding: 0.8rem 0.9rem;
@@ -116,6 +229,143 @@
   #todo-modal .group.working { color: #8ab4f8; border-left-color: #8ab4f8; }
   #todo-modal .group.snooze { color: #b39ddb; border-left-color: #b39ddb; }
   #todo-modal .group.done { color: #81c995; border-left-color: #81c995; }
+  #todo-modal .group.handoff { color: #80cbc4; border-left-color: #80cbc4; }
+  :is(#todo-modal, .wtree) .todo-views { display: flex; gap: 0.4rem; margin: 0.2rem 0 0.4rem; }
+  /* 📨 新着まとめ at the left, 一覧 | 🌳 木 to its right (2026-11-23) */
+  :is(#todo-modal, .wtree) .todo-top { display: flex; align-items: stretch; gap: 0.5rem; margin: 0.2rem 0 0.5rem; }
+  :is(#todo-modal, .wtree) .todo-top .todo-views { margin: 0 0 0 auto; align-items: stretch; flex-shrink: 0; }   /* right; 新着まとめ stays left */
+  :is(#todo-modal, .wtree) .todo-top .todo-views button { display: flex; align-items: center; border-radius: 10px; padding: 0 0.9rem; white-space: nowrap; }
+  @media (max-width: 420px) { :is(#todo-modal, .wtree) .todo-top .todo-views button { padding: 0 0.6rem; } #todo-modal .item.compact { padding: 0.45rem 0.6rem; } }
+  /* Two lines (2026-11-23, the user: 「📨 新着まとめ」で改行して数がその下に、上下に少し太いボタンに) */
+  #todo-modal .item.compact { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 0.15rem;
+    padding: 0.45rem 0.8rem; border-bottom: none; border: 1px solid #2a3542; border-radius: 10px; flex: 0 1 auto; min-width: 0; }
+  #todo-modal .item.compact .who { white-space: nowrap; }
+  #todo-modal .item.compact .msg { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  #todo-modal .item.compact .msg small { font-size: 0.75em; color: #9aa5b1; margin-right: 0.1em; }
+  :is(#todo-modal, .wtree) .todo-views button, :is(#todo-modal, .wtree) .tree-bar button, :is(#todo-modal, .wtree) .tbtns button { padding: 0.3rem 0.7rem; border-radius: 999px; border: 1px solid #2a3542; background: #1c2531; color: #e6e6e6; font: inherit; font-size: 0.85rem; }
+  :is(#todo-modal, .wtree) .todo-views button.on, :is(#todo-modal, .wtree) .tree-bar button.on { border-color: #8ab4f8; color: #8ab4f8; font-weight: 600; }
+  :is(#todo-modal, .wtree) .tree-bar { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.6rem 0; }
+  /* 📊 利用 (the deployment notes) */
+  #todo-modal .usage-people .uh, #todo-modal .usage-people .ur { display: grid; grid-template-columns: minmax(6rem, 1fr) repeat(4, 4.6rem); gap: 0.3rem; padding: 0.25rem 0.5rem; font-size: 0.85rem; align-items: center; }
+  #todo-modal .usage-people .uh { color: #9aa5b1; font-size: 0.75rem; }
+  #todo-modal .usage-people .ur span:not(.un), #todo-modal .usage-people .uh span:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
+  #todo-modal .usage-people .un { position: relative; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #todo-modal .usage-people .un i, #todo-modal .usage-weeks .wb i { position: absolute; left: 0; bottom: 0; height: 3px; background: #8ab4f8; border-radius: 2px; }
+  #todo-modal .usage-weeks .uw { display: grid; grid-template-columns: 3.6rem 7rem 1fr; gap: 0.5rem; padding: 0.2rem 0.5rem; font-size: 0.82rem; align-items: center; }
+  #todo-modal .usage-weeks .wd { color: #9aa5b1; font-variant-numeric: tabular-nums; }
+  #todo-modal .usage-weeks .wb { position: relative; height: 1.1rem; }
+  #todo-modal .usage-weeks .wb i { top: 0.15rem; bottom: auto; height: 0.8rem; opacity: 0.45; }
+  #todo-modal .usage-weeks .wb b { position: relative; font-weight: 600; padding-left: 0.3rem; font-variant-numeric: tabular-nums; }
+  #todo-modal .usage-weeks .wp { color: #c0c8d2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #todo-modal .usage-trees details { border-bottom: 1px solid #222c38; padding: 0.35rem 0.5rem; }
+  #todo-modal .usage-trees summary { cursor: pointer; display: flex; gap: 0.6rem; align-items: baseline; flex-wrap: wrap; }
+  #todo-modal .usage-trees .ut { font-weight: 600; margin-right: 0.6rem; }
+  #todo-modal .usage-trees .us { color: #9aa5b1; font-size: 0.78rem; }
+  #todo-modal .usage-trees .uw2 { display: flex; flex-wrap: wrap; gap: 0.3rem 0.8rem; margin: 0.25rem 0 0.2rem 1rem; font-size: 0.8rem; }
+  #todo-modal .usage-trees .up small { color: #9aa5b1; }
+  #todo-modal .usage-trees .ub { margin: 0.3rem 0 0.3rem 1rem; padding-left: 0.5rem; border-left: 2px solid #2a3542; font-size: 0.85rem; }
+  @media (max-width: 600px) { #todo-modal .usage-people .uh, #todo-modal .usage-people .ur { grid-template-columns: minmax(4.5rem, 1fr) repeat(4, 3.6rem); font-size: 0.78rem; } #todo-modal .usage-weeks .uw { grid-template-columns: 3.2rem 5rem 1fr; } }
+  :is(#todo-modal, .wtree) .tree-back { padding: 0.3rem 0.7rem; border-radius: 999px; border: 1px solid #2a3542; background: #1c2531; color: #e6e6e6; font: inherit; font-size: 0.85rem; }
+  :is(#todo-modal, .wtree) .tball.k-none { color: #9aa5b1; }
+  :is(#todo-modal, .wtree) .tree { border: 1px solid #2a3542; border-radius: 8px; }
+  :is(#todo-modal, .wtree) .tree.grouped { border: none; display: flex; flex-direction: column; gap: 0.6rem; }
+  :is(#todo-modal, .wtree) .tree.grouped .tgroup { border: 1px solid #2a3542; border-radius: 8px; }
+  :is(#todo-modal, .wtree) .tree.grouped .tgroup.done, :is(#todo-modal, .wtree) .tree.grouped .tgroup.done-fold-group { border-color: #1f2833; }
+  :is(#todo-modal, .wtree) .tree.grouped .tgroup .tnode:last-child { border-bottom: none; }
+  :is(#todo-modal, .wtree) .tnode { display: grid; grid-template-columns: 2.2rem 1fr auto; gap: 0.3rem; align-items: start; padding: 0.45rem 0.5rem 0.45rem calc(0.5rem + var(--d, 0) * 1.1rem); border-bottom: 1px solid #1c2531; }
+  :is(#todo-modal, .wtree) .tnode:last-child { border-bottom: none; }
+  :is(#todo-modal, .wtree) .tree.grouped :is(.tnode, .tsession) { padding-left: 0.5rem; }
+  :is(#todo-modal, .wtree) .tree.grouped.arrange .tnode:not([data-id]) { padding-left: 2.4rem; }
+  :is(#todo-modal, .wtree) .tbox { margin: -1px -1px 0 0.45rem; border: 1px solid #34465d; border-radius: 6px 0 0 6px; }
+  :is(#todo-modal, .wtree) .tbox:last-child { margin-bottom: -1px; }
+  :is(#todo-modal, .wtree) .tgroup > .tbox:last-child { border-bottom-right-radius: 8px; }
+  :is(#todo-modal, .wtree) .tnode.tfocus { background: #23324a; box-shadow: inset 3px 0 0 #5b9cff; }
+  .tshare { background: #161d27; color: #dde3ea; border: 1px solid #2c3a4d; border-radius: 10px; padding: .9rem 1rem; width: min(32rem, 100%); max-height: calc(100vh - 2rem); overflow: auto; box-sizing: border-box; }
+  .tshare-sec { display: flex; flex-direction: column; gap: .35rem; margin-bottom: .8rem; }
+  .tshare-sec label { display: flex; gap: .4rem; align-items: center; }
+  .tshare-chosen, .tshare-list { display: flex; flex-wrap: wrap; gap: .3rem; }
+  .tshare-list { max-height: 14rem; overflow: auto; }
+  .tshare .tchip { background: #1f2835; color: #dde3ea; border: 1px solid #34465d; border-radius: 999px; padding: .2rem .6rem; font-size: .9rem; }
+  .tshare .tchip.on { background: #2a4a7a; border-color: #5b9cff; }
+  .tshare-q { padding: .4rem .5rem; background: #0f141b; color: #dde3ea; border: 1px solid #34465d; border-radius: 6px; font-size: 1rem; }
+  .tshare-none { color: #8a96a3; font-size: .9rem; }
+  .tshare-btns { display: flex; justify-content: flex-end; gap: .5rem; }
+  .tshare-btns button { padding: .4rem 1rem; }
+  .tshare-btns button.on { background: #2a4a7a; color: #fff; border: 1px solid #5b9cff; }
+  :is(#todo-modal, .wtree) .tree.arrange .tnode[data-id] { grid-template-columns: 1.6rem 2.2rem 1fr auto; }
+  :is(#todo-modal, .wtree) .tree.arrange .tnode:not([data-id]) { padding-left: calc(2.4rem + var(--d, 0) * 1.1rem); }
+  :is(#todo-modal, .wtree) .tnode .tgrip { cursor: grab; touch-action: none; user-select: none; padding: 0 .35rem; color: #9aa; font-size: 1.1em; align-self: center; }
+  :is(#todo-modal, .wtree) .tnode.dragging { position: relative; z-index: 5; background: #2a3550; opacity: .9; box-shadow: 0 2px 8px #0008; }
+  :is(#todo-modal, .wtree) .tnode.drop-before { box-shadow: inset 0 3px 0 #5b9cff; }
+  :is(#todo-modal, .wtree) .tnode.drop-after { box-shadow: inset 0 -3px 0 #5b9cff; }
+  :is(#todo-modal, .wtree) .tnode.drop-into { background: #23324a; box-shadow: inset 0 0 0 2px #5b9cff; }
+  #share-pane .share-save[hidden] { display: none; }
+  :is(#todo-modal, .wtree) .tnode .tog { background: none; border: none; color: #c3ccd6; padding: 0; min-height: 2rem; min-width: 2rem; font-size: 1.15rem; line-height: 1; }
+  :is(#todo-modal, .wtree) .tnode.tcan { cursor: pointer; }
+  :is(#todo-modal, .wtree) .tmain { min-width: 0; display: block; line-height: 1.6; }
+  :is(#todo-modal, .wtree) .tmain > * + * { margin-left: 0.5rem; }
+  :is(#todo-modal, .wtree) .tt { font-weight: 600; color: #e6e6e6; text-decoration: none; word-break: break-word; }
+  :is(#todo-modal, .wtree) .tnode.done .tt { color: #9aa5b1; text-decoration: line-through; }
+  :is(#todo-modal, .wtree) .tt.tlink::after { content: " ›"; color: #8ab4f8; }
+  #todo-modal a.tball { text-decoration: none; border: 1px solid #2a3542; }
+  :is(#todo-modal, .wtree) .tsum, :is(#todo-modal, .wtree) .tvis { font-size: 0.75rem; color: #9aa5b1; }
+  :is(#todo-modal, .wtree) .tball { font-size: inherit; padding: 0 0.45rem; border-radius: 999px; background: #1a222c; display: inline; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+  :is(#todo-modal, .wtree) .tball.k-person { color: #f2c94c; } :is(#todo-modal, .wtree) .tball.k-ai { color: #8ab4f8; }
+  :is(#todo-modal, .wtree) .tball.k-sleep { color: #b39ddb; } :is(#todo-modal, .wtree) .tball.k-done { color: #81c995; } :is(#todo-modal, .wtree) .tball.k-ext { color: #9aa5b1; }
+  :is(#todo-modal, .wtree) .tstale { font-size: 0.75rem; color: #f28b82; font-weight: 600; }
+  :is(#todo-modal, .wtree) .tbtns { position: relative; }
+  :is(#todo-modal, .wtree) .tbtns .tmore { padding: 0.1rem 0.6rem; border-radius: 999px; border: 1px solid #2a3542; background: #1c2531; color: #e6e6e6; font: inherit; }
+  :is(#todo-modal, .wtree) .tmenu { position: fixed; z-index: 50; overscroll-behavior: contain; display: flex; flex-direction: column; min-width: min(15rem, calc(100vw - 1rem));
+    width: max-content; max-width: calc(100vw - 1.5rem); overflow-y: auto; background: #1c2531; border: 1px solid #2a3542; border-radius: 10px; box-shadow: 0 6px 18px #0008; padding: 0.3rem; }
+  :is(#todo-modal, .wtree) .tmenu[hidden] { display: none; }
+  :is(#todo-modal, .wtree) .tmenu::before { content: ""; position: absolute; top: -6px; right: 0.9rem; width: 10px; height: 10px; background: #1c2531;
+    border-left: 1px solid #2a3542; border-top: 1px solid #2a3542; transform: rotate(45deg); }
+  :is(#todo-modal, .wtree) .tmenu.up { top: auto; bottom: calc(100% + 6px); }
+  :is(#todo-modal, .wtree) .tmenu.up::before { top: auto; bottom: -6px; transform: rotate(225deg); }
+  :is(#todo-modal, .wtree) .tmenu > button { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: none; }
+  :is(#todo-modal, .wtree) .tmenu button { text-align: left; background: none; border: none; color: #e6e6e6; font: inherit; font-size: 1rem; padding: 0.85rem 0.9rem; min-height: 3rem; border-radius: 6px; }
+  :is(#todo-modal, .wtree) .tmenu > button + button { border-top: 1px solid #2a3542; border-radius: 0; }
+  :is(#todo-modal, .wtree) .tmenu button:active, :is(#todo-modal, .wtree) .tmenu button:hover { background: #2a3542; }
+  /* ▶'s choices (AI, place, 始める) as thick as the menu's own rows (2026-11-23, the user: 新しく始める時に開くメニューがまだ細い) */
+  :is(#todo-modal .tmenu, .wtree .tmenu, #child-slot) > div { display: flex; flex-direction: column; gap: 0.45rem; padding: 0.5rem 0.6rem 0.7rem; border-top: 1px solid #2a3542; }
+  :is(#todo-modal .tmenu, .wtree .tmenu, #child-slot) > div[hidden] { display: none; }
+  :is(#todo-modal .tmenu, .wtree .tmenu, #child-slot) > div + button { border-top: 1px solid #2a3542; border-radius: 0; }
+  :is(#todo-modal .tmenu, .wtree .tmenu, #child-slot) > div input[type=text] { font: inherit; font-size: 1rem; min-height: 3rem; padding: 0.5rem 0.7rem; border-radius: 8px; background: #131a22; color: #e6e6e6; border: 1px solid #34465d; box-sizing: border-box; width: 100%; min-width: 0; }
+  :is(#todo-modal .tmenu, .wtree .tmenu, #child-slot) > div select[hidden], :is(#todo-modal .tmenu, .wtree .tmenu, #child-slot) > div input[hidden], :is(#todo-modal .tmenu, .wtree .tmenu, #child-slot) > div span[hidden] { display: none; }
+  /* 🧑‍🤝‍🧑 共有 opens in the menu too: no box of its own there */
+  :is(#todo-modal .tmenu, .wtree .tmenu, #child-slot) .tshare { width: auto; max-height: none; overflow: visible; background: none; border: none; border-radius: 0; padding: 0; }
+  :is(#todo-modal .tmenu, .wtree .tmenu, #child-slot) .tshare .tshare-sec label { white-space: normal; min-height: 2.4rem; }
+  :is(#todo-modal .tmenu, .wtree .tmenu, #child-slot) .tshare .tchip { min-height: 2.4rem; padding: 0.3rem 0.8rem; background: #1f2835; border: 1px solid #34465d; border-radius: 999px; text-align: center; }
+  :is(#todo-modal .tmenu, .wtree .tmenu, #child-slot) .tshare .tchip.on { background: #2a4a7a; border-color: #5b9cff; }
+  :is(#todo-modal .tmenu, .wtree .tmenu, #child-slot) .tshare .tshare-q { min-height: 2.8rem; font-size: 1rem; }
+  :is(#todo-modal .tmenu, .wtree .tmenu, #child-slot) .tshare .tshare-btns button { min-height: 2.8rem; padding: 0.4rem 1.2rem; text-align: center; border: 1px solid #34465d; border-radius: 8px; }
+  :is(#todo-modal .tmenu, .wtree .tmenu, #child-slot) .tshare .tshare-btns button.on { background: #2a4a7a; border-color: #5b9cff; color: #fff; font-weight: 600; }
+  /* ＋ 新しい仕事: a line under the bar */
+  #todo-modal .dom-row, #todo-modal .dom-box { display: contents; }   /* rows and views still made by DOM code inside the to-do page's Preact root */
+  :is(#todo-modal, .wtree) .tadd { display: flex; gap: 0.4rem; margin: 0 0 0.5rem; }
+  :is(#todo-modal, .wtree) .tadd[hidden] { display: none; }
+  :is(#todo-modal, .wtree) .tadd input { flex: 1; min-width: 0; font: inherit; font-size: 1rem; min-height: 2.8rem; padding: 0.4rem 0.6rem; border-radius: 8px; background: #131a22; color: #e6e6e6; border: 1px solid #34465d; }
+  :is(#todo-modal, .wtree) .tadd button { min-height: 2.8rem; padding: 0 1rem; background: #2a4a7a; border: 1px solid #5b9cff; border-radius: 8px; color: #fff; font-weight: 600; }
+  :is(#todo-modal .tmenu, .wtree .tmenu, #child-slot) > div select { font: inherit; font-size: 1rem; min-height: 3rem; padding: 0.5rem 0.7rem; border-radius: 8px; background: #131a22; color: #e6e6e6; border: 1px solid #34465d; }
+  :is(#todo-modal .tmenu, .wtree .tmenu, #child-slot) > div span { color: #9aa5b1; font-size: 0.9rem; }
+  :is(#todo-modal .tmenu, .wtree .tmenu, #child-slot) > div > button { min-height: 3rem; text-align: center; font-weight: 600; background: #2a4a7a; border: 1px solid #5b9cff; border-radius: 8px; color: #fff; }
+  :is(#todo-modal .tmenu, .wtree .tmenu, #child-slot) > div > button:hover, :is(#todo-modal .tmenu, .wtree .tmenu, #child-slot) > div > button:active { background: #33599a; }
+  /* ▶ セッションで作業: 新規 | 既存 tabs, each its own pane; 既存 is the session list's folder tree, scrolling inside */
+  :is(#todo-modal .tmenu, .wtree .tmenu, #child-slot) .ttabs { display: flex; gap: 0.4rem; }
+  :is(#todo-modal .tmenu, .wtree .tmenu, #child-slot) .ttabs button { flex: 1; min-height: 2.8rem; text-align: center; border: 1px solid #34465d; border-radius: 8px; padding: 0.4rem; }
+  :is(#todo-modal .tmenu, .wtree .tmenu, #child-slot) .ttabs button.on { background: #2a4a7a; border-color: #5b9cff; color: #fff; font-weight: 600; }
+  :is(#todo-modal .tmenu, .wtree .tmenu, #child-slot) .tpane { display: flex; flex-direction: column; gap: 0.45rem; }
+  :is(#todo-modal .tmenu, .wtree .tmenu, #child-slot) .tpane[hidden] { display: none; }
+  :is(#todo-modal, .wtree) .tmenu .tpane > button { min-height: 3rem; text-align: center; font-weight: 600; background: #2a4a7a; border: 1px solid #5b9cff; border-radius: 8px; color: #fff; }
+  :is(#todo-modal, .wtree) .tmenu .tpane > button:disabled { opacity: 0.45; }
+  :is(#todo-modal, .wtree) .tmenu .tpick { display: flex; flex-direction: column; gap: 0.45rem; }
+  :is(#todo-modal, .wtree) .tmenu .tpick-tree { display: flex; flex-direction: column; max-height: min(50vh, 22rem); overflow-y: auto; overscroll-behavior: contain; border: 1px solid #34465d; border-radius: 8px; background: #131a22; }
+  :is(#todo-modal, .wtree) .tmenu .tpick-tree button { flex: none; min-height: 2.8rem; padding-top: 0.5rem; padding-bottom: 0.5rem; white-space: normal; overflow-wrap: anywhere; border-radius: 0; }
+  :is(#todo-modal, .wtree) .tmenu .tpick-tree button + button { border-top: 1px solid #222d39; }
+  :is(#todo-modal, .wtree) .tmenu .tpick-f { color: #9aa5b1; }
+  :is(#todo-modal, .wtree) .tmenu .tpick-s.stopped { color: #9aa5b1; }
+  :is(#todo-modal, .wtree) .tmenu .tpick-s.on { background: #2a4a7a; color: #fff; }
+  :is(#todo-modal, .wtree) .tmenu .tpick-tree > span { padding: 0.7rem; }
   #todo-modal .item { display: flex; gap: 0.5rem; align-items: flex-start; padding: 0.5rem 0.2rem; border-bottom: 1px solid #1c2531; cursor: pointer; color: inherit; text-decoration: none; }
   #todo-modal .item .body { flex: 1; min-width: 0; }
   #todo-modal .item .who { font-weight: bold; word-break: break-word; }
@@ -139,13 +389,14 @@
   #todo-modal .item a.body { color: inherit; text-decoration: none; display: block; }
   #todo-modal .head a { color: #8ab4f8; font-size: 0.85rem; }
   /* /todo (the deployment notes, 2026-11-08): the list is the whole page. */
-  /* .ext-overlay: what an extension shows over the whole page (aigwExt
+  /* .ext-overlay: what an extension shows over the whole page (aizaExt
      closeOverlay) stays visible on the to-do page too. */
-  body.todo-page > :not(#todo-modal):not(#voice-bar):not(.ext-overlay):not(script) { display: none !important; }
+  body.todo-page > :not(#todo-modal):not(#voice-bar):not(.ext-overlay):not(script):not(#top-header):not(#work-views) { display: none !important; }
   /* html/body never scroll (see the top), so on /todo the list is its own
      full-screen scroller; the bottom padding keeps the last row above the
      voice bar. */
-  body.todo-page #todo-modal { position: fixed; inset: 0; background: #131a22; padding: 0; display: block;
+  /* Under the tabs (the deployment notes): in the page's column, not over it. */
+  body.todo-page #todo-modal { position: static; flex: 1; min-height: 0; background: #131a22; padding: 0; display: block;
     overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
   body.todo-page #todo-modal .box { width: 100%; max-width: 760px; margin: 0 auto; border: none; border-radius: 0; max-height: none; min-height: 100%;
     padding-bottom: 5rem; overflow: visible; box-sizing: border-box; }
@@ -179,7 +430,7 @@
   #reload-btn, #top-reload-btn { background: none; border: none; color: #9aa5b1; font-size: 1.1rem; padding: 0.2rem 0.4rem; cursor: pointer; }
   #machine-btn {
     background: #131a22; color: #9aa5b1; border: 1px solid #2a3542; border-radius: 6px;
-    font-size: 0.75rem; padding: 0.2rem 0.45rem; cursor: pointer; white-space: nowrap;
+    font-size: 1.02rem; padding: 0.2rem 0.45rem; cursor: pointer; white-space: nowrap;
   }
   #board-modal .mlist { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.8rem; }
   #board-modal .mpick { padding: 0.35rem 0.7rem; border-radius: 6px; border: 1px solid #2a3542; background: #1c2531; color: #e6e6e6; cursor: pointer; }
@@ -208,14 +459,21 @@
   .session-row .link-btn.armed { color: #4285F4; }
   /* Bar shown only while armed, offering the one way out besides tapping a
      second 🔗: same shape as #archive-toggle-btn, not a .session-row. */
+  /* Fixed at the bottom of the screen (2026-11-20, the user: 画面の一番上にしか
+     出ないとスクロールで見えなくなる), so it stays in sight while scrolling
+     the list for the second session. */
   #link-armed-banner {
-    display: none; align-items: center; justify-content: space-between;
-    padding: 0.6rem 1rem; margin-bottom: 0.6rem; border-radius: 8px;
+    display: none; align-items: center; justify-content: space-between; gap: 0.6rem;
+    position: fixed; left: 16px; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    z-index: 40; max-width: 640px; margin: 0 auto;
+    padding: 0.7rem 1rem; border-radius: 8px;
     border: 1px solid #4285F4; background: #1c2531; font-size: 0.85rem;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.5);
   }
   #link-armed-banner.visible { display: flex; }
+  body.link-armed #sessions { padding-bottom: 5rem; }
   #link-armed-banner button { background: none; border: none; color: #9aa5b1; }
-  .session-row .delete-btn, .session-row .edit-btn, .session-row .archive-btn, .session-row .link-btn {
+  .session-row .delete-btn, .session-row .edit-btn, .session-row .archive-btn, .session-row .link-btn, .folder-row .row-acts button {
     background: none; border: none; color: #9aa5b1; font-size: 1.1rem;
     padding: 0.4rem 0.6rem; flex-shrink: 0;
   }
@@ -232,21 +490,26 @@
   .session-row.folder-row { padding: 0.35rem 0.8rem; background: #18212c; margin-bottom: 0.4rem; }
   .folder-row .folder-main { display: flex; align-items: center; gap: 0.4rem; min-width: 0; flex: 1; }
   .folder-row .label { flex: 1 1 auto; min-width: 2.5em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  :is(.folder-row, .tnode .tog) .ficon { position: relative; display: inline-block; padding-right: 0.25em; }
+  .tnode .tog .ficon { font-size: 1.05rem; }
+  .tnode .tog .flock { position: absolute; left: -0.25em; bottom: 0; font-size: 0.5em; line-height: 1; }
+  :is(#todo-modal, .wtree) .tnode .tbtns { display: flex; align-items: center; gap: 0.3rem; }
+  :is(#todo-modal, .wtree) .tnode .tdiscord { text-decoration: none; font-size: 1.05rem; }
+  :is(.folder-row, .tnode .tog) .ftog { position: absolute; right: -0.1em; bottom: 0.05em; font-size: 0.55em; line-height: 1; padding: 1px 2px; border-radius: 4px; background: #131a22; color: #dde3ea; }
   .folder-row .meta, .folder-row .dot, .folder-row .drag-handle { flex-shrink: 0; }
   .folder-row .waiting-badge { flex-shrink: 0; white-space: nowrap; margin-left: 0; }
-  .folder-row .delete-btn, .folder-row .edit-btn, .folder-row .archive-btn { padding: 0.15rem 0.3rem; font-size: 0.95rem; }
   .session-row.drop-into { outline: 2px solid #4285F4; background: #1c2a3d; }
   #nsb-folder { display: flex; gap: 0.4rem; align-items: center; font-size: 0.85rem; margin-top: 0.35rem; }
     #nsb-folder[hidden] { display: none; }
     #nsb-folder button { padding: 0.1rem 0.5rem; }
-    .folder-menu { position: absolute; z-index: 50; background: #1c2531; border: 1px solid #3a4656; border-radius: 6px;
-      box-shadow: 0 2px 10px #0003; display: flex; flex-direction: column; min-width: 12rem; }
-    .folder-menu button { text-align: left; padding: 0.55rem 0.8rem; border: 0; background: none; color: inherit; font-size: 0.95rem; }
-    .folder-menu button:hover { background: #8882; }
     .folder-row .workdir { color: #888; font-size: 0.75rem; margin-left: 0.3rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     @media (max-width: 600px) { .folder-row .workdir { display: none; } }
-    #new-folder-btn {
-    display: block; margin: 0.2rem 0 0.5rem auto; padding: 0.3rem 0.7rem; border-radius: 8px;
+
+    #list-arrange-btn.on { border-style: solid; border-color: #8ab4f8; color: #8ab4f8; font-weight: 600; }
+    /* ⠿ only while ↕ is on (2026-11-23, the user: 誤ってドラッグして動かしてしまう) */
+    body:not(.list-arrange) .session-row .drag-handle { display: none; }
+    #new-folder-btn, #list-arrange-btn {
+    display: block; margin: 0; padding: 0.3rem 0.7rem; border-radius: 8px;
     border: 1px dashed #2a3542; background: none; color: #9aa5b1; font-size: 0.8rem;
   }
   .ext-archive-toggle-btn {
@@ -297,6 +560,9 @@
 
   #new-session-bar { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.8rem 1rem; background: #131a22; }
   .nsb-row { display: flex; gap: 0.5rem; align-items: center; }
+  /* #kind/#place in this host's view, #preset on another machine (app.js rebuildPresetOptions) */
+  #new-session-bar select[hidden], #kind-place-row[hidden], #skip-row[hidden] { display: none; }
+  #kind-place-row select { flex: 1; min-width: 0; }
   #new-session-bar select, #new-session-bar input, #new-session-bar button {
     padding: 0.6rem; border-radius: 8px; border: 1px solid #2a3542; background: #1c2531; color: #e6e6e6;
   }
@@ -347,13 +613,13 @@
   }
   #patrol-bar button:last-child { margin-left: auto; }
   #patrol-bar button.patrol-icon { padding: 0.45rem 0.55rem; }
-  #patrol-bar button#patrol-archive { margin-left: auto; }
-  #patrol-bar button#patrol-archive + button + button { margin-left: 0; }
+  #patrol-bar button#patrol-rename { margin-left: auto; }
+  #patrol-bar button#patrol-rename + button + button + button { margin-left: 0; }
   #patrol-bar button { white-space: nowrap; flex-shrink: 0; }
   #patrol-bar { flex-wrap: wrap; row-gap: 0.15rem; }
   #patrol-folder { flex-basis: 100%; font-size: 0.72rem; color: #7d8a97; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.1; }
   #patrol-bar select { min-width: 0; flex: 0 1 auto; }
-  @media (max-width: 420px) { #patrol-bar { gap: 0.3rem; padding: 0.3rem 0.5rem; } #patrol-bar button { padding: 0.45rem 0.6rem; } #patrol-bar button.patrol-icon { padding: 0.45rem 0.45rem; } }
+  @media (max-width: 420px) { #patrol-bar { gap: 0.3rem; padding: 0.3rem 0.5rem; } #patrol-bar button { padding: 0.45rem 0.6rem; } #patrol-bar button.patrol-icon { padding: 0.45rem 0.45rem; } #patrol-bar select { max-width: 4.5rem; } }
   #patrol-bar select {
     background: #1c2531; color: #9aa5b1; border: 1px solid #2a3542; border-radius: 6px;
     font-size: 0.85rem; padding: 0.35rem 0.3rem;
@@ -379,10 +645,10 @@
      .share-save below). */
   /* .active/.shared are backgrounds, not text `color`, on every emoji icon
      button below (screen/share/agents) -- a color-presentation emoji glyph
-     (🖥️/👥/🤖) is drawn from its own fixed-color bitmap/vector art and
+     (🖥️/🧑‍🤝‍🧑/🤖) is drawn from its own fixed-color bitmap/vector art and
      ignores CSS `color` entirely, so the highlight has to come from
      something else. Confirmed 2026-08-28 after the user reported the
-     share-btn "always looks purple" no matter what -- that was just 👥's
+     share-btn "always looks purple" no matter what -- that was just the then 👥's
      own native color showing through a `color:` rule that was never having
      any effect. border-radius here (rather than only on the modifier
      classes) keeps the button's own hit-box shape stable whether or not a
@@ -396,7 +662,7 @@
   #chat-header button.speak-btn.active { background: rgba(66,133,244,0.28); }
   #chat-header button.speak-btn { position: relative; }
   #chat-header button.speak-btn.paused::after { content: "⏸"; position: absolute; right: -2px; bottom: -2px; font-size: 0.6rem; }
-  .audio-menu { position: fixed; z-index: 50; display: flex; gap: 0.4rem; padding: 0.4rem; background: #1f2933; border: 1px solid #3a4654; border-radius: 8px; box-shadow: 0 4px 14px rgba(0,0,0,0.5); max-width: calc(100vw - 16px); }
+  .audio-menu { position: fixed; z-index: 50; display: flex; gap: 0.4rem; padding: 0.4rem; background: #1f2933; border: 1px solid #3a4654; border-radius: 8px; box-shadow: 0 4px 14px rgba(0,0,0,0.5); max-width: calc(100vw - 16px); flex-wrap: wrap; justify-content: flex-end; }
   .audio-menu button { background: #2a3440; color: #e6e6e6; border: 1px solid #3a4654; border-radius: 6px; padding: 0.35rem 0.6rem; font-size: 0.85rem; white-space: nowrap; }
   .audio-menu button.on { background: #2f5fa8; border-color: #4a7cc9; }
   .audio-menu button.voice.on { background: #c0392b; border-color: #e0574a; }
@@ -405,6 +671,17 @@
   /* Long-press popup on 🔊: speed and voice (app.js openSpeakPopup). */
   /* The bubble being read aloud (tap the chat to pause, tap a bubble to resume there). */
   .bubble.speaking { box-shadow: 0 0 0 2px rgba(66,133,244,0.6); }
+  .out-page { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,0.6); display: flex; justify-content: center; align-items: flex-start; overflow-y: auto; padding: 16px; }
+  .out-page .out-inner { background: #1f2933; color: #e6e6e6; border: 1px solid #3a4654; border-radius: 8px; padding: 0.8rem 1rem; width: min(760px, 100%); }
+  .out-page h3 { margin: 0 0 0.6rem; font-size: 1rem; }
+  .out-page .out-k { font-size: 0.75rem; color: #9aa5b1; margin-top: 0.6rem; }
+  .out-page .out-v { font-size: 0.9rem; overflow-wrap: anywhere; }
+  .out-page pre.out-v { white-space: pre-wrap; margin: 0.2rem 0 0; font-family: inherit; background: #131a22; padding: 0.4rem 0.5rem; border-radius: 6px; }
+  .out-page .out-v a { color: #8ab4f8; }
+  .out-page .out-btns { display: flex; gap: 0.5rem; justify-content: flex-end; flex-wrap: wrap; margin-top: 0.8rem; }
+  .out-page .out-btns button { background: #2a3440; color: #e6e6e6; border: 1px solid #3a4654; border-radius: 6px; padding: 0.4rem 0.9rem; }
+  .out-page .out-btns button.ask-go { background: #2f5fa8; border-color: #4a7cc9; }
+  .out-page .out-btns button.ask-no { background: #5a2a2a; border-color: #8a3a3a; }
   .speak-pop { position: fixed; z-index: 50; display: flex; flex-direction: column; gap: 0.5rem; padding: 0.7rem; background: #1f2933; border: 1px solid #3a4654; border-radius: 8px; box-shadow: 0 4px 14px rgba(0,0,0,0.5); color: #e6e6e6; font-size: 0.9rem; max-width: calc(100vw - 16px); }
   .speak-pop label { display: flex; align-items: center; gap: 0.5rem; }
   .speak-pop-lang { font-size: 0.8rem; color: #9aa5b1; margin-top: 0.2rem; }
@@ -470,7 +747,7 @@
   }
   #screen-wrap button.live-btn.visible { display: block; }
   /* Claude Code's own Task-tool subagent logs (see list_subagents/
-     get_subagent_log in aigw-backend) -- a list of subagents the session's
+     get_subagent_log in aiza-backend) -- a list of subagents the session's
      current conversation has spawned, tap one to read its own transcript.
      Same "own scrolling region, capped height" shape as #screen-pane. */
   #agents-pane {
@@ -512,6 +789,8 @@
     padding: 0.4rem 0.8rem; border-radius: 8px; border: 1px solid #2a3542;
     background: #1c2531; color: #e6e6e6;
   }
+  #share-pane .share-links { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
+  #share-pane .share-links-head { width: 100%; color: #9aa5b1; font-size: 0.8rem; }
   #share-pane .share-warn { color: #f2c078; font-size: 0.8rem; margin-bottom: 0.5rem; }
   #share-pane .share-row {
     display: flex; align-items: center; justify-content: space-between;
@@ -542,6 +821,11 @@
   #folder-share .share-add input { flex: 1; min-width: 7rem; padding: 0.4rem 0.6rem; border-radius: 6px; border: 1px solid #2a3542; background: #0b0f14; color: #e6e6e6; }
   #folder-share .share-add button, #folder-share .close { padding: 0.4rem 0.8rem; border-radius: 6px; border: none; background: #4285F4; color: white; }
   #folder-share .close { background: #2a3542; margin-top: 0.8rem; float: right; }
+  #login-lost { position: fixed; inset: 0; background: #000a; z-index: 80; display: flex; align-items: center; justify-content: center; padding: 16px; }
+  #login-lost .box { background: #131a22; color: #d7dde5; border: 1px solid #2a3542; border-radius: 10px; padding: 1rem; width: 100%; max-width: 26rem; }
+  #login-lost h3 { margin: 0 0 0.5rem; font-size: 1rem; }
+  #login-lost .note { color: #9aa5b1; font-size: 0.85rem; margin-bottom: 0.8rem; }
+  #login-lost button { padding: 0.5rem 1rem; border-radius: 6px; border: none; background: #4285F4; color: white; font-size: 0.95rem; }
   #logins-modal { position: fixed; inset: 0; background: #0008; z-index: 60; display: flex; align-items: center; justify-content: center; padding: 16px; }
   #logins-modal[hidden] { display: none; }
   #logins-modal .box { background: #131a22; color: #d7dde5; border: 1px solid #2a3542; border-radius: 10px; padding: 0.9rem 1rem;
@@ -603,6 +887,16 @@
     font-family: ui-monospace, monospace; font-size: 0.8rem; line-height: 1.2;
     background: rgba(0, 0, 0, 0.25); border-radius: 6px;
   }
+  /* Copy button on each code block (2026-11-20): top right of the wrapper,
+     so it does not scroll away with a wide block. */
+  .bubble .md-code-wrap { position: relative; margin: 0.3rem 0; max-width: 100%; }
+  .bubble .md-code-wrap .md-code { margin: 0; padding-right: 2.6rem; min-height: 2.4rem; box-sizing: border-box; }
+  .bubble .md-copy {
+    position: absolute; top: 0.2rem; right: 0.2rem; min-width: 2rem; min-height: 2rem;
+    padding: 0 0.4rem; font-size: 1rem; line-height: 1; cursor: pointer;
+    color: #c3ccd6; background: rgba(30, 38, 48, 0.85); border: 1px solid #3a4756; border-radius: 6px;
+  }
+  .bubble .md-copy.ok { color: #7fd18b; border-color: #4f8a5a; }
   .bubble .md-code .cw1, .bubble .md-code .cw2 {
     display: inline-block; text-align: center; overflow: visible; vertical-align: top;
   }
@@ -623,7 +917,44 @@
   .bubble.user.queued { opacity: 0.6; }
   .bubble.user.queued::after { content: " ⏳"; }
   .bubble.agent { align-self: flex-start; background: #1c2531; font-family: ui-monospace, monospace; font-size: 0.85rem; }
+  /* Tool calls (one line each, a run folded into one): quieter than a reply. */
+  .toolline, .toolgroup { align-self: flex-start; max-width: 92%; color: #9aa5b1; font-size: 0.75rem; font-family: ui-monospace, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 0.3rem; }
+  .toolgroup summary { cursor: pointer; overflow: hidden; text-overflow: ellipsis; list-style: none; }
+  .toolgroup summary::-webkit-details-marker { display: none; }
+  .toolgroup[open] { white-space: normal; }
+  .toolgroup .tg-body .toolline { padding: 0; max-width: none; }
+  .toolline.denied { color: #d9534f; white-space: normal; }
   .bubble.system { align-self: center; background: none; color: #9aa5b1; font-size: 0.75rem; }
+  /* A question or permission prompt (aiza-ask-hook): the chat's own black and white, set off only by a thin frame. */
+  .bubble.ask { align-self: stretch; max-width: none; background: #0b0f14; color: #e6e6e6; border: 1px solid #2a3542; border-left: 4px solid #81c995; display: flex; flex-direction: column; gap: 0.5rem; white-space: normal; }
+  .bubble.ask .ask-q { font-weight: 600; }
+  .bubble.ask .ask-row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+  .bubble.ask button { font: inherit; font-size: 0.95rem; min-height: 2.5rem; padding: 0 0.9rem; border-radius: 10px; border: 1px solid #2a3542; background: #1c2531; color: #e6e6e6; }
+  .bubble.ask button.on, .bubble.ask button.ask-go { border-color: #e6e6e6; font-weight: 600; }
+  .bubble.ask button.ask-term { color: #9aa5b1; }
+  .bubble.ask button:disabled { opacity: 0.5; }
+  .bubble.ask .ask-sum { white-space: pre-wrap; word-break: break-all; font-family: ui-monospace, monospace; font-size: 0.85rem; color: #e6e6e6; padding: 0.4rem 0.6rem; border: 1px solid #2a3542; border-radius: 6px; }
+  .bubble.ask > input.ask-other { display: block; width: 100%; box-sizing: border-box; margin-top: 0.35rem; }
+  .bubble.ask .ask-q.missing { color: #f0a35e; }
+  #composer { position: relative; }
+  #ref-pick { position: absolute; left: 0; right: 0; bottom: 100%; z-index: 30; background: #131a22; border: 1px solid #2a3542;
+              border-radius: 10px; padding: 0.25rem; display: flex; flex-direction: column; max-height: 40vh; overflow-y: auto; }
+  #ref-pick[hidden] { display: none; }
+  button.ttr { font: inherit; font-size: 0.7rem; margin-left: 0.3rem; padding: 0 0.3rem; border-radius: 6px; border: 1px solid #2a3542; background: none; color: #8a96a3; vertical-align: 1px; }
+  #take-btns { display: inline-flex; gap: 0.3rem; margin-left: 0.4rem; }
+  #take-btns .take-btn { font: inherit; font-size: 0.8rem; padding: 0.15rem 0.45rem; border-radius: 8px; border: 1px solid #2a3542; background: #1c2531; color: #d7dde5; }
+  #ref-pick button { text-align: left; background: none; border: none; color: #d7dde5; padding: 0.45rem 0.6rem; font: inherit; border-radius: 8px; }
+  #ref-pick button:hover, #ref-pick button:focus { background: #1c2531; }
+  .bubble.ask .ask-q.missing::after { content: " ←"; }
+  .bubble.ask button.ask-send:not(.ready) { opacity: 0.6; }
+  .bubble.ask .ask-other-row { flex-wrap: nowrap; }
+  .bubble.ask .ask-other-row input.ask-other { flex: 1; min-width: 0; }
+  .bubble.ask input.ask-other { font: inherit; font-size: 0.95rem; padding: 0.5rem 0.6rem; border-radius: 10px; border: 1px solid #2a3542; background: #0b0f14; color: #e6e6e6; }
+  .bubble.ask .ask-hint { font-size: 0.75rem; color: #9aa5b1; }
+  .bubble.ask .ask-note { font-size: 0.85rem; color: #9aa5b1; }
+  .bubble.ask.done { opacity: 0.8; }
+  .bubble.ask.done .ask-note { color: #81c995; }
+  .bubble.ask.done .ask-row, .bubble.ask.done input.ask-other { display: none; }
   /* Links inside agent output (see setTextWithLinks) -- a login URL is long
      and must wrap rather than widen the bubble past the screen. */
   .bubble a { color: #8ab4f8; overflow-wrap: anywhere; }
@@ -640,6 +971,8 @@
     text-decoration: none; cursor: pointer; max-width: 100%;
   }
   .attachment-icon { font-size: 1.3rem; flex-shrink: 0; }
+  /* A unix directory (a place on disk), not one of aiza's folders (📁): a gray folder with >_ (the user's pick, 2026-11-27). */
+  .dir-icon { display: inline-block; flex: none; font-style: normal; width: 1.2em; height: 1.2em; vertical-align: -0.22em; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M2 6a2 2 0 0 1 2-2h5.5l2 2.5H20a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2z' fill='%2364748b'/%3E%3Cpath d='M6.5 11.5l3 2.5-3 2.5' fill='none' stroke='%23fff' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M11.5 17h5' stroke='%23fff' stroke-width='1.8' stroke-linecap='round'/%3E%3C/svg%3E") center / contain no-repeat; }
   .attachment-name { overflow-wrap: anywhere; }
   /* Still-updating tail line of an "attach"-preset session (see live_tail
      event handling in app.js) -- a thin accent border marks it as
@@ -673,19 +1006,20 @@
      (2026-08-15) once it grew to 5 rows (container/host/root/winbox-a/
      winbox-b) and made the list page too long on a phone. */
   #view-auth { display: none; flex-direction: column; flex: 1; min-height: 0; }
-  #auth-header { display: flex; align-items: center; gap: 0.6rem; padding: 0.6rem 1rem; background: #131a22; }
-  #auth-header span { flex: 1; font-size: 0.95rem; font-weight: 600; }
-  #auth-header select#lang-select {
-    padding: 0.15rem 0.3rem; border-radius: 8px; border: 1px solid #2a3542;
-    background: #1c2531; color: #e6e6e6; font-size: 0.8rem;
-  }
-  /* One ⟳ for the whole panel (it re-reads every scope in one request), so
-     it lives in the page header rather than on any one row. */
-  #auth-header button#auth-refresh {
-    padding: 0.15rem 0.5rem; border-radius: 8px; border: 1px solid #2a3542;
-    background: #1c2531; color: #e6e6e6; font-size: 0.8rem;
-  }
+  #lang-select { padding: 0.25rem 0.4rem; border-radius: 8px; border: 1px solid #2a3542; background: #1c2531; color: #e6e6e6; font-size: 0.85rem; }
+  /* One ⟳ for every sign-in row (it re-reads every scope in one request). */
   #claude-auth-section { padding: 1rem; overflow-y: auto; flex: 1; min-height: 0; }
+  /* 設定's cards (the deployment notes). */
+  .set-card { background: #131a22; border: 1px solid #222c37; border-radius: 10px; padding: 0.7rem 0.9rem; margin-bottom: 0.8rem; }
+  .set-card h3 { display: flex; align-items: center; gap: 0.5rem; margin: 0 0 0.5rem; font-size: 0.95rem; }
+  .set-card h3 > span { flex: 1; }
+  .set-card #auth-refresh { background: none; border: 1px solid #2a3542; color: #e6e6e6; border-radius: 6px; padding: 0.1rem 0.5rem; cursor: pointer; }
+  .set-row { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; min-height: 2.4rem; font-size: 0.9rem; }
+  .set-row > span { color: #c5ccd4; }
+  #account-row .who { cursor: default; text-decoration: none; }
+  .speak-pop.inline { position: static; z-index: auto; box-shadow: none; border: none; background: none; padding: 0; max-width: none; }
+  .set-note { font-size: 0.8rem; color: #9aa5b1; }
+  #login-list-row { margin-top: 0.6rem; }
   /* Stacked, not one line: at phone width a label + an email + two buttons
      cannot share a row without wrapping into an unreadable jumble. Status on
      top, actions right-aligned underneath, so every row has the same shape
@@ -711,10 +1045,6 @@
   .auth-row button:disabled { opacity: 0.5; }
   /* Hidden unless this user has root-shell access at all (see
      applyCapabilities() in app.js) -- same gate as the preset option. */
-  #auth-row-root { display: none; }
-  #auth-row-root.visible { display: flex; }
-  #codex-auth-row-root { display: none; }
-  #codex-auth-row-root.visible { display: flex; }
   /* Same gate as #auth-row-root above, just one button instead of a whole
      row: any user can kill their own Chrome, only root-shell users get the
      "everyone" button too. */
@@ -737,6 +1067,8 @@
   }
   #key-grid.visible { display: flex; }
   #key-grid button { width: 2.4rem; text-align: center; }
+  #key-grid button.chord { display: none; width: auto; min-width: 2.8rem; background: #23344a; }
+  #key-grid.ctrl-only button.chord { display: inline-block; }
   #composer { display: flex; gap: 0.5rem; padding: 0.7rem; background: #131a22; flex-shrink: 0; }
   #composer textarea {
     flex: 1; resize: none; border-radius: 10px; border: 1px solid #2a3542; background: #1c2531;
@@ -766,56 +1098,49 @@
        screen while chatting). -->
   <header id="top-header">
     <div class="header-left">
-      <h1>aigw</h1>
-      <!-- Populated in applyCapabilities() with this host's own short name
-           (e.g. "example", not a fixed "このホスト" -- ambiguous if this
-           same file is ever served from more than one host, 2026-08-17)
-           plus one option per GET /capabilities' ssh_machines.
-           Selecting a machine filters both the session list and the "接続"
-           candidate list to that machine only -- see applyMachineFilter().
-           Also how "Claude 認証" is left again once open:
-           there is no back button there any more, picking any real machine
-           here is the only way back, same as picking "Claude 認証" is the
-           only way in. -->
-      <!-- 2026-11-09: the menu itself is hidden (it keeps the state); the
-           button opens the machine panel (machines, 設定, and the Windows
-           machines' blackboard) -- the user: "コンボボックスをやめて黒板に統一". -->
-      <select id="machine-select" title="操作対象のマシン" hidden></select>
-      <button id="machine-btn" title="マシン・設定・黒板"></button>
+      <!-- The logo, not the word (2026-11-21, the user): a tap says what aiza is. -->
+      <h1><button id="about-btn" type="button" title="AI座 とは" data-i18n-title="index.what_ai_za" aria-label="AI座 とは" data-i18n-aria-label="index.what_ai_za"><img src="/agents/icons/aiza.svg" alt="AI座" width="28" height="28"></button></h1>
     </div>
+    <!-- The tabs (the deployment notes, 2026-11-25): 仕事, the extensions' own
+         (aizaExt tabs: 新着), 設定. Links, so a middle click opens one in a
+         new tab; a plain click switches here (page.js showTab). -->
+    <nav id="tabs" role="tablist">
+      <a class="tab" data-tab="work" href="/work" role="tab"><span data-i18n="common.work">仕事</span><span id="todo-badge" class="n" hidden></span></a>
+      <span id="ext-slot-tabs"></span>
+      <a class="tab" data-tab="settings" href="/settings" role="tab" data-i18n="common.settings">設定</a>
+    </nav>
     <div class="header-right">
-      <!-- Extension point (aigwExt slots "header-links", ext/README.md): an
+      <!-- Extension point (aizaExt slots "header-links", ext/README.md): an
            extension can add its own header link(s) here (an internal docs
            viewer, ...). Left empty without one. -->
       <span id="ext-slot-header-links"></span>
-      <button id="search-toggle-btn" title="チャットを検索">🔍</button>
-      <!-- The to-do list (the deployment notes): a link to its own page, /todo. -->
-      <!-- Voice mode (the deployment notes). -->
-      <button id="voice-btn" title="音声モード" aria-label="音声モード"><svg class="mic-ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="8.5" y="2.5" width="7" height="12" rx="3.5"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
-      <a id="todo-btn" href="/todo" title="やること">✅<span id="todo-badge" hidden></span></a>
-      <button id="top-reload-btn" title="再読み込み">⟳</button>
-      <!-- Tap to log out (with a confirm dialog) instead of a separate
-           always-visible link -- see app.js. Last (2026-11-09): a long name
-           is what scrolls out of view, not the buttons. -->
-      <span class="who" id="who" title="タップでログアウト"></span>
+      <!-- Voice mode (the deployment notes). A plain line mic (2026-11-25, the user: シンプルな方が良い). -->
+      <button id="voice-btn" title="読み上げ・音声モード" data-i18n-title="common.read_aloud_voice_mode" aria-label="読み上げ・音声モード" data-i18n-aria-label="common.read_aloud_voice_mode"><svg class="mic-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg></button>
     </div>
   </header>
+  <!-- 仕事's views (the deployment notes): one tree seen four ways. -->
+  <nav id="work-views" role="tablist" hidden>
+    <a data-view="tree" href="/work" role="tab"><span data-i18n="common.tree_view">🌳 木</span></a>
+    <a data-view="ball" href="/work/ball" role="tab"><span data-i18n="common.by_ball">🙋 番ごと</span></a>
+    <a data-view="week" href="/work/week" role="tab"><span data-i18n="common.week_view">📅 週</span></a>
+    <a data-view="usage" href="/work/usage" role="tab"><span data-i18n="common.usage_view">📊 利用</span></a>
+  </nav>
   <div id="todo-modal" hidden><div class="box"></div></div>
-  <div id="voice-bar" hidden><span class="st"></span><label><input type="checkbox" class="drive"> 運転中</label><button class="off">✕</button></div>
+  <div id="voice-bar" hidden><span class="st"></span><label><input type="checkbox" class="drive"> <span data-i18n="index.driving">運転中</span></label><button class="off">✕</button></div>
   <div id="board-modal" hidden><div class="box"></div></div>
-
-  <div id="view-list">
-    <!-- Full-text search of this user's own chat logs (GET /search, see
-         app.js's runSearch). Opened by #search-toggle-btn; a hit opens its
-         session scrolled to that message. -->
-    <div id="search-panel" hidden>
-      <form id="search-form">
-        <input id="search-input" type="search" placeholder="チャットを検索(空白で区切るとすべてを含むもの)" enterkeyhint="search" autocomplete="off">
-        <button type="submit">検索</button>
-      </form>
-      <div id="search-status"></div>
-      <div id="search-results"></div>
-    </div>
+  <!-- セッションを始める (the deployment notes 段3, 2026-11-25): one screen for
+       every way of starting one (＋ セッション, a folder's ＋, a work-tree
+       item's ▶, 🤛 引き取る, a GitHub issue's link); each fills in what it
+       knows, and every field can still be changed. A layer over the tab:
+       Back or ✕ closes it, 開始 turns it into the new session's chat. -->
+  <div id="start-modal" hidden><div class="box">
+    <div class="start-head"><span data-i18n="index.start_a_session">＋ セッションを始める</span>
+      <button type="button" class="close" title="閉じる" data-i18n-title="common.close">✕</button></div>
+    <div id="start-note" hidden><span class="what"></span>
+      <label><input type="checkbox" id="start-link" checked> <span data-i18n="index.link_it">結びつける</span></label></div>
+    <!-- 置く場所 (段4): a folder, or an item of a tree (the session then works on it). -->
+    <div class="nsb-row" id="start-place-row"><span class="nsb-icon" title="置く場所" data-i18n-title="index.where_to_put">📍</span>
+      <select id="start-place" title="置く場所" data-i18n-title="index.where_to_put"></select></div>
     <div id="new-session-bar">
       <!-- "Claude" is the interactive TUI preset ("claude-tui"). The headless
            "claude" preset is deliberately absent: the TUI does everything it
@@ -828,15 +1153,26 @@
            appended at runtime by app.js's applyCapabilities() -- only for
            users the backend reports as able to become root.
            (A "Codewhale" option lived here until 2026-08-01.) -->
+      <!-- What to run x where (2026-11-14, the user: Claude/Codex/Shell と
+           Email/Dev/ホスト/ルート に分けて全部の組み合わせで): #kind and #place pick
+           the value of #preset (app.js KIND_PLACE), which stays the one the
+           rest of the page reads. Another machine (the machine selector)
+           shows #preset itself instead, with that machine's own presets.
+           Email and ルート are added by app.js applyCapabilities when this
+           user has them. -->
+      <div class="nsb-row" id="kind-place-row">
+        <select id="kind" title="何を動かすか" data-i18n-title="index.what_run"><option value="claude">Claude</option><option value="codex">Codex</option><option value="shell">Shell</option></select>
+        <select id="place" title="どこで動かすか" data-i18n-title="index.where_run"><option value="dev" selected>devbox</option><option value="host" data-i18n="common.host">ホスト</option></select>
+      </div>
       <div class="nsb-row">
-        <select id="preset"><option value="claude-tui">Claude</option><option value="codex-tui">Codex</option><option value="shell">Shell (sandbox内)</option><option value="host-shell">Shell (sandbox外・ホスト)</option></select>
-        <input id="label" placeholder="名前(任意)">
-        <button id="create-btn">開始</button>
+        <select id="preset" hidden><option value="claude-tui">Claude</option><option value="codex-tui">Codex</option><option value="shell" data-i18n="index.shell_devbox">Shell (devbox)</option><option value="host-shell" data-i18n="index.shell_host">Shell (ホスト)</option><option value="claude-host" data-i18n="index.claude_host">Claude (ホスト)</option><option value="codex-host" data-i18n="index.codex_host">Codex (ホスト)</option></select>
+        <input id="label" placeholder="名前(任意)" data-i18n-placeholder="index.name_optional">
+        <button id="create-btn" data-i18n="common.start_2">開始</button>
       </div>
       <!-- Set by a folder's ＋ → 新しいセッション (the deployment notes). -->
       <div id="nsb-folder" hidden></div>
       <div id="folder-share" hidden><div class="box"></div></div>
-      <!-- Headless-claude-only knobs (see aigw-backend's create_session):
+      <!-- Headless-claude-only knobs (see aiza-backend's create_session):
            which directory under ~/sandhome `claude -p` runs in, and which
            existing Claude Code conversation in that directory to continue
            with `--resume`. Hidden for the tmux presets, which take their
@@ -846,28 +1182,30 @@
              a subfolder"), not chosen from a flattened list of the whole
              tree: any depth is reachable, and each dropdown stays short. -->
         <div class="nsb-row">
-          <span class="nsb-icon" title="作業ディレクトリ">📁</span>
-          <span id="cwd-crumb" title="作業ディレクトリ">sandhome</span>
-          <button id="cwd-up" title="上のフォルダへ">↑</button>
-          <button id="cwd-new" title="ここに新しいフォルダを作る">＋</button>
+          <span class="nsb-icon" title="作業ディレクトリ" data-i18n-title="index.working_directory"><span class="dir-icon"></span></span>
+          <span id="cwd-crumb" title="作業ディレクトリ" data-i18n-title="index.working_directory">sandhome</span>
+          <button id="cwd-up" title="上のディレクトリへ" data-i18n-title="index.up_one_folder">↑</button>
+          <button id="cwd-new" title="ここに新しいディレクトリを作る" data-i18n-title="index.create_new_folder_here">＋</button>
         </div>
         <div class="nsb-row">
-          <select id="cwd-child"><option value="">サブフォルダを開く…</option></select>
+          <select id="cwd-child"><option value="" data-i18n="common.open_subfolder">サブディレクトリを開く…</option></select>
         </div>
         <div class="nsb-row">
-          <span class="nsb-icon" title="続きから">⏱</span>
-          <select id="resume"><option value="">新規</option></select>
+          <span class="nsb-icon" title="続きから" data-i18n-title="common.continue">⏱</span>
+          <select id="resume"><option value="" data-i18n="common.new_2">新規</option></select>
         </div>
-        <!-- claude-tui only (see aigw-backend's create_session): whether the
-             launched `claude` gets --dangerously-skip-permissions. Defaults
-             on; unchecking gets the normal confirm-in-screen-panel behavior
-             this preset had before this option existed. -->
-        <div class="nsb-row">
-          <label style="display:flex; align-items:center; gap:0.4rem; font-size:0.85rem;">
-            <input type="checkbox" id="skip-permissions" checked style="flex:none;">
-            権限確認をスキップ(--dangerously-skip-permissions)
-          </label>
-        </div>
+      </div>
+      <!-- Every Claude and Codex but the Email Claude (the sandbox CLI always
+           skips there): whether the program starts with
+           --dangerously-skip-permissions (Claude) or
+           --dangerously-bypass-approvals-and-sandbox (Codex). Defaults on;
+           unchecking gets the normal confirm-in-screen-panel behavior.
+           app.js applyPresetOptions shows it and picks the label. -->
+      <div class="nsb-row" id="skip-row">
+        <label style="display:flex; align-items:center; gap:0.4rem; font-size:0.85rem;">
+          <input type="checkbox" id="skip-permissions" checked style="flex:none;">
+          <span id="skip-label" data-i18n="common.dont_ask_before_each_ai">AI の操作をいちいち確認しない(--dangerously-skip-permissions)</span>
+        </label>
       </div>
       <!-- Drive/folder picker for a drives-capable ssh machine's Claude
            preset -- Windows machines only, shown
@@ -878,21 +1216,21 @@
            appears once a drive/folder has actually been chosen (see
            app.js's refreshSshConversations) -- unlike #claude-opts there is
            no fixed default directory to resume "the current one" against
-           before that (the deployment notes, aigw-backend's
+           before that (the deployment notes, aiza-backend's
            create_session). -->
       <div id="ssh-cwd-opts">
         <div class="nsb-row">
-          <span class="nsb-icon" title="作業ドライブ/フォルダ">📁</span>
-          <span id="ssh-cwd-crumb" title="作業ドライブ/フォルダ">ドライブを選択…</span>
-          <button id="ssh-cwd-up" title="上のフォルダへ">↑</button>
-          <button id="ssh-cwd-new" title="ここに新しいフォルダを作る">＋</button>
+          <span class="nsb-icon" title="作業ドライブ/ディレクトリ" data-i18n-title="index.working_drive_folder"><span class="dir-icon"></span></span>
+          <span id="ssh-cwd-crumb" title="作業ドライブ/ディレクトリ" data-i18n-title="index.working_drive_folder" data-i18n="common.choose_drive_2">ドライブを選択…</span>
+          <button id="ssh-cwd-up" title="上のディレクトリへ" data-i18n-title="index.up_one_folder">↑</button>
+          <button id="ssh-cwd-new" title="ここに新しいディレクトリを作る" data-i18n-title="index.create_new_folder_here">＋</button>
         </div>
         <div class="nsb-row">
-          <select id="ssh-cwd-child"><option value="">ドライブを選ぶ…</option></select>
+          <select id="ssh-cwd-child"><option value="" data-i18n="common.choose_drive">ドライブを選ぶ…</option></select>
         </div>
         <div class="nsb-row">
-          <span class="nsb-icon" title="続きから">⏱</span>
-          <select id="ssh-resume"><option value="">新規</option></select>
+          <span class="nsb-icon" title="続きから" data-i18n-title="common.continue">⏱</span>
+          <select id="ssh-resume"><option value="" data-i18n="common.new_2">新規</option></select>
           <!-- 🐚/🪟 screen toggle (the deployment notes), shown only on a
                machine that has a desktop variant -- see app.js
                updateDesktopToggle. -->
@@ -904,14 +1242,14 @@
            holding a second copy of the same toggle (the deployment notes). -->
       <div id="ssh-shell-opts">
         <div class="nsb-row">
-          <span class="nsb-icon" title="画面の有無">🖥</span>
-          <span class="desktop-toggle-label">画面</span>
+          <span class="nsb-icon" title="画面の有無" data-i18n-title="index.or_without_screen">🖥</span>
+          <span class="desktop-toggle-label" data-i18n="common.screen">画面</span>
           <button class="desktop-toggle" type="button" style="display:none">🐚</button>
         </div>
       </div>
       <!-- Working-directory-only picker for "shell"/"host-shell"/
            "root-shell"/"codex-tui" (2026-09-27,
-           the deployment notes; codex-tui added 2026-09-28): no resume row (aigw-backend's
+           the deployment notes; codex-tui added 2026-09-28): no resume row (aiza-backend's
            SHELL_CWD_PRESETS has no notion of resuming a specific past
            conversation, unlike #claude-opts). "shell"/"codex-tui" browse
            ~/sandhome (same tree #claude-opts does); "host-shell" this
@@ -921,191 +1259,165 @@
            app.js's refreshShellCwdWorkdirs). -->
       <div id="shell-cwd-opts">
         <div class="nsb-row">
-          <span class="nsb-icon" title="作業ディレクトリ">📁</span>
-          <span id="shell-cwd-crumb" title="作業ディレクトリ">sandhome</span>
-          <button id="shell-cwd-up" title="上のフォルダへ">↑</button>
-          <button id="shell-cwd-new" title="ここに新しいフォルダを作る">＋</button>
+          <span class="nsb-icon" title="作業ディレクトリ" data-i18n-title="index.working_directory"><span class="dir-icon"></span></span>
+          <span id="shell-cwd-crumb" title="作業ディレクトリ" data-i18n-title="index.working_directory">sandhome</span>
+          <button id="shell-cwd-up" title="上のディレクトリへ" data-i18n-title="index.up_one_folder">↑</button>
+          <button id="shell-cwd-new" title="ここに新しいディレクトリを作る" data-i18n-title="index.create_new_folder_here">＋</button>
         </div>
         <div class="nsb-row">
-          <select id="shell-cwd-child"><option value="">サブフォルダを開く…</option></select>
+          <select id="shell-cwd-child"><option value="" data-i18n="common.open_subfolder">サブディレクトリを開く…</option></select>
         </div>
       </div>
     </div>
     <!-- Shown only while a 🔗 tap is waiting for its second session (see
          app.js's linkArmedSessionId) -- "セッション連携" (the deployment notes). -->
+  </div></div>
+  <div id="about-modal" hidden><div class="box">
+    <img class="banner" src="/agents/icons/aiza-banner.svg" alt="AI座 — 人々と AI たちの一座">
+    <ul>
+      <li data-i18n="index.ai_za_company_people_who">AI座 は、会社・部署・研究室など、仕事を共に進める仲間の座です。座の中の人々と AI たちが、一緒に仕事を進めます。</li>
+      <li data-i18n="index.phone_or_pc_browser_start">スマホや PC のブラウザから、Claude Code や Codex などの AI のセッションを作り、チャットで動かします。</li>
+      <li data-i18n="index.sessions_run_in_own_work">セッションは自分の作業箱(devbox)、ホスト、座の Windows マシンなどで動きます(右のマシンのボタンで切り替え)。</li>
+      <li data-i18n="index.share_session_people_in_ai">セッションを座の中の人と共有したり、セッションどうしをつないで AI どうしに相談させたりできます(セッションの ⋯ から)。</li>
+      <li data-i18n="index.in_work_tree_can_see">✅ の仕事の木で、どの仕事のボールを誰(人か AI か)が持っているかが見えます。</li>
+      <li data-i18n="index.problems_or_wishes_use_send">困ったことや欲しいものは、セッションの ⋯ の「📮 窓口に送る」へ。</li>
+    </ul>
+    <button type="button" class="close" data-i18n="common.close">閉じる</button>
+  </div></div>
+
+  <div id="view-list">
+    <!-- 仕事's tree, its top (the deployment notes 段4, the user's mock): one thin
+         row to make (＋ セッション, ＋ 📁 a folder, ＋ 🌳 a tree) and to
+         search the chats, then what to show. -->
+    <div id="tree-tools">
+      <!-- 始める (段3): the one screen every way of starting a session opens. -->
+      <button id="start-btn" type="button" data-i18n="index.start_session">＋ 🤖 AI</button>
+      <button id="new-folder-btn" type="button" title="フォルダを作る" data-i18n-title="index.new_folder_title">＋ 📁</button>
+      <button id="new-tree-btn" type="button" title="新しい仕事(木)" data-i18n-title="index.new_tree_title">＋ 🌳</button>
+      <input id="tree-search" type="search" placeholder="🔍 探す" data-i18n-placeholder="index.search_short" title="チャットの中身を探す" data-i18n-title="index.search_chats" enterkeyhint="search" autocomplete="off">
+      <button id="list-arrange-btn" type="button" title="並べ替え" data-i18n-title="common.arrange">↕</button>
+      <!-- The machine the start screen starts on (no list filter any more). -->
+      <select id="machine-select" title="操作対象のマシン" data-i18n-title="index.machine_work_on" hidden></select>
+      <button id="search-toggle-btn" type="button" hidden>🔍</button>
+      <!-- What ＋ 🤖 / ＋ 📁 / ＋ 🌳 / ↕ open, one at a time, right under the
+           buttons (2026-11-27, the user: ４つのボタンを押したときの追加の
+           フォームの出方が違います。木と検索のやり方にあわせてほしい).
+           The same button again or Esc closes it (list.js ui.tool). -->
+      <div id="tool-panel" hidden>
+        <div id="new-tree-row" class="tool-row" hidden><input id="new-tree-title" placeholder="新しい仕事の題" data-i18n-placeholder="tree.title_job" enterkeyhint="done"><button id="new-tree-add" type="button" data-i18n="tree.add">足す</button></div>
+        <div id="new-folder-row" class="tool-row" hidden><input id="new-folder-name" placeholder="フォルダの名前" data-i18n-placeholder="list.new_folder_name" enterkeyhint="done"><button id="new-folder-add" type="button" data-i18n="list.make">作る</button></div>
+        <div id="arrange-row" class="tool-row" hidden><span class="what" data-i18n="list.arrange_hint">⠿ をつまんで、セッションやフォルダを動かせます</span><button id="arrange-done" type="button" data-i18n="list.arrange_done">終わる</button></div>
+        <div id="start-slot"></div>
+        <!-- ＋ 🌳 on a selected branch: its ＋ 子を足す (tree.js treeChildPanel) -->
+        <div id="child-slot" hidden></div>
+      </div>
+    </div>
+    <div id="tree-filter">
+      <span class="lbl" data-i18n="index.show_what">出すもの</span>
+      <label class="stopped"><input type="checkbox" id="show-stopped"> <span data-i18n="index.stopped_sessions_too">止まったセッションも</span></label>
+      <div class="seg" role="radiogroup">
+        <button type="button" data-f="all" data-i18n="index.all_of_it">全部</button>
+        <button type="button" data-f="you" title="あなたがボールを持つものだけ" data-i18n-title="index.only_your_turn" data-i18n="index.your_turn_short">🙋 あなたの番</button>
+        <button type="button" data-f="stale" title="3日以上動いていないものだけ" data-i18n-title="index.only_stuck_3_days" data-i18n="index.stuck_3_days_short">⏳ 3日止まり</button>
+      </div>
+    </div>
+    <!-- Full-text search of this user's own chat logs (GET /search, see
+         app.js's runSearch). Opened by #search-toggle-btn; a hit opens its
+         session scrolled to that message. -->
+    <div id="search-panel" hidden>
+      <form id="search-form">
+        <input id="search-input" type="search" placeholder="チャットを検索(空白で区切るとすべてを含むもの)" data-i18n-placeholder="index.search_chats_separate_words_spaces" enterkeyhint="search" autocomplete="off">
+        <button type="submit" data-i18n="common.search">検索</button>
+      </form>
+      <div id="search-status"></div>
+      <div id="search-results"></div>
+    </div>
     <div id="link-armed-banner">
       <span id="link-armed-text"></span>
-      <button id="link-armed-cancel">キャンセル</button>
+      <button id="link-armed-cancel" data-i18n="common.cancel_2">キャンセル</button>
     </div>
-    <!-- Above the list, not under it: with many sessions the bottom is far
-         away (2026-11-04, the user could not find it there). -->
-    <button id="new-folder-btn" type="button">＋ フォルダを作る</button>
     <div id="sessions"></div>
     <!-- Closed by default, opened by tapping the
          button -- see renderArchivedSection()/archiveToggleBtn in app.js. -->
-    <button id="archive-toggle-btn" type="button">🗄 アーカイブを開く</button>
+    <button id="archive-toggle-btn" type="button" data-i18n="common.open_archive">🗄 アーカイブを開く</button>
     <div id="archived-list" hidden></div>
-    <!-- Archives of built-in folders that keep their own (aigwExt folders,
+    <!-- Archives of built-in folders that keep their own (aizaExt folders,
          ownArchive; renderArchivedSection()), folded on their own. -->
     <div id="ext-archives"></div>
     <!-- Sessions shared with me, by owner (the deployment notes, renderSharedSection()). -->
-    <button id="shared-toggle-btn" type="button" hidden>👥 共有ログを開く</button>
+    <button id="shared-toggle-btn" type="button" hidden data-i18n="common.open_shared_logs">🧑‍🤝‍🧑 共有ログを開く</button>
+    <!-- The machines' blackboard (Windows machines free / in use / asleep), at the bottom (段4). -->
+    <button id="machine-btn" type="button" title="マシン・黒板" data-i18n-title="index.machines_settings_board"></button>
     <div id="shared-list" hidden></div>
     <div id="tmux-sessions-section">
-      <h2>既存のtmuxセッション</h2>
+      <h2 data-i18n="index.existing_tmux_sessions">既存のtmuxセッション</h2>
       <div id="tmux-sessions"></div>
     </div>
   </div>
 
   <div id="view-auth">
-    <!-- No back button (2026-08-15, at the user's request): #top-header
-         (with the machine selector) stays visible here, unlike on a chat
-         page, so picking any real machine there is how you leave -- see
-         applyMachineFilter(). Renamed "Claude 認証" -> "設定" (2026-08-18)
-         once it grew a second, unrelated concern (Kill Chrome) -- ids/classes
-         below still say auth-* since Claude auth is still most of the page,
-         only the visible title changed. -->
-    <div id="auth-header">
-      <span>設定</span>
-      <!-- Display language (the deployment notes): filled and wired by app.js from i18n.js's LANGS. -->
-      <select id="lang-select" title="表示言語" aria-label="表示言語"></select>
-      <button id="auth-refresh" title="全部再確認">⟳</button>
-    </div>
-    <!-- Whether Claude Code is signed in, in each of the places one can be:
-         inside devbox-<user> (what the "claude"/"claude-tui"/"shell" presets
-         use), on the host as this same user (host-shell's own environment),
-         as root (root-shell's, shown only if that is granted at all), and on
-         each reachable ssh:<machine> (rows added at
-         runtime by addSshAuthRow()). Every row is actionable: "ログイン" opens
-         a normal chat session running `claude auth login` in that same place
-         (the claude-login* presets), since that flow is a URL plus a pasted
-         code rather than a one-shot command; "ログアウト" is one command and
-         answers inline. data-scope is what each button sends to
-         /claude-auth/{login,logout}. Its own page (not part of view-list)
-         since 2026-08-15 -- five rows made the session list too long. -->
+    <!-- 設定 (the deployment notes, 2026-11-25): its own tab, /settings. Cards in
+         the order of the user's design: 表示, AI のログイン, 読み上げと音声,
+         通知, そのほか, アカウント. ids/classes still say auth-* since the
+         sign-in rows were the first thing here (2026-08-15 "Claude 認証",
+         2026-08-18 "設定"). -->
     <div id="claude-auth-section">
-      <!-- Extension point (aigwExt slots "settings", ext/README.md): an
-           extension can add its own auth-row(s) here without touching this
-           core file. First on the page (2026-10-06, at the user's request:
-           the deployment's rows on top, then Accounts, Chrome last). Left
-           empty and untouched without one. -->
-      <div id="ext-slot-settings"></div>
-      <!-- Everything below the deployment's own rows is about
-           signing a tool in somewhere -- one heading for it (2026-10-06,
-           at the user's request). -->
-      <h2 style="margin: 1rem 0 0.5rem; padding: 0; font-size: 0.85rem; color: #9aa5b1;">Accounts</h2>
-      <div class="auth-row">
-        <div class="auth-line">
-          <span class="auth-label">sandbox内</span>
-          <span id="auth-status" class="auth-status-text">確認中…</span>
+      <section class="set-card">
+        <h3 data-i18n="index.display">表示</h3>
+        <!-- Display language (the deployment notes): filled and wired by app.js from i18n.js's LANGS. -->
+        <div class="set-row"><span data-i18n="index.language">表示言語</span>
+          <select id="lang-select" title="表示言語" data-i18n-title="index.language" aria-label="表示言語" data-i18n-aria-label="index.language"></select></div>
+      </section>
+      <section class="set-card">
+        <h3><span data-i18n="index.ai_logins">AI のログイン</span>
+          <button id="auth-refresh" title="全部再確認" data-i18n-title="index.check_everything_again">⟳</button></h3>
+        <!-- Whether Claude Code / Codex is signed in, in each of the places
+             one can be: inside devbox-<user>, on the host as this same user,
+             as root (shown only if that is granted at all), and on each
+             reachable ssh:<machine>. Every row is actionable: "ログイン" opens
+             a normal chat session running the tool's login in that same place
+             (the *-login presets), since that flow is a URL plus a pasted code
+             rather than a one-shot command; "ログアウト" is one command and
+             answers inline. Drawn by app.js (AuthRows, Preact) from one table. -->
+        <div id="auth-rows"></div>
+        <!-- Everyone's Claude / Codex logins, read-only (the deployment notes): at
+             the bottom of this card (2026-11-26, the user). Only for
+             administrators (capabilities.login_list); the server decides. -->
+        <div id="login-list-row" hidden>
+          <button id="login-list-btn" class="auth-btn" data-i18n="index.everyones_logins">🧑‍🤝‍🧑 全員のログイン一覧</button>
         </div>
-        <div class="auth-actions">
-          <button class="auth-login" data-scope="container">ログイン</button>
-          <button class="auth-logout" data-scope="container">ログアウト</button>
-        </div>
-      </div>
-      <!-- This host, as this same user's real $HOME (not sandhome). -->
-      <div class="auth-row" id="auth-row-host">
-        <div class="auth-line">
-          <span class="auth-label">sandbox外(host)</span>
-          <span id="auth-status-host" class="auth-status-text">確認中…</span>
-        </div>
-        <div class="auth-actions">
-          <button class="auth-login" data-scope="host">ログイン</button>
-          <button class="auth-logout" data-scope="host">ログアウト</button>
-        </div>
-      </div>
-      <!-- Hidden entirely unless GET /capabilities says root_shell -- same
-           gate as the "root-shell" preset option (applyCapabilities()). -->
-      <div class="auth-row" id="auth-row-root">
-        <div class="auth-line">
-          <span class="auth-label">root</span>
-          <span id="auth-status-root" class="auth-status-text">確認中…</span>
-        </div>
-        <div class="auth-actions">
-          <button class="auth-login" data-scope="root">ログイン</button>
-          <button class="auth-logout" data-scope="root">ログアウト</button>
-        </div>
-      </div>
-    <!-- Codex CLI's own auth rows, same shape as Claude's above (see the
-         deployment notes on codex) -- no ssh:<machine> rows, codex isn't installed on those
-         machines. Kept as a visually separate group (its own h2) rather
-         than interleaved with Claude's rows, since "container/host/root"
-         repeats and a shared label per row would be ambiguous about which
-         tool it's for. Inside #claude-auth-section (2026-10-06, at the
-         user's request), so the whole page is one scrolling pane instead of
-         Codex staying pinned below it and eating the screen. -->
-    <h2 style="margin: 1rem 0 0.5rem; padding: 0; font-size: 0.85rem; color: #9aa5b1;">Codex</h2>
-    <div id="codex-auth-section">
-      <div class="auth-row">
-        <div class="auth-line">
-          <span class="auth-label">sandbox内</span>
-          <span id="codex-auth-status" class="auth-status-text">確認中…</span>
-        </div>
-        <div class="auth-actions">
-          <button class="codex-auth-login" data-scope="container">ログイン</button>
-          <button class="codex-auth-logout" data-scope="container">ログアウト</button>
-        </div>
-      </div>
-      <div class="auth-row" id="codex-auth-row-host">
-        <div class="auth-line">
-          <span class="auth-label">sandbox外(host)</span>
-          <span id="codex-auth-status-host" class="auth-status-text">確認中…</span>
-        </div>
-        <div class="auth-actions">
-          <button class="codex-auth-login" data-scope="host">ログイン</button>
-          <button class="codex-auth-logout" data-scope="host">ログアウト</button>
-        </div>
-      </div>
-      <!-- Hidden unless GET /capabilities says root_shell, same gate as
-           #auth-row-root above. -->
-      <div class="auth-row" id="codex-auth-row-root">
-        <div class="auth-line">
-          <span class="auth-label">root</span>
-          <span id="codex-auth-status-root" class="auth-status-text">確認中…</span>
-        </div>
-        <div class="auth-actions">
-          <button class="codex-auth-login" data-scope="root">ログイン</button>
-          <button class="codex-auth-logout" data-scope="root">ログアウト</button>
-        </div>
-      </div>
-    </div>
-    <!-- Claude Code on each ssh:<machine> (addSshAuthRow() in app.js fills
-         this in). Its own heading, after Codex, so those rows don't read as
-         more Codex rows. Hidden until at least one row exists. -->
-    <h2 id="ssh-auth-heading" hidden style="margin: 1rem 0 0.5rem; padding: 0; font-size: 0.85rem; color: #9aa5b1;">Other hosts</h2>
-    <div id="ssh-auth-rows"></div>
-    <!-- Everyone's Claude / Codex logins, read-only (the deployment notes). Only
-         for administrators (capabilities.login_list); the server decides. -->
-    <div id="login-list-row" hidden style="margin-top: 1rem;">
-      <button id="login-list-btn" class="auth-btn">👥 全員のログイン一覧</button>
-    </div>
-    <div id="logins-modal" hidden><div class="box"></div></div>
-    <div style="margin-top: 1rem;"></div>
-      <!-- Cleans up headful-Chrome debug instances (the deployment notes)
-           left running from CDP-driven browser testing/automation --
-           otherwise only reaped automatically after 30 minutes idle. First row
-           from 2026-08-18, last since 2026-10-06 (both at the user's request). "全員" only ever
-           shown to users with root-shell access (applyCapabilities()), same
-           gate as #auth-row-root below -- see kill_all_chrome in
-           aigw-backend. -->
-      <div class="auth-row" id="chrome-kill-row">
-        <div class="auth-line">
-          <span class="auth-label">Chrome</span>
-          <span id="chrome-kill-status" class="auth-status-text"></span>
-        </div>
-        <div class="auth-actions">
-          <button id="chrome-kill-own-btn">Kill Chrome</button>
-          <button id="chrome-kill-all-btn">Kill Chrome(全員)</button>
-        </div>
-      </div>
+        <div id="logins-modal" hidden><div class="box"></div></div>
+      </section>
+      <section class="set-card">
+        <h3 data-i18n="index.read_aloud_and_voice">読み上げと音声</h3>
+        <!-- Laid open, not a balloon (2026-11-26, the user): speak.js builds it. -->
+        <div id="speak-settings" class="speak-pop inline"></div>
+      </section>
+      <section class="set-card">
+        <h3 data-i18n="index.notifications">通知</h3>
+        <!-- This device's own: whether it gets the notifications (its push
+             subscription), and what the browser allows (2026-11-26). -->
+        <label class="set-row"><span data-i18n="index.notify_this_device">この端末に通知する</span>
+          <input type="checkbox" id="notify-on"></label>
+        <div class="set-note" id="notify-status"></div>
+      </section>
+      <!-- Extension point (aizaExt slots "settings", ext/README.md): a card of
+           its own for what an extension adds (a site-specific setting), shown once
+           something is in it. -->
+      <section class="set-card" id="ext-slot-settings" hidden></section>
+      <section class="set-card">
+        <h3 data-i18n="index.account">アカウント</h3>
+        <!-- From the old header (2026-11-25). -->
+        <div class="set-row" id="account-row"><span class="who" id="who"></span>
+          <button id="logout-btn" class="auth-btn" data-i18n="index.log_out">ログアウト</button></div>
+      </section>
     </div>
   </div>
 
   <div id="view-chat">
     <div id="chat-header">
       <!-- A session that has actually ended is now detected automatically
-           (remain-on-exit/dead-pane, see aigw-backend) -- so the ← here is
+           (remain-on-exit/dead-pane, see aiza-backend) -- so the ← here is
            just "go look at something else", never "end this". Restored
            2026-08-16 (at the user's request) in the slot the now-removed
            停止 button used to occupy; swipe-right still also works
@@ -1113,53 +1425,53 @@
       <!-- A real link to the list (2026-11-05, the user: "普通のリンクに"), so
            long-press / Ctrl+click / middle-click open the list elsewhere; a
            plain click still closes the chat in place (app.js). -->
-      <a class="back" id="back-btn" href="/agents/" title="一覧へ">←</a>
+      <a class="back" id="back-btn" href="/agents/" title="一覧へ" data-i18n-title="common.list">←</a>
       <!-- Status dot: a tap on a running session's (green) dot offers to stop
            it -- Claude Code gets Ctrl+C twice first so its conversation is
            saved for resume; a tap on an ended, resumable session's (grey)
            dot offers to resume it (2026-10-09; before that, stopping was a
            long-press). See app.js. -->
-      <span class="dot" id="chat-dot" title="タップで停止"></span>
+      <span class="dot" id="chat-dot" title="タップで停止" data-i18n-title="common.tap_stop"></span>
       <span id="chat-label"></span>
       <!-- Someone else's session shared with me. -->
       <span id="chat-owner-badge" class="owner-badge"></span>
       <!-- Shows the pane exactly as tmux renders it right now. The chat log
            is append-only and cannot represent an in-place redraw, which is
            what Claude Code's selection menus are — see _latest_screen in
-           aigw-backend. Hidden for the headless preset, which has no pane. -->
+           aiza-backend. Hidden for the headless preset, which has no pane. -->
       <!-- One button for read-aloud (the deployment notes) and voice mode (the deployment notes),
            2026-11-12 at the user's request: a tap opens a one-line menu
            (openAudioMenu() in app.js) with the two on/off buttons and the
            read-aloud settings. Blue while reading aloud, red in voice mode. -->
-      <button class="speak-btn voice-btn" id="audio-btn" title="読み上げ・音声モード" aria-label="読み上げ・音声モード"><svg class="mic-ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="8.5" y="2.5" width="7" height="12" rx="3.5"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
-      <button class="screen-btn" id="screen-btn" title="画面">🖥️</button>
+      <button class="speak-btn voice-btn" id="audio-btn" title="読み上げ・音声モード" data-i18n-title="common.read_aloud_voice_mode" aria-label="読み上げ・音声モード" data-i18n-aria-label="common.read_aloud_voice_mode"><svg class="mic-ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="8.5" y="2.5" width="7" height="12" rx="3.5"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+      <button class="screen-btn" id="screen-btn" title="画面" data-i18n-title="common.screen">🖥️</button>
       <!-- Both save (💾) and sharing management live in this one panel now
            (2026-08-28, at the user's request) -- save is available to owner
            and shared viewer alike; the sharing controls rendered inside stay
            owner-only (see renderSharePane() in app.js). Button itself is
            always shown, unlike before, since a shared viewer needs it too. -->
-      <button class="share-btn" id="share-btn" title="共有">🧑‍🤝‍🧑</button>
+      <button class="share-btn" id="share-btn" title="連携・共有・保存" data-i18n-title="common.link_share_save" aria-label="その他" data-i18n-aria-label="common.other">⋯</button>
       <!-- Moved here from the (now-hidden-while-chatting) top #top-header
            bar at the user's request (2026-08-15) -- same element, same
            click handler, just relocated in the DOM. -->
-      <button id="reload-btn" title="再読み込み">⟳</button>
     </div>
     <!-- Patrol (the deployment notes): previous/next session without the list. -->
     <div id="patrol-bar" hidden>
       <!-- The session's folder in the list (the deployment notes), not its cwd. -->
       <div id="patrol-folder"></div>
-      <button id="patrol-prev" type="button" title="前のセッション">‹ 前</button>
+      <button id="patrol-prev" type="button" title="前のセッション" data-i18n-title="index.previous_session" data-i18n="index.prev">‹ 前</button>
       <span id="patrol-pos"></span>
-      <select id="patrol-filter" title="巡回するセッション">
-        <option value="all">全部</option>
-        <option value="alive">動いているもの</option>
-        <option value="waiting">確認待ち</option>
-        <option value="you">あなたの番</option>
+      <select id="patrol-filter" title="巡回するセッション" data-i18n-title="index.sessions_go_through">
+        <option value="all" data-i18n="common.all_2">全部</option>
+        <option value="alive" data-i18n="index.running">動いているもの</option>
+        <option value="waiting" data-i18n="common.waiting">確認待ち</option>
+        <option value="you" data-i18n="common.turn">あなたの番</option>
       </select>
-      <!-- 🗄 / 🗑 on the session being shown, then on to the next one. -->
-      <button id="patrol-archive" class="patrol-icon" type="button" title="アーカイブして次へ">🗄</button>
-      <button id="patrol-delete" class="patrol-icon" type="button" title="会話ログを削除して次へ">🗑</button>
-      <button id="patrol-next" type="button" title="次のセッション">次 ›</button>
+      <!-- ✏️ renames the session being shown; 🗄 / 🗑 act on it, then go on to the next one. -->
+      <button id="patrol-rename" class="patrol-icon" type="button" title="名前を変更" data-i18n-title="common.rename">✏️</button>
+      <button id="patrol-archive" class="patrol-icon" type="button" title="アーカイブして次へ" data-i18n-title="index.archive_go_next">🗄</button>
+      <button id="patrol-delete" class="patrol-icon" type="button" title="会話ログを削除して次へ" data-i18n-title="index.delete_chat_log_go_next">🗑</button>
+      <button id="patrol-next" type="button" title="次のセッション" data-i18n-title="index.next_session" data-i18n="index.next">次 ›</button>
     </div>
     <!-- 2026-09-11, at the user's request: a running host/root session whose
          passkey unlock window has since closed keeps its tmux pane alive
@@ -1172,8 +1484,8 @@
          hidden by updateUnlockNotice() in app.js, driven by the same
          unlock-status poll that already drives the header badge. -->
     <div id="unlock-notice" hidden>
-      <span>🔒 root/hostのロックが閉じているため、新着メッセージを取得できません</span>
-      <button id="unlock-notice-btn" type="button">🔓 解錠する</button>
+      <span data-i18n="index.root_host_locked_so_new">🔒 root/hostのロックが閉じているため、新着メッセージを取得できません</span>
+      <button id="unlock-notice-btn" type="button" data-i18n="common.unlock">🔓 解錠する</button>
     </div>
     <!-- #screen-wrap exists only so the floating 🤖 button has a
          position:relative parent to anchor to -- see the CSS comment above. -->
@@ -1182,11 +1494,11 @@
       <!-- 2026-09-01: shown only while
            screenAtLive is false -- see the CSS comment on button.live-btn
            for why this is a required escape hatch, not just a nicety. -->
-      <button class="live-btn" id="screen-live-btn" title="ライブ表示に戻る">● ライブに戻る</button>
+      <button class="live-btn" id="screen-live-btn" title="ライブ表示に戻る" data-i18n-title="index.back_live_view" data-i18n="index.back_live">● ライブに戻る</button>
       <!-- Relocated from #chat-header (2026-08-28, at the user's request):
            floats over this pane's top-right corner instead, so it's only
            reachable while the pane itself is open. -->
-      <button class="agents-btn" id="agents-btn" title="サブエージェント">🤖</button>
+      <button class="agents-btn" id="agents-btn" title="サブエージェント" data-i18n-title="common.subagents">🤖</button>
     </div>
     <div id="agents-pane"></div>
     <div id="share-pane"></div>
@@ -1194,7 +1506,7 @@
       <div id="messages"></div>
       <!-- Shown when new output arrives while scrolled up (app.js
            afterChatAppend, 2026-10-05). -->
-      <button id="new-msg-btn" type="button">↓ 新着</button>
+      <button id="new-msg-btn" type="button" data-i18n="common.new">↓ 新着</button>
     </div>
     <div id="key-toolbar">
       <div id="key-grid"></div>
@@ -1204,15 +1516,15 @@
       <!-- A phone keyboard's autocorrect/autocapitalisation is wrong for
            everything this box is used for: shell command lines, and pasted
            OAuth codes where one changed character is an unexplained failure. -->
-      <textarea id="text" placeholder="メッセージを入力..." rows="1"
+      <textarea id="text" placeholder="メッセージを入力..." data-i18n-placeholder="index.type_message" rows="1"
                 autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false"></textarea>
       <!-- 送信: the literal characters and nothing else. 実行: the same plus
            Enter, and with an empty box, Enter alone. Two buttons rather than
            one because "type" and "submit" are different acts on a terminal,
            and merging them makes the composer unusable whenever the pane is
            not sitting at a text prompt). -->
-      <button id="send-btn" title="Enterを送らずに文字だけ送る">送信</button>
-      <button id="run-btn" title="文字を送ってEnter(空ならEnterだけ)">実行</button>
+      <button id="send-btn" title="Enterを送らずに文字だけ送る" data-i18n-title="index.send_text_without_enter" data-i18n="common.send_2">送信</button>
+      <button id="run-btn" title="文字を送ってEnter(空ならEnterだけ)" data-i18n-title="index.send_text_enter_just_enter" data-i18n="common.run">実行</button>
     </div>
     <!-- Hidden, triggered by the 📎 button #key-toolbar builds (app.js) --
          not visible itself, only its native file picker is. -->
@@ -1222,11 +1534,34 @@
 <!-- Display language (the deployment notes): t() for app.js and the extensions, and
      this page's static text translated here, before any of them runs. -->
 <script src="/agents/i18n.js"></script>
-<script>window.aigwI18n.apply(document.body);</script>
-<!-- The extensions' registry (window.aigwExt, ext/README.md), before
+<script>window.aizaI18n.apply(document.documentElement);</script>
+<!-- The extensions' registry (window.aizaExt, ext/README.md), before
      app.js: app.js loads the extensions /config lists, and they register
      here. -->
 <script src="/agents/ext.js"></script>
+<!-- the tree view (the deployment notes): Preact 10.29.8 + htm 3.1.1, vendored -->
+<script src="/agents/vendor/preact.min.umd.js"></script>
+<script src="/agents/vendor/preact-hooks.umd.js"></script>
+<script src="/agents/vendor/htm.umd.js"></script>
+<!-- The page's own scripts, in order (the deployment notes): one
+     global scope; page.js first (the page's state), app.js last, it starts
+     the page. -->
+<script src="/agents/page.js"></script>
+<script src="/agents/tree.js"></script>
+<script src="/agents/speak.js"></script>
+<script src="/agents/chat.js"></script>
+<script src="/agents/share.js"></script>
+<script src="/agents/list.js"></script>
+<script src="/agents/todo.js"></script>
+<script src="/agents/voice.js"></script>
+<script src="/agents/form.js"></script>
+<script src="/agents/settings.js"></script>
+<script src="/agents/keys.js"></script>
+<script src="/agents/api.js"></script>
+<script src="/agents/links.js"></script>
+<script src="/agents/search.js"></script>
+<script src="/agents/sessionops.js"></script>
+<script src="/agents/compose.js"></script>
 <script src="/agents/app.js"></script>
 </body>
 </html>

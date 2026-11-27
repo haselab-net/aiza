@@ -1,0 +1,96 @@
+#!/usr/bin/env python3
+"""Adapt the box's canonical local-only guard to all Codex PreToolUse tools.
+
+This is the same prompt-injection/mistake guard as Claude's hook, not an OS
+security boundary. It deliberately does not claim to defeat encoded commands.
+Never read local-only data or copy the private policy into the shared tree.
+"""
+import json
+import os
+from pathlib import Path
+import pwd
+import stat
+import subprocess
+import sys
+
+MAX_INPUT = 1024 * 1024
+REASON = 'ローカル LLM 専用の結果を開く操作、または箱の番人を確認できない操作は実行できません。'
+
+
+def box_home():
+    home = Path(pwd.getpwuid(os.getuid()).pw_dir) / 'mailbox'
+    if (not Path('/.dockerenv').is_file() or os.getuid() == 0
+            or os.environ.get('HOME') != str(home)):
+        raise ValueError('Mailbox user environment required')
+    return home
+
+
+def protected(value):
+    if isinstance(value, str):
+        return '.local-only' in value
+    if isinstance(value, dict):
+        return any(protected(k) or protected(v) for k, v in value.items())
+    if isinstance(value, list):
+        return any(protected(v) for v in value)
+    return False
+
+
+def guard_fd(home):
+    fd = os.open('/', os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for component in (home / '.claude/hooks').parts[1:]:
+            nxt = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd)
+            fd = nxt
+        result = os.open('local-only-guard.py', os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+        s = os.fstat(result)
+        if (not stat.S_ISREG(s.st_mode) or s.st_nlink != 1 or s.st_size > MAX_INPUT
+                or s.st_uid not in (0, os.getuid()) or s.st_mode & 0o022):
+            os.close(result)
+            raise ValueError('Invalid guard')
+        return result
+    finally:
+        os.close(fd)
+
+
+def allowed(event, home):
+    if (not isinstance(event, dict) or event.get('hook_event_name') != 'PreToolUse'
+            or not isinstance(event.get('tool_name'), str)
+            or not isinstance(event.get('tool_input'), dict)):
+        return False
+    ti = event['tool_input']
+    if protected(ti):
+        return False
+    # Codex 0.155 maps native exec_command/shell to Bash + command. Other
+    # tools still undergo the opaque-input check above (e.g. apply_patch).
+    if event['tool_name'] == 'Bash' and not isinstance(ti.get('command'), str):
+        return False
+    fd = guard_fd(home)
+    try:
+        result = subprocess.run([sys.executable, '/proc/self/fd/' + str(fd)],
+                                input=json.dumps(event, allow_nan=False),
+                                text=True, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL, timeout=5,
+                                pass_fds=(fd,))
+        return result.returncode == 0
+    finally:
+        os.close(fd)
+
+
+def main():
+    try:
+        raw = sys.stdin.buffer.read(MAX_INPUT + 1)
+        if len(raw) > MAX_INPUT:
+            raise ValueError('Input too large')
+        event = json.loads(raw, parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
+        ok = allowed(event, box_home())
+    except Exception:
+        ok = False
+    if not ok:
+        print(json.dumps({'hookSpecificOutput': {'hookEventName': 'PreToolUse',
+                          'permissionDecision': 'deny', 'permissionDecisionReason': REASON}}, ensure_ascii=False))
+    # Exit zero with a structured deny. Errors must never silently allow a tool.
+
+
+if __name__ == '__main__':
+    main()

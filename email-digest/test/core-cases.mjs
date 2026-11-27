@@ -83,12 +83,13 @@ export function coreTests(label, mk, opts = {}) {
       const r = b.node('add.mjs', [f, 'テストのメモ']);
       assert.equal(r.status, 0, r.stderr);
       assert.match(r.stdout, /^added 2, total 7$/m);
-      assert.match(r.stderr, /REOPEN mail:18a0000000000004/);
+      assert.match(r.stderr, /REPLY mail:18a0000000000004/);          // a reply from someone else reopens as 未読 (↩ 返信)
       const d = b.items(), by = Object.fromEntries(d.items.map(i => [i.id, i]));
       assert.equal(by['mail:18a0000000000009'].status, '未決');
       assert.equal(by['mail:18a0000000000001'].status, '未決');           // byUser keeps the owner's status
       assert.equal(by['mail:18a0000000000001'].summary, '更新。');
-      assert.equal(by['mail:18a0000000000004'].status, '未決');
+      assert.equal(by['mail:18a0000000000004'].status, '未読');
+      assert.deepEqual(by['mail:18a0000000000004'].replied, { at: '2026-11-05T10:00', from: '高橋' });
       assert.equal(by['mail:18a0000000000004'].synced, undefined);
       const m = by['misc:noaction'];
       assert.equal(m.summary.split('\n').length, 2);

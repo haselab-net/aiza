@@ -1,0 +1,10 @@
+[Unit]
+Description=aiza: one Discord DM request from a container
+
+[Service]
+ExecStart=/usr/local/sbin/aiza-discord-dm serve
+StandardInput=socket
+StandardOutput=socket
+StandardError=journal
+TimeoutStopSec=60
+RuntimeMaxSec=120

@@ -1,0 +1,19 @@
+[Unit]
+Description=Deploy the aiza desk bot's fixes that need no person (the deployment notes)
+After=aiza-tree-store.service network-online.target
+ConditionPathExists=/etc/aiza/desk-deploy.env
+
+[Service]
+Type=oneshot
+# AIZA_DESK_REPO (the repository's URL) and AIZA_DESK_PEERS (ssh names of the other hosts)
+EnvironmentFile=/etc/aiza/desk-deploy.env
+# git reaches the repository with root's own credential helper, ssh with root's key
+Environment=HOME=/root
+ExecStart=/usr/local/sbin/aiza-desk-deploy
+# 2026-11-24, the audit: /usr and /etc read-only but where it installs; no new privileges.
+# Not ProtectHome: it reads the sender's commit from their home (runuser ... upload-pack).
+ProtectSystem=full
+ReadWritePaths=/var/lib/aiza-desk-deploy /var/lib/aiza-desk-deploy-work /usr/local/sbin /opt/aiza/static /opt/sandbox-shared/tools/bin
+PrivateTmp=yes
+NoNewPrivileges=yes
+TimeoutStartSec=1800

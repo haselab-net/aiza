@@ -1,26 +1,31 @@
-# aigw
+# AI座 (AI-za)
+
+**AI座(英語では AI-za)は、人々と AI たちの一座**。座は、会社・部署・研究室など、仕事を共に進める仲間の集まりのこと
+(英語の company にも、もとは「共にパンを食べる仲間」と「一座」の意味がある)。座の中の人が話し合い、その周りで AI のセッションたちが
+仕事を進める。誰のどのセッションが何を持っているかを、座の中で見て、渡し合う。
+2026-11 まで名前は aigw(AI gateway)だった。コマンド・サービス・パス・リポジトリの名前も 2026-11-23 に `aiza` にそろえた。
 
 **スマホのブラウザで動くPWA(Webアプリ)から、テキストチャットの画面で
 ターミナル操作や Claude Code などのAIエージェントとの対話を行うための
 仕組み**。ターミナルへの入力・出力をチャットのメッセージのように
 やり取りするUIで、tmuxペインの中身をチャット形式で見たり操作したりできる。
 
-**使い方を画面写真で見る → [チュートリアル](https://haselab-net.github.io/aigw/tutorial/)**(日本語・English・简体中文)。手元で試すなら [Docker で試す](https://haselab-net.github.io/aigw/tutorial/docker.html)。
+**使い方を画面写真で見る → [チュートリアル](https://haselab-net.github.io/aiza/tutorial/)**(日本語・English・简体中文)。手元で試すなら [Docker で試す](https://haselab-net.github.io/aiza/tutorial/docker.html)。
 
 その認証・実行基盤として、「パスキー(WebAuthn)でrootシェルの窓を
 開閉するデーモン」と「1ユーザー1プロセスのバックエンドへ、systemdの
 ソケットアクティベーションで振り分けるプロキシ」を備えている。
 
-**使い方のチュートリアル**(画面写真付き、利用者向け、GitHub Pages): [入口](https://haselab-net.github.io/aigw/tutorial/)・[Docker で試す](https://haselab-net.github.io/aigw/tutorial/docker.html)(自分の PC で動かす。サーバーが無くてもよい)・[基本編](https://haselab-net.github.io/aigw/tutorial/basic.html)・[発展編](https://haselab-net.github.io/aigw/tutorial/advanced.html)。[English](https://haselab-net.github.io/aigw/tutorial/en/)・[简体中文](https://haselab-net.github.io/aigw/tutorial/zh/) もあり、各ページの右上で切り替えられる。ページの元は`docs/tutorial/`。
+**使い方のチュートリアル**(画面写真付き、利用者向け、GitHub Pages): [入口](https://haselab-net.github.io/aiza/tutorial/)・[Docker で試す](https://haselab-net.github.io/aiza/tutorial/docker.html)(自分の PC で動かす。サーバーが無くてもよい)・[基本編](https://haselab-net.github.io/aiza/tutorial/basic.html)・[発展編](https://haselab-net.github.io/aiza/tutorial/advanced.html)。[English](https://haselab-net.github.io/aiza/tutorial/en/)・[简体中文](https://haselab-net.github.io/aiza/tutorial/zh/) もあり、各ページの右上で切り替えられる。ページの元は`docs/tutorial/`。
 
-**主な機能**(利用者から見たもの): セッション一覧とチャット画面、ターミナル画面の表示とソフトキーボード、続きからの再開、
-フォルダ(入れ子・作業フォルダ・アーカイブの中も同じ形)、確認待ちと巡回、通知の一覧、共有(1件ずつ・フォルダごと、閲覧のみ/共同作業)、
+**主な機能**(利用者から見たもの): 仕事・新着・設定のタブ、セッションとチャット画面、ターミナル画面の表示とソフトキーボード、続きからの再開、
+フォルダ(入れ子・作業ディレクトリ・アーカイブの中も同じ形)、仕事の木(枝ごとの番、担当と協力)、確認待ちと巡回、共有(1件ずつ・フォルダごと、閲覧のみ/共同作業)、
 セッション同士の連携(`talkto`)、パスキーで開閉するホスト/root/別コンテナのシェル、ssh でつないだ他のマシン(Windows は画面ありのデスクトップでも)、
-その Windows 機を誰のどのセッションが使っているかの黒板(`aigw-board`)、全員のログインの一覧(見るだけ)、表示言語の切り替え。
+その Windows 機を誰のどのセッションが使っているかの黒板(`aiza-board`)、全員のログインの一覧(見るだけ)、表示言語の切り替え。
 
 **現状のスコープ**: このリポジトリには、上記2つの仕組み、PWAの
 コアフロントエンド(セッション一覧・チャットUI)、そしてセッション管理・
-tmux操作を行うバックエンド本体(`bin/aigw-backend`・`bin/aigw-gateway`)の
+tmux操作を行うバックエンド本体(`bin/aiza-backend`・`bin/aiza-gateway`)の
 汎用コアが入っている。サーバー固有の実装(特定ドメイン限定の自己登録、
 社内ドキュメントビューア連携など)は「拡張ポイントの実装」という形で
 コアから切り離されており、このリポジトリには含まれない——後述の
@@ -29,7 +34,7 @@ tmux操作を行うバックエンド本体(`bin/aigw-backend`・`bin/aigw-gatew
 「モバイル向けPWAでtmuxセッションを操作するUI」の実装例として読むもの、
 という位置づけ。
 
-**外部依存**: `bin/aigw-backend`は、コンテナ内でコマンドを実行するための
+**外部依存**: `bin/aiza-backend`は、コンテナ内でコマンドを実行するための
 別ツール(`sandbox exec`/`sandbox ip`相当のCLI)の存在を前提にしている。
 このツール自体は本リポジトリには含まれない。将来的にはこの依存ツール
 自体も公開し、Linux/Windows(MSYS2等)で動く形にする計画があるが、
@@ -39,12 +44,12 @@ tmux操作を行うバックエンド本体(`bin/aigw-backend`・`bin/aigw-gatew
 手元のブラウザでセッション一覧・チャット画面・シェルと Claude Code のセッションを試せる(Google ログインやパスキーは無い)。
 
 ```sh
-docker build -f docker/Dockerfile -t aigw-demo .
-docker run -d --name aigw-demo -p 127.0.0.1:8878:8878 -v aigw-demo-home:/home/demo aigw-demo
+docker build -f docker/Dockerfile -t aiza-demo .
+docker run -d --name aiza-demo -p 127.0.0.1:8878:8878 -v aiza-demo-home:/home/demo aiza-demo
 # http://localhost:8878/agents/ を開く。詳しくは docker/README.md
 ```
 
-画面写真付きの手順はチュートリアルの[Docker で試す](https://haselab-net.github.io/aigw/tutorial/docker.html)(English・简体中文あり)。
+画面写真付きの手順はチュートリアルの[Docker で試す](https://haselab-net.github.io/aiza/tutorial/docker.html)(English・简体中文あり)。
 
 ## このリポジトリについて
 
@@ -64,26 +69,26 @@ docker run -d --name aigw-demo -p 127.0.0.1:8878:8878 -v aigw-demo-home:/home/de
 
 | ファイル | 役割 |
 |---|---|
-| `bin/aigw-unlockd` | パスキー解錠の信頼の起点。root権限で動く唯一のプロセスで、WebAuthnの検証(`Fido2Server`)とroot用tmuxサーバーの起動/停止を一手に握る。ネットワークに直接触れるプロセス(ゲートウェイやバックエンド)は一切信用せず、検証結果を左右できない。 |
-| `bin/aigw-passkey` | パスキーの登録・一覧・失効・状態表示を行うCLI。判定は一切せず、`aigw-unlockd`のUnixソケットへ中継するだけ。 |
-| `bin/aigw-proxy-handler` | ソケットアクティベーションされた接続1本ごとに、対象ユーザーの停止中バックエンドを起こしてから中継する。 |
-| `bin/aigw-reap-idle` | しばらく使われていないユーザーごとのバックエンドを止める。 |
+| `bin/aiza-unlockd` | パスキー解錠の信頼の起点。root権限で動く唯一のプロセスで、WebAuthnの検証(`Fido2Server`)とroot用tmuxサーバーの起動/停止を一手に握る。ネットワークに直接触れるプロセス(ゲートウェイやバックエンド)は一切信用せず、検証結果を左右できない。 |
+| `bin/aiza-passkey` | パスキーの登録・一覧・失効・状態表示を行うCLI。判定は一切せず、`aiza-unlockd`のUnixソケットへ中継するだけ。 |
+| `bin/aiza-proxy-handler` | ソケットアクティベーションされた接続1本ごとに、対象ユーザーの停止中バックエンドを起こしてから中継する。 |
+| `bin/aiza-reap-idle` | しばらく使われていないユーザーごとのバックエンドを止める。 |
 | `bin/aigw-root-tmux-grant` | パスキー解錠が成立した瞬間だけ、そのユーザーにroot用tmuxサーバーへのアクセスを与える(逆に閉じる)。 |
-| `bin/aigw-gateway` | 共有フロントドア。OAuthログイン・PWA配信・per-userバックエンドへのプロキシ。サーバー固有のルート(下記「バックエンドの拡張ポイント」)は`aigw_site_routes`という任意のPythonモジュールに委譲する形になっており、そのモジュール自体は本リポジトリに含まれない。 |
-| `bin/aigw-backend` | ユーザーごとのバックエンド。tmuxセッション管理・SSE配信。`sandbox exec`相当の外部CLIに依存する(前述)。 |
+| `bin/aiza-gateway` | 共有フロントドア。OAuthログイン・PWA配信・per-userバックエンドへのプロキシ。サーバー固有のルート(下記「バックエンドの拡張ポイント」)は`aiza_site_routes`という任意のPythonモジュールに委譲する形になっており、そのモジュール自体は本リポジトリに含まれない。 |
+| `bin/aiza-backend` | ユーザーごとのバックエンド。tmuxセッション管理・SSE配信。`sandbox exec`相当の外部CLIに依存する(前述)。 |
 | `bin/talkto`・`bin/talkto-remote` | 連携した相手のセッションに文を1つ送るCLI(セッションの中で使う)。ネットワークは使わず、セッションのディレクトリのファイルに1行書いてバックエンドの返事を待つ。`-remote`はssh先のマシン用(bash)。 |
-| `bin/aigw-board` | Windows機の黒板を見るCLI(セッションの中で使う)。`talkto`と同じ経路でバックエンドに頼む。書き込みは不要: Windows機の上のセッションと、セッションの中からの ssh/scp/sftp/rsync は、各バックエンドが自分のユーザーの分を3分ごとの点検で自動で載せる(終了・SSH終了・30分以上動きなし)。`use`/`done` はメモを残したいときだけ。 |
-| `bin/aigw-board-sync` | 黒板を1台にまとめる(root、黒板のあるホストで毎分)。`/etc/aigw/board.json` が `{"role": "feed"}` のホストの書き込みを ssh で取り込み、そのホストには全体の写しを置く(そちらには 📋 を出さない)。 |
-| `bin/aigw-login-list` | 全員のClaude Code・Codexのログイン(アカウントのメール・組織・プランだけ、秘密は出さない)を返すrootのCLI。sudoで引数なしで呼ばれ、誰に何を見せるかを`$SUDO_USER`で自分で決める(rootのログインは、呼んだ人のroot階層の窓が開いているときだけ)。 |
-| `bin/aigw-agent` | ssh先のマシンで長く動く小さな中継。バックエンドの見回り(画面の取得など)を1本のssh接続のJSON行で受け、ポーリングのたびにプロセスを起こさない。 |
-| `bin/aigw-ssh-tmux-watchdog` | ssh先のtmuxサーバーが応答しなくなったのを見つけて立て直す見張り。 |
-| `bin/aigw-desktop-tmux-start` | Windows機のログオン中のデスクトップ側でtmuxサーバーを起動するスクリプト(スケジュールタスクから)。画面のあるアプリを動かすセッション用。 |
-| `bin/aigw-set-email` | 各ユーザーが自分のGoogleアカウントのメールアドレスを自分のGECOS "Other"欄に自己登録するCLI(`aigw-gateway`はログイン時にこれで発行されたメール↔Unixユーザー名の対応を見る)。`root`への昇格はsudo経由、`etc/sudoers.d/aigw.example`参照。 |
-| `systemd/*` | 上記を動かすためのユニット一式(`aigw-gateway.service`・`aigw-backend@.service`含む)。 |
-| `systemd/aigw-backend-proxy-generator` | systemdのgenerator。起動時と`daemon-reload`のたびに、ポート21000〜21099ごとの`aigw-backend-proxy-<port>.socket`と、その接続用の雛形`aigw-backend-proxy-<port>@.service`を作る(下記「ソケットアクティベーションによるuid単位のファンアウト」)。`/etc/systemd/system-generators/`に置く。 |
-| `etc/tmpfiles.d/aigw-backend.conf` | `/run/aigw-backend/`(ソケットアクティベーション用ディレクトリ)を早期boot時に作る`systemd-tmpfiles`設定。`/etc/tmpfiles.d/`にコピーする。 |
-| `etc/sudoers.d/aigw.example` | `aigw-set-email`をNOPASSWDで許可するsudoersルールの例。`/etc/sudoers.d/aigw`として設置(グループ名は自分のデプロイに合わせて変更)。 |
-| `requirements.txt` | `aigw-gateway`/`aigw-backend`が必要とするPythonパッケージ。 |
+| `bin/aiza-board` | Windows機の黒板を見るCLI(セッションの中で使う)。`talkto`と同じ経路でバックエンドに頼む。書き込みは不要: Windows機の上のセッションと、セッションの中からの ssh/scp/sftp/rsync は、各バックエンドが自分のユーザーの分を3分ごとの点検で自動で載せる(終了・SSH終了・30分以上動きなし)。`use`/`done` はメモを残したいときだけ。 |
+| `bin/aiza-board-sync` | 黒板を1台にまとめる(root、黒板のあるホストで毎分)。`/etc/aiza/board.json` が `{"role": "feed"}` のホストの書き込みを ssh で取り込み、そのホストには全体の写しを置く(そちらには 📋 を出さない)。 |
+| `bin/aiza-login-list` | 全員のClaude Code・Codexのログイン(アカウントのメール・組織・プランだけ、秘密は出さない)を返すrootのCLI。sudoで引数なしで呼ばれ、誰に何を見せるかを`$SUDO_USER`で自分で決める(rootのログインは、呼んだ人のroot階層の窓が開いているときだけ)。 |
+| `bin/aiza-agent` | ssh先のマシンで長く動く小さな中継。バックエンドの見回り(画面の取得など)を1本のssh接続のJSON行で受け、ポーリングのたびにプロセスを起こさない。 |
+| `bin/aiza-ssh-tmux-watchdog` | ssh先のtmuxサーバーが応答しなくなったのを見つけて立て直す見張り。 |
+| `bin/aiza-desktop-tmux-start` | Windows機のログオン中のデスクトップ側でtmuxサーバーを起動するスクリプト(スケジュールタスクから)。画面のあるアプリを動かすセッション用。 |
+| `bin/aiza-set-email` | 各ユーザーが自分のGoogleアカウントのメールアドレスを自分のGECOS "Other"欄に自己登録するCLI(`aiza-gateway`はログイン時にこれで発行されたメール↔Unixユーザー名の対応を見る)。`root`への昇格はsudo経由、`etc/sudoers.d/aiza.example`参照。 |
+| `systemd/*` | 上記を動かすためのユニット一式(`aiza-gateway.service`・`aiza-backend@.service`含む)。 |
+| `systemd/aiza-backend-proxy-generator` | systemdのgenerator。起動時と`daemon-reload`のたびに、ポート21000〜21099ごとの`aiza-backend-proxy-<port>.socket`と、その接続用の雛形`aiza-backend-proxy-<port>@.service`を作る(下記「ソケットアクティベーションによるuid単位のファンアウト」)。`/etc/systemd/system-generators/`に置く。 |
+| `etc/tmpfiles.d/aiza-backend.conf` | `/run/aiza-backend/`(ソケットアクティベーション用ディレクトリ)を早期boot時に作る`systemd-tmpfiles`設定。`/etc/tmpfiles.d/`にコピーする。 |
+| `etc/sudoers.d/aiza.example` | `aiza-set-email`をNOPASSWDで許可するsudoersルールの例。`/etc/sudoers.d/aiza`として設置(グループ名は自分のデプロイに合わせて変更)。 |
+| `requirements.txt` | `aiza-gateway`/`aiza-backend`が必要とするPythonパッケージ。 |
 | `static/index.html`・`static/app.js`・`static/manifest.json`・`static/sw.js` | モバイル向けPWAのコアフロントエンド(セッション一覧・チャット画面・tmuxペインの表示/操作・共有・検索)。バックエンドAPI(未公開)への依存はあるが、コード自体にサーバー固有の情報は無い。 |
 | `static/i18n.js` | 表示言語(日本語・English・简体中文)。日本語の原文をキーにした辞書と`t()`、静的なHTMLを一度だけ訳す`apply()`。選んだ言語はブラウザ(localStorage)とユーザーごとのバックエンド(`GET/POST /prefs`)に保存する。チャットの中身は訳さない。 |
 | `static/outbox-browse.html` | チャットに置かれたフォルダの中を見るページ。 |
@@ -93,34 +98,35 @@ docker run -d --name aigw-demo -p 127.0.0.1:8878:8878 -v aigw-demo-home:/home/de
 
 `static/index.html`には2つの空のフック(`#site-extra-header-links`・
 `#site-extra-auth-rows`)があり、`static/app.js`はページ読み込み時に
-`window.aigwSiteExtras.init(...)`(存在すれば)を呼ぶ。`/agents/
+`window.aizaSiteExtras.init(...)`(存在すれば)を呼ぶ。`/agents/
 site-extras.js`という決まった場所に置いた追加スクリプトがあれば、
 サーバー固有の機能をコアの
 ファイルを一切変更せずに追加できる——ファイルが無いデプロイでは黙って
 404になり、何も変わらない。3Dモデル添付を開く処理も同じ仕組み
-(`window.aigwSiteExtras.openModel3d`)で、無ければ素のファイルを
+(`window.aizaSiteExtras.openModel3d`)で、無ければ素のファイルを
 ブラウザ既定の扱いで開く。
 
 表示言語の辞書(`static/i18n.js`)にはコアの画面の文しか入っていない。
 `site-extras.js`やサーバー固有のページ(ログイン画面など)は、自分の文の訳を
-`window.aigwI18n.add({en: {...}, "zh-CN": {...}})`で足してから
-`t()`/`apply()`を使う。キーは日本語の原文、変数は`{name}`。
+`window.aizaI18n.define({"site.<名前>": {ja: "…", en: "…", "zh-CN": "…"}})`で足してから
+`t("site.<名前>")`/`apply()`を使う。鍵は`<場所>.<名前>`(英小文字と`_`)で、3言語を対等に並べる。変数は`{name}`。
+画面の HTML は`data-i18n="<鍵>"`(属性は`data-i18n-title`など)で鍵を書き、`apply()`が埋める。
 
 ### バックエンドの拡張ポイント
 
-`bin/aigw-gateway`・`bin/aigw-backend`はどちらも起動時に一度だけ
-`try: import aigw_site_routes`(無ければ`None`のまま)し、組み込みの
+`bin/aiza-gateway`・`bin/aiza-backend`はどちらも起動時に一度だけ
+`try: import aiza_site_routes`(無ければ`None`のまま)し、組み込みの
 どのルートにも一致しなかったリクエストをその戻り値へ委譲する
-(`aigw_site_routes.handle_get(handler, ctx, path, qs)`のように、
+(`aiza_site_routes.handle_get(handler, ctx, path, qs)`のように、
 コア側の`sign`/`unsign`等いくつかの関数参照を束ねた小さな`ctx`
 オブジェクトを明示的に渡す——両ファイルとも`.py`拡張子を持たない
 実行ファイルで、Pythonの通常のimport解決には乗らないため)。
-`aigw_site_routes`が存在しなければ、それらのリクエストは単に404に
+`aiza_site_routes`が存在しなければ、それらのリクエストは単に404に
 フォールバックするだけで、コア自体の動作には一切影響しない。
 
 このモジュール自体(社内向けのアカウント自己登録・独自ドキュメント
 ビューア連携など、デプロイごとに異なる実装)は本リポジトリには
-含まれない——それぞれのデプロイが自分の`aigw_site_routes.py`を
+含まれない——それぞれのデプロイが自分の`aiza_site_routes.py`を
 別途用意する前提の拡張ポイントである。
 
 ## 設計の要点
@@ -139,7 +145,7 @@ site-extras.js`という決まった場所に置いた追加スクリプトが�
 今の方式は逆で、**sudoルールは1行も無く、ユーザーが引数を渡すroot側の
 プログラムも存在しない**。`aigw-root-tmux@<user>.service`という、ただの
 `tmux -D -S ...`サーバー(rootで動くだけの何の変哲もないtmux)を用意しておき、
-`aigw-unlockd`がWebAuthnの検証に成功した15分間だけ、そのソケットへの
+`aiza-unlockd`がWebAuthnの検証に成功した15分間だけ、そのソケットへの
 アクセス権(tmuxの`server-access`ACL + ファイルパーミッション)を
 `aigw-root-tmux-grant`で与える/剥奪する。ユーザーが動かせるのは
 ただのシェルであり、あらかじめ用意された「rootにできる動詞」の集合ではない。
@@ -148,15 +154,15 @@ site-extras.js`という決まった場所に置いた追加スクリプトが�
 
 ネットワークに直接触れるプロセス(ゲートウェイは無権限ユーザーで動き、
 バックエンドはリクエストしたUnixユーザーで動く)のどちらも、WebAuthnの
-アサーションが妥当かどうかを判定しない。判定するのは`aigw-unlockd`
+アサーションが妥当かどうかを判定しない。判定するのは`aiza-unlockd`
 だけで、これはネットワークから見えない(Unixドメインソケットのみ)。
 ゲートウェイ/バックエンドが仲介するのは、ブラウザの
 `navigator.credentials.*` が作った不透明なJSONのやり取りだけ——
-もしゲートウェイやバックエンドの脆弱性を突かれても、`aigw-unlockd`の
+もしゲートウェイやバックエンドの脆弱性を突かれても、`aiza-unlockd`の
 署名検証(WebAuthn認証器の秘密鍵はデバイスの外に出ない)を偽造すること
 はできない。
 
-`/run/aigw-unlockd.sock` はあえて`0666`(誰でも接続できる)にしてある。
+`/run/aiza-unlockd.sock` はあえて`0666`(誰でも接続できる)にしてある。
 接続できても「ここに資格情報があるが妥当か」と**尋ねられる**だけで、
 状態を変える動詞はすべて`SO_PEERCRED`で呼び出し元の実uidを見て
 本人(かroot)以外を拒否する。ソケットのパーミッションではなく、
@@ -165,19 +171,19 @@ site-extras.js`という決まった場所に置いた追加スクリプトが�
 ### ソケットアクティベーションによるuid単位のファンアウト
 
 1ユーザー1バックエンドプロセスを、そのユーザーがアクセスしたときだけ
-systemdに起動させたい。`aigw-backend-proxy-<port>.socket`
+systemdに起動させたい。`aiza-backend-proxy-<port>.socket`
 (`port = 21000 + (uid - 1000)`)がuidごとに1つずつあり、
-接続が来ると`aigw-proxy-handler`が実際のバックエンドソケットへ中継する
+接続が来ると`aiza-proxy-handler`が実際のバックエンドソケットへ中継する
 (存在しなければ`systemctl start`で起こしてから)。
 
-ソケットはポートごとに別の雛形(`aigw-backend-proxy-<port>@.service`)を持つ。
+ソケットはポートごとに別の雛形(`aiza-backend-proxy-<port>@.service`)を持つ。
 `Accept=yes`のAF_UNIXソケットは、接続ごとのサービスを
 `<雛形>@<n>-<相手のPID>-<相手のUID>.service`と名付ける(`n`はソケットごとの
 受け付け数)。100個のソケットが1つの雛形を共有すると、ゲートウェイという
 1つのプロセスから2つのポートへの接続は`n`が同じなら同じ名前になり、
 先の接続が開いている間、後のソケットが`Device or resource busy`でfailedになる。
 起動直後は全ソケットの`n`が0から揃って始まるので、すぐに起きる。
-100組のユニットはgenerator(`systemd/aigw-backend-proxy-generator`)が作るので、
+100組のユニットはgenerator(`systemd/aiza-backend-proxy-generator`)が作るので、
 直すのは1か所でよい。
 
 素朴に「リクエストごとに新規TCP/Unix接続」だと、1回のページ読み込みで
@@ -193,69 +199,69 @@ systemdに起動させたい。`aigw-backend-proxy-<port>.socket`
 
 ### Python実行環境
 
-`aigw-gateway`/`aigw-backend`の1行目(shebang)は`/opt/aigw/venv/bin/python3`
+`aiza-gateway`/`aiza-backend`の1行目(shebang)は`/opt/aiza/venv/bin/python3`
 に固定してある。この通りの場所にvenvを作れば、シェバンを書き換える必要は無い:
 
 ```sh
-python3 -m venv /opt/aigw/venv
-/opt/aigw/venv/bin/pip install -r requirements.txt
+python3 -m venv /opt/aiza/venv
+/opt/aiza/venv/bin/pip install -r requirements.txt
 ```
 
-`google-auth-oauthlib`/`google-auth`は`aigw-gateway`のOAuthログイン処理が
+`google-auth-oauthlib`/`google-auth`は`aiza-gateway`のOAuthログイン処理が
 直接importする必須の依存(無いとログインできない)。`pywebpush`は
-`aigw-backend`がtry/exceptで囲んで遅延importしており、無ければWeb Push
+`aiza-backend`がtry/exceptで囲んで遅延importしており、無ければWeb Push
 送信を静かにスキップするだけの任意の依存。
 
 ### 専用システムユーザーとCookie署名鍵
 
 ```sh
-useradd --system --no-create-home --shell /usr/sbin/nologin aigw
-mkdir -p /etc/aigw
-openssl rand -base64 32 > /etc/aigw/cookie_secret
-chown aigw:aigw /etc/aigw/cookie_secret
-chmod 600 /etc/aigw/cookie_secret
+useradd --system --no-create-home --shell /usr/sbin/nologin aiza
+mkdir -p /etc/aiza
+openssl rand -base64 32 > /etc/aiza/cookie_secret
+chown aiza:aiza /etc/aiza/cookie_secret
+chmod 600 /etc/aiza/cookie_secret
 ```
 
-`aigw-gateway`はこのファイルを無条件に読む(`Path(...).read_bytes()`)。
+`aiza-gateway`はこのファイルを無条件に読む(`Path(...).read_bytes()`)。
 セッションCookieのHMAC署名鍵なので、**存在しないとログインが機能する
 以前にクラッシュする**。値を変えると既存の全セッションが即座に無効になる。
 
 ### Web Push用VAPID鍵ペア(任意)
 
 ```sh
-/opt/aigw/venv/bin/python3 <<'EOF'
+/opt/aiza/venv/bin/python3 <<'EOF'
 from py_vapid import Vapid02, b64urlencode
 from cryptography.hazmat.primitives import serialization
 
 v = Vapid02()
 v.generate_keys()
-v.save_key("/etc/aigw/vapid_private.pem")
+v.save_key("/etc/aiza/vapid_private.pem")
 
 raw_pub = v.public_key.public_bytes(
     serialization.Encoding.X962,
     serialization.PublicFormat.UncompressedPoint,
 )
-with open("/etc/aigw/vapid_public.txt", "w") as f:
+with open("/etc/aiza/vapid_public.txt", "w") as f:
     f.write(b64urlencode(raw_pub))
 EOF
-chmod 644 /etc/aigw/vapid_private.pem /etc/aigw/vapid_public.txt
+chmod 644 /etc/aiza/vapid_private.pem /etc/aiza/vapid_public.txt
 ```
 
 （`py_vapid`は`pywebpush`が依存として引き込む。`vapid_public.txt`は
 ブラウザの`PushManager.subscribe()`にそのまま渡す生の楕円曲線点の
 base64url表現で、`save_public_key()`が書き出すPEM形式とは別物なので
-注意。）このペアが無くても`aigw-gateway`は`/agents/api/vapid-public-key`を
+注意。）このペアが無くても`aiza-gateway`は`/agents/api/vapid-public-key`を
 404で返すだけで、コア機能(ログイン・セッション操作)には影響しない
 ——Web Pushだけが使えなくなる。
 
 ### 自己登録用sudoersルール
 
 ```sh
-cp etc/sudoers.d/aigw.example /etc/sudoers.d/aigw
-# ファイル内の %sandboxusers を、自分のデプロイでaigwを使わせたい
+cp etc/sudoers.d/aiza.example /etc/sudoers.d/aiza
+# ファイル内の %sandboxusers を、自分のデプロイでaizaを使わせたい
 # グループ名に置き換える
-chmod 440 /etc/sudoers.d/aigw
-visudo -c -f /etc/sudoers.d/aigw
+chmod 440 /etc/sudoers.d/aiza
+visudo -c -f /etc/sudoers.d/aiza
 ```
 
 ### systemdユニットの設置
@@ -263,26 +269,26 @@ visudo -c -f /etc/sudoers.d/aigw
 ```sh
 cp systemd/*.service systemd/*.timer /etc/systemd/system/
 install -d /etc/systemd/system-generators
-install -m 755 systemd/aigw-backend-proxy-generator /etc/systemd/system-generators/
-cp etc/tmpfiles.d/aigw-backend.conf /etc/tmpfiles.d/aigw-backend.conf
+install -m 755 systemd/aiza-backend-proxy-generator /etc/systemd/system-generators/
+cp etc/tmpfiles.d/aiza-backend.conf /etc/tmpfiles.d/aiza-backend.conf
 systemd-tmpfiles --create
-systemctl daemon-reload        # generator が aigw-backend-proxy-<port>.socket を作り sockets.target に入れる
-systemctl enable --now aigw-gateway.service aigw-unlockd.service \
-  aigw-reap-idle.timer
-# aigw-backend@<user>.service はソケットアクティベーションで起きるので enable しない。
+systemctl daemon-reload        # generator が aiza-backend-proxy-<port>.socket を作り sockets.target に入れる
+systemctl enable --now aiza-gateway.service aiza-unlockd.service \
+  aiza-reap-idle.timer
+# aiza-backend@<user>.service はソケットアクティベーションで起きるので enable しない。
 # ソケットは次の起動から自動で listen する。今すぐ使うなら:
 for port in $(seq 21000 21099); do
-  systemctl start "aigw-backend-proxy-${port}.socket"
+  systemctl start "aiza-backend-proxy-${port}.socket"
 done
 ```
 
-`port = 21000 + (uid - 1000)`という前提(`aigw-backend-proxy-<port>.socket`
-の対応するuid範囲)は`aigw-gateway`側のコードにハードコードされている。
+`port = 21000 + (uid - 1000)`という前提(`aiza-backend-proxy-<port>.socket`
+の対応するuid範囲)は`aiza-gateway`側のコードにハードコードされている。
 別の割り当てにしたい場合はそちら側の定数も合わせて変える必要がある。
 
 ### リバースプロキシ・TLS(このリポジトリの範囲外)
 
-`aigw-gateway`自体は`127.0.0.1:8878`で平文HTTPをlistenするだけで、TLS
+`aiza-gateway`自体は`127.0.0.1:8878`で平文HTTPをlistenするだけで、TLS
 終端は行わない。**WebAuthnはHTTPS(またはlocalhost)を要求し、Google
 OAuthのredirect URIも実在するHTTPSのURLでなければならない**ため、実際に
 動かすにはnginx等のリバースプロキシで`/agents/`を`127.0.0.1:8878`へ
@@ -292,20 +298,20 @@ OAuthのredirect URIも実在するHTTPSのURLでなければならない**た�
 
 ### Google Cloud ConsoleでのOAuthクライアント作成(手作業)
 
-`/etc/aigw/oauth_client.json`の`client_id`/`client_secret`は、Google Cloud
+`/etc/aiza/oauth_client.json`の`client_id`/`client_secret`は、Google Cloud
 ConsoleでOAuth 2.0クライアントID(種別: ウェブアプリケーション)を作成し、
 承認済みのリダイレクトURIに`https://<public_host>/agents/oauth2callback`を
 登録して取得する。コマンドで再現できない手作業。
 
 ### WebAuthn設定
 
-`aigw-unlockd`/`aigw-passkey` は WebAuthn の Relying Party 情報を
-`/etc/aigw/webauthn.json` から読む(このリポジトリには実ファイルを含めない):
+`aiza-unlockd`/`aiza-passkey` は WebAuthn の Relying Party 情報を
+`/etc/aiza/webauthn.json` から読む(このリポジトリには実ファイルを含めない):
 
 ```json
 {
   "rp_id": "example.com",
-  "rp_name": "aigw root unlock (example.com)",
+  "rp_name": "aiza root unlock (example.com)",
   "origin": "https://example.com"
 }
 ```
@@ -317,7 +323,7 @@ ConsoleでOAuth 2.0クライアントID(種別: ウェブアプリケーショ�
 
 ### OAuthクライアント設定
 
-`aigw-gateway`はGoogle OAuthのクライアント情報を`/etc/aigw/oauth_client.json`
+`aiza-gateway`はGoogle OAuthのクライアント情報を`/etc/aiza/oauth_client.json`
 から読む(このリポジトリには実ファイルを含めない):
 
 ```json
@@ -333,8 +339,8 @@ ConsoleでOAuth 2.0クライアントID(種別: ウェブアプリケーショ�
 
 ### SSH経由マシン設定(任意)
 
-`aigw-backend`は、SSH経由でも操作したい追加のマシンがあれば
-`/etc/aigw/ssh_machines.json`から読む(このリポジトリには実ファイルを
+`aiza-backend`は、SSH経由でも操作したい追加のマシンがあれば
+`/etc/aiza/ssh_machines.json`から読む(このリポジトリには実ファイルを
 含めない。ファイルが無ければ空のまま——この機能を使わないデプロイでは
 単に無視される):
 
@@ -355,7 +361,7 @@ ConsoleでOAuth 2.0クライアントID(種別: ウェブアプリケーショ�
   (前述「外部依存」)、これが無いままではセッション作成自体が失敗する。
   動作を確かめるだけなら`docker/`のデモを使う(`docker/sandbox`が、そのコンテナの中で
   利用者として実行する仮の代わりをする)。
-- **「Kill Chrome」ボタンは動かない**: `aigw-backend`のコードには、
+- **「Kill Chrome」ボタンは動かない**: `aiza-backend`のコードには、
   ヘッドフルChromeのデバッグセッションを止めるボタンの実装
   (`chromedbg-kill-own`をsudo経由で呼ぶ、`chrome-debug@<user>.service`を
   操作する)が残っているが、その対象となる`chrome-debug@`サービス一式・

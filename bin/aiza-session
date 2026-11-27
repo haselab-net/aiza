@@ -1,0 +1,87 @@
+#!/usr/bin/env python3
+"""aiza-session -- read another aiza session this one was pointed at (the
+plan's stage 14: 「このセッションを要約して」). Like aiza-tree, it appends one
+JSON line ("sref") to $AIZA_TALKTO and waits for this session's backend to
+answer in talkto_status.jsonl; the backend decides what may be read, on
+behalf of this session's owner.
+"""
+import os as _aiza_os  # aigw-legacy: sessions started before the rename (2026-11-23) only have AIGW_*
+for _k in [k for k in _aiza_os.environ if k.startswith("AIGW_")]:
+    _aiza_os.environ.setdefault("AIZA_" + _k[5:], _aiza_os.environ[_k].replace("/.aigw/", "/.aiza/").replace("/.aigw-state/", "/.aiza-state/"))
+import json
+import os
+import secrets
+import sys
+import time
+
+WAIT_SECONDS = 200
+
+HELP = """\
+使い方:
+  aiza-session show <参照>              要約(目的・済んだこと・決めたこと・残る問い・ファイルやブランチ)
+  aiza-session show <参照> --tail [件数]  最後のやり取り(既定 30 件)
+  aiza-session show <参照> --grep <語>    その語を含むやり取り
+
+<参照> は、チャットの [AI座参照 s:<参照> 「題」] の <参照>(<ID> か <持ち主>/<ID>)。
+読めるのは、このセッションの持ち主が見られるセッションだけ(自分のもの、共有されたもの、
+見られる仕事の木に結ばれた devbox のセッション)。Email のセッションは本人の Email のセッションからだけ。
+要約は作るのに少し時間がかかる。作ったものは覚えておき、新しいやり取りが増えるまで使い回す。
+
+オプション: -h, --help  この説明
+"""
+
+
+def main(argv):
+    if not argv or argv[0] in ("-h", "--help", "-help", "help"):
+        print(HELP, end="")
+        return 0
+    if argv[0] != "show" or len(argv) < 2:
+        print("aiza-session: aiza-session show <参照> [--tail [件数] | --grep <語>](aiza-session --help)", file=sys.stderr)
+        return 2
+    req = {"ref": argv[1], "mode": "summary"}
+    rest = argv[2:]
+    if rest and rest[0] == "--tail":
+        req["mode"] = "tail"
+        if len(rest) > 1:
+            try:
+                req["n"] = int(rest[1])
+            except ValueError:
+                print("aiza-session: --tail の件数は数で", file=sys.stderr)
+                return 2
+    elif rest and rest[0] == "--grep":
+        if len(rest) < 2:
+            print("aiza-session: --grep の語がありません", file=sys.stderr)
+            return 2
+        req.update(mode="grep", q=" ".join(rest[1:]))
+    elif rest and rest[0] != "--summary":
+        print(f"aiza-session: 知らない指定です: {rest[0]}", file=sys.stderr)
+        return 2
+    path = os.environ.get("AIZA_TALKTO")
+    if not path:
+        print("aiza-session: $AIZA_TALKTO がありません -- AI座 が始めたセッションの中で使ってください", file=sys.stderr)
+        return 1
+    item_id = secrets.token_hex(8)
+    with open(path, "a") as f:
+        f.write(json.dumps({"ts": time.time(), "id": item_id, "sref": req}, ensure_ascii=False) + "\n")
+    status_path = os.path.join(os.path.dirname(path), "talkto_status.jsonl")
+    deadline = time.time() + WAIT_SECONDS
+    while time.time() < deadline:
+        try:
+            with open(status_path) as f:
+                for raw in f:
+                    try:
+                        obj = json.loads(raw)
+                    except ValueError:
+                        continue
+                    if isinstance(obj, dict) and obj.get("id") == item_id:
+                        print(obj.get("msg") or obj.get("status"))
+                        return 0 if obj.get("status") == "ok" else 1
+        except OSError:
+            pass
+        time.sleep(0.5)
+    print("aiza-session: 返事がありません(AI座 のこのセッションの見張りが止まっているかもしれません)", file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

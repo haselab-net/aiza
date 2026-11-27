@@ -16,9 +16,9 @@
   ローカルユーザーか)
 - 想定される影響
 
-特に価値があるのは、**セッションCookieの検証・回転**(`bin/aigw-gateway`)、
+特に価値があるのは、**セッションCookieの検証・回転**(`bin/aiza-gateway`)、
 **共有セッションの権限境界**(`resolve_session_access`と2つのallowlist)、
-**WebAuthnの検証**(`bin/aigw-unlockd`)まわりの指摘です。
+**WebAuthnの検証**(`bin/aiza-unlockd`)まわりの指摘です。
 
 ---
 

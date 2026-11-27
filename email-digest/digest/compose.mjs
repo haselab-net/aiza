@@ -6,7 +6,7 @@
 //     そのあと値({{bin}} {{code}} {{data}} {{local}} {{gmail}} {{gcal}} {{last}} {{start}} {{q}})を埋める。
 // 断片: EXT/text/*.md を名前の順に。<!-- slot: 名前 --> の行で区切る。どの型にも無い口の名前があれば失敗する
 import fs from 'fs'; import path from 'path'; import { fileURLToPath } from 'url';
-import { CODE, DATA, LOCAL, MAILBOX_HOME } from './conf.mjs';
+import { CODE, DATA, LOCAL, MAILBOX_HOME } from './conf.mjs'; import { allExts, enabled } from './ext.mjs';
 const EXT = process.env.DIGEST_EXT || path.join(CODE, 'private');
 export const TEMPLATES = { 'PROCEDURE.md': 'PROCEDURE.in.md', 'CLAUDE.md': 'CLAUDE.in.md' };
 const PROMPTS = ['prompts/regular.md', 'prompts/quick.md'];
@@ -24,7 +24,10 @@ export function values(abs = false) {
 export function fragments(ext = EXT) {
   const dir = path.join(ext, 'text'), slots = {};
   if (!fs.existsSync(dir)) return slots;
+  // 設定の sources で外した読む先の断片(<番号>-<名前>.md の名前が sources に無い読む先)は使わない
+  const off = new Set(allExts.filter(e => !enabled(e)).map(e => e.name));
   for (const f of fs.readdirSync(dir).filter(f => f.endsWith('.md')).sort()) {
+    if (off.has(f.replace(/^\d+-|\.md$/g, ''))) continue;
     const t = fs.readFileSync(path.join(dir, f), 'utf8');
     const parts = t.split(/^<!-- slot: *([\w-]+) *-->\n/m);
     if (parts[0].trim()) throw new Error(`${f}: 最初の <!-- slot: 名前 --> より前に文がある`);
@@ -68,7 +71,8 @@ export function composeAll() {
   const vals = values(), wrote = [];
   for (const [out, tpl] of Object.entries(TEMPLATES))
     if (writeIfChanged(path.join(DATA, out), NOTE + '\n' + expand(fs.readFileSync(path.join(CODE, tpl), 'utf8'), slots, vals))) wrote.push(out);
-  // 共用方式: 項目のセッションの作業フォルダ(DATA)に Stop フックを置く。写し方式ではリポジトリの .claude/settings.json がそのまま使われる
+  // 共用方式: 項目のセッションの作業フォルダ(DATA)に Stop フックを置く。写し方式ではリポジトリの .claude/settings.json がそのまま使われる。
+  // 箱の HOME の ~/.claude/settings.json は利用者の設定(箱が入れたフックがある)なので、ここでは作らない・触らない(private/ARCHITECTURE.md 7節)
   if (DATA !== CODE) {
     const hook = { hooks: { Stop: [{ hooks: [{ type: 'command', command: `DIGEST_DATA=${JSON.stringify(DATA)} node ${JSON.stringify(path.join(CODE, 'session-end.mjs'))} hook` }] }] } };
     if (writeIfChanged(path.join(DATA, '.claude', 'settings.json'), JSON.stringify(hook, null, 2) + '\n')) wrote.push('.claude/settings.json');

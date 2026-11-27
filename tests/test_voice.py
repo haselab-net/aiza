@@ -22,7 +22,7 @@ class VoiceTest(unittest.TestCase):
         self.asked = []
         self.answer = '{"action":"none","say":""}'
         B._voice_ask = lambda text: (self.asked.append(text), self.answer)[1]
-        for sid, label in (("aaaaaaaaaaa1", "SPIDAR"), ("aaaaaaaaaaa2", "タスク")):
+        for sid, label in (("aaaaaaaaaaa1", "Robot"), ("aaaaaaaaaaa2", "タスク")):
             (self.root / sid).mkdir()
             (self.root / sid / "meta.json").write_text(json.dumps({"id": sid, "label": label, "created_ts": 9e9}))
         (self.root / "aaaaaaaaaaa1" / "events.jsonl").write_text(
@@ -37,7 +37,7 @@ class VoiceTest(unittest.TestCase):
         self.answer = '{"action":"open","session":"aaaaaaaaaaa1","say":"開きます"}'
         out = B.voice_command({"text": "スパイダーを開いて"})
         self.assertEqual(out["action"], "open")
-        self.assertIn("SPIDAR", self.asked[0])
+        self.assertIn("Robot", self.asked[0])
 
     def test_unknown_session_or_action(self):
         self.answer = '{"action":"open","session":"bbbbbbbbbbb1"}'
@@ -53,6 +53,21 @@ class VoiceTest(unittest.TestCase):
         out = B.voice_command({"text": "スパイダーを読んで"})
         self.assertEqual(out["read_text"], "要約です")
         self.assertTrue(self.asked[1].startswith("[要約] 長い返事"))
+
+    def test_brief_summary_once_per_reply(self):
+        # the deployment notes: every page reading other sessions out asks; the model once per reply.
+        B._voice_brief_cache.clear()
+        self.answer = '{"action":"say","say":"一言です"}'
+        sid = "aaaaaaaaaaa1"
+        self.assertEqual(B.voice_summarize_session(sid, brief=True), {"say": "一言です"})
+        self.assertEqual(B.voice_summarize_session(sid, brief=True), {"say": "一言です"})
+        self.assertEqual(len(self.asked), 1)
+        self.assertTrue(self.asked[0].startswith("[一言要約] 長い返事"))
+        with open(self.root / sid / "events.jsonl", "a") as f:
+            f.write(json.dumps({"type": "agent_output", "text": "次の返事"}) + "\n")
+        B.voice_summarize_session(sid, brief=True)
+        self.assertEqual(len(self.asked), 2)
+        self.assertEqual(B.voice_summarize_session("aaaaaaaaaaa2", brief=True)["say"], "返事なし")
 
     def test_empty(self):
         with self.assertRaises(ValueError):

@@ -1,0 +1,26 @@
+[Unit]
+Description=aiza work tree store (every aiza user's backend asks it; who asks is told by the socket's peer credentials)
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/aiza-tree-store
+Restart=on-failure
+RestartSec=3
+RuntimeDirectory=aiza-tree
+RuntimeDirectoryMode=0755
+StateDirectory=aiza-tree
+StateDirectoryMode=0700
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateNetwork=yes
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+
+[Install]
+WantedBy=multi-user.target

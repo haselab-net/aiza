@@ -1,6 +1,6 @@
 """The Windows machines' blackboard (the deployment notes, 2026-11-06):
 sessions on a Windows machine appear by themselves; claims from inside a
-session (aigw-board, through the talkto file) and from the page; the check
+session (aiza-board, through the talkto file) and from the page; the check
 marks ended (stopped / fell / deleted) and long-idle (30 min) entries.
 
     python3 -m unittest discover -s tests -v
@@ -33,7 +33,7 @@ class BoardTest(unittest.TestCase):
         B.list_sessions = lambda on_behalf_of=None: self.rows
         B.session_roots = lambda: [root / "s"]
         self.ssh = {}
-        B._board_ssh_uses = lambda talkto: dict(self.ssh)
+        B._board_ssh_uses = lambda talkto, *a: dict(self.ssh)
         B.BOARD_SSH_CONFIG = str(root / "ssh_config")
 
     def tearDown(self):

@@ -7,6 +7,7 @@ if (!id || !ST.includes(status)) { console.error('usage: set-status.mjs <id> <' 
 const d = JSON.parse(fs.readFileSync(DB, 'utf8'));
 const it = d.items.find(x => x.id === id);
 if (!it) { console.error('no such item: ' + id); process.exit(1); }
+if (it.held) { console.error('ローカルの確認で保留中の項目(held)。本人がまとめのページで「Claudeに渡す」を選ぶまで扱えません: ' + id); process.exit(3); }
 it.status = status; it.changed = new Date().toISOString(); it.byUser = true;
 delete it.doneAsk; // ページで既決にされた後の Claude の判断(既決で確定・未決で戻す)
 if (note) it.note = note;

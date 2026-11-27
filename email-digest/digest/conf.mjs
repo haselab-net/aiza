@@ -18,7 +18,7 @@ const readJson = f => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } c
 const DEFAULTS = {
   account: '',            // Gmail のアドレス(メールのリンクの authuser)。空なら ~/.gmail/account(gmail.py が書く)
   pageUrl: '/email/',     // まとめページの URL(表示用)
-  // 通知とセッション起動の送り先。aigw の notify 専用リスナーは docker0 の 23000+(uid-1000)
+  // 通知とセッション起動の送り先。aiza の notify 専用リスナーは docker0 の 23000+(uid-1000)
   notifyUrl: `http://172.17.0.1:${23000 + uid - 1000}/notify`,
   gmail: '',              // gmail.py のパス(空ならコードの1つ上)
   me: { name: '', profile: '', mentions: [], nameRe: '' },

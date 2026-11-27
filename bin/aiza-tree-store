@@ -1,0 +1,1311 @@
+#!/usr/bin/env python3
+"""aiza-tree-store -- the work tree's store, shared by every aiza user of
+this host (the plan's stage 2: one job split into children, each with who
+holds the ball). Runs as root; each user's aiza-backend asks it over a unix
+socket and is told apart by the socket's peer credentials (SO_PEERCRED), so
+no backend can act as another user, and a node seen by its owner alone is
+never handed to anyone else.
+
+One request per connection: a JSON line {"op": ..., ...}; one JSON line back.
+
+  list                          the nodes the caller may see
+  add      {title, parent?, visibility?, links?, ball?}
+  update   {id, title?, parent?, state?, ball?, visibility?, members?, links?}
+  remove   {id}                 only a node without children
+  ball     {session, ball}      the ball of the caller's node that session took on last (current_of)
+  history  {id}                 what happened to a node the caller may see
+  owners_for {user}             (the gateway only) owners of sessions linked to nodes that user may see
+  take     {id, session}        take a node's work on with one's own session (and become its member)
+  untake   {id}                 undo one's own take
+  taken_for / ack_taken {id}    takes of one's sessions not yet told to them
+  recent   {since}              what happened since then to the nodes the caller may see
+  report   {desk, title, ref?, deploy?}  (any lab member) a report to the desk: a child of the desk's root;
+                                with deploy {repo, sha}, a request to deploy a commit the sender made
+  desk     {id}                 (root only) make a root of root's the desk's root, seen by the lab
+
+The desk (the deployment notes, 2026-11-19): reports of bugs and missing
+features, one child each under one lab-visible root. A report's session is
+a link only (links.ref: host/user/kind/session), never links.session, so
+the session is not shared with the lab the way a node's session is.
+A report may ask for a deploy (the desk's stage 4): "deploy" names a commit
+in a repository of the sender's, on the host of its session's ref; the
+desk's deploy tool fetches it as that user and takes it by the same rule as
+the bot's fixes. Its ball says so (DEPLOY_WAITING), so the bot does not
+start on it.
+
+Rest ("その他"), made only when needed (2026-11-22, the user: その他を作るほう
+が良い場合もありませんか？ 親の仕事がない状態で子ができるときと、親の仕事を
+分割して子に分けるとき): a node that gets children keeps its own session and
+ball. It is done when all its children are and its own part is (no session
+on it, or a done ball) -- settle. Only when its session goes on working on
+it after it has children (a status that is not 🤖 or ✓ comes to it) is its
+own work made a child, named by that status's text (else "その他"), and the
+session and ball move there; that child, like the rest child from before,
+makes the node done exactly when all its children are. A session that moves
+from a node to one under it (or from a rest child to one under the same
+parent) takes its work down with it: the node it left keeps no session
+(moved down), not left. Nodes that follow GitHub (a repo's root and its
+issues) are left out.
+
+Before the turn (2026-11-22, the user: 置き去りは多くの場合、AI の仕事は
+終わって人に最終確認を求めて止まり、人がそれに答えずに次の仕事を与えた場合
+に起きている): a new message turns a node's ball to 🤖 at once. What it was
+just before (🙋, 💤, ✓ ...) is kept for a while (before_turn); if the
+session then takes on another node elsewhere within BEFORE_TURN_KEEP, the
+node it leaves goes back to that -- a 🙋 stays the person's, a ✓ closes
+again -- instead of being left with a 🤖 nobody holds.
+
+One session, one place: a session may hold several nodes, but its state
+(the ball, with its text) goes only to the one it took on last -- linked_ts,
+set whenever a session is linked to a node (add, update with a new session
+or "relink", take). When it takes on another (2026-11-19, the user: 木の
+止めているものが実際より多い), each open one it held before is closed if
+its ball was done, and otherwise marked "left" (置き去り: no session follows
+it any more) instead of showing the ball it had as if still held. Linked
+again, it is not left.
+
+Closing: a done ball closes the node (closed_by "ball"); the session's next
+ball that is not done opens it again. Not a 担当's while its team still works
+(lead_busy: helpers, or open handoff branches under its item): its ball then
+waits for them (kind "ai", wait "team", the done text kept) and the node is
+closed when the last of them is done or gone (release_waiting_leads). Closed by hand (closed_by "hand"), the
+session's state goes nowhere until it takes something on again -- not to an
+older node of the same session.
+
+Visibility: "self" (the owner, and the members named) or "lab" (every user
+of the lab group as well). The owner and the members may change a node;
+only the owner changes who sees it, or removes it. Every change is appended
+to the history file (who, when, what). Both files are root's alone.
+
+Shared from the root (2026-11-19, the user: 木の根を共有した場合、その子孫も
+同じ共有設定に / 枝葉側の設定は消して根に合わせる / 根で共有していない場合は
+この限りではない): under a root shared with someone (lab, or members named),
+every descendant sees by the root's setting -- its visibility, its members,
+and the root's owner -- and keeps nothing of its own (only a taker stays a
+member while the take stands). Such a node is marked "follows" (the root's
+id) and its own setting is not changed by hand. Under a root shared with no
+one, each node keeps its own; the root's owner making it private again
+takes its descendants back with it.
+"""
+import grp
+import json
+import os
+import pwd
+import re
+import secrets
+import socket
+import struct
+import subprocess
+import sys
+import threading
+import time
+
+SOCK_DIR = os.environ.get("AIZA_TREE_SOCK_DIR", "/run/aiza-tree")
+SOCK = os.path.join(SOCK_DIR, "sock")
+DATA_DIR = os.environ.get("AIZA_TREE_DIR", "/var/lib/aiza-tree")
+NODES = os.path.join(DATA_DIR, "nodes.json")
+HISTORY = os.path.join(DATA_DIR, "history.jsonl")
+# Teams (the deployment notes, 2026-11-27): a lead session (🧭 担当, the one an
+# item is linked to) and the sessions helping it (🤝 協力). Kept apart from
+# the nodes: a helper writes nothing into the tree, and goes wherever its
+# lead goes. {"<owner>/<lead sid>": {"lead": {"owner", "session"},
+# "helpers": [{"owner", "session", "ts"}]}}.
+TEAMS = os.path.join(DATA_DIR, "teams.json")
+LAB_GROUP = os.environ.get("AIZA_TREE_LAB_GROUP", "sandboxusers")
+GATEWAY_USER = os.environ.get("AIZA_TREE_GATEWAY_USER", "aiza")
+
+TITLE_MAX = 200
+MAX_NODES = 20000
+MAX_REQUEST = 64 * 1024
+ID_RE = re.compile(r"^n[0-9a-f]{12}$")
+SESSION_RE = re.compile(r"^[0-9a-f]{12}$")
+ISSUE_RE = re.compile(r"^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}#[0-9]{1,9}$")
+HANDOFF_RE = re.compile(r"^h[0-9a-f]{12}$")
+# A desk report's session, as a link only: <host>/<user>/<kind>/<session>.
+REF_RE = re.compile(r"^[a-z0-9][a-z0-9.-]{0,62}/[a-z_][a-z0-9_-]{0,31}/(devbox|email|host|root|ssh)/[0-9a-f]{8,32}$")
+REPO_RE = re.compile(r"^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$")
+USER_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
+BALL_KINDS = ("person", "ai", "sleep", "ext", "done")
+STATES = ("open", "done")
+VISIBILITY = ("self", "lab")
+
+REST_TITLE = "その他"
+BEFORE_TURN_KEEP = 30 * 60
+SHORT_TITLE = 20   # titles made up from a text (2026-11-22, the user: 推測で作るタイトルの長さはだいたい20文字程度に)
+
+
+def short_title(text, n=SHORT_TITLE):
+    """About n characters of text: its first sentence if that is short enough,
+    else cut at a 、 or space before n, with …."""
+    t = " ".join(str(text or "").split()).rstrip("…")
+    if len(t) <= n + 4:
+        return t
+    for sep in "。！？!?":
+        i = t.find(sep)
+        if 0 < i <= n + 4:
+            return t[:i]
+    cut = t[:n]
+    j = max(cut.rfind(c) for c in "、,・ (（「:：")
+    if j >= n // 2:
+        cut = cut[:j]
+    return cut.rstrip() + "…"
+
+
+lock = threading.Lock()
+
+# the deployment notes (2026-11-21, the user: 木の共有も Discord の知らせから
+# 直接飛べるように): someone newly named on a node gets a Discord DM with a
+# link to it. The helper reads the node itself (title, members) and sends
+# only if the person is still named; it never holds sharing up.
+NOTIFY_HELPER = os.environ.get("AIZA_TREE_NOTIFY_HELPER", "/usr/local/sbin/aiza-discord-dm")
+
+
+def notify_members(user, node_id, added):
+    if not NOTIFY_HELPER or not os.path.isfile(NOTIFY_HELPER):
+        return
+
+    def run():
+        for to in added:
+            try:
+                subprocess.run([NOTIFY_HELPER, "tree", user, to, node_id],
+                               stdin=subprocess.DEVNULL, capture_output=True, timeout=60)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+    threading.Thread(target=run, daemon=True).start()
+
+
+def log(msg):
+    print(f"[aiza-tree-store] {msg}", file=sys.stderr, flush=True)
+
+
+def load():
+    try:
+        with open(NODES) as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def save(nodes):
+    tmp = NODES + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(nodes, f, ensure_ascii=False)
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, NODES)
+
+
+def load_teams():
+    try:
+        with open(TEAMS) as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def save_teams(teams):
+    tmp = TEAMS + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(teams, f, ensure_ascii=False)
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, TEAMS)
+
+
+def team_of_helper(teams, owner, sid):
+    """The key of the team this session helps, or None (one at a time)."""
+    for k, t in teams.items():
+        if any(h["owner"] == owner and h["session"] == sid for h in t.get("helpers", [])):
+            return k
+    return None
+
+
+def drop_helper(teams, owner, sid):
+    """This session helps no one any more. True when it did."""
+    k = team_of_helper(teams, owner, sid)
+    if k is None:
+        return False
+    t = teams[k]
+    t["helpers"] = [h for h in t["helpers"] if not (h["owner"] == owner and h["session"] == sid)]
+    if not t["helpers"]:
+        del teams[k]
+    return True
+
+
+def now_a_lead(n):
+    """n's session took n on: it is a 担当 now, so it helps no one."""
+    sid = (n.get("links") or {}).get("session")
+    if not sid:
+        return
+    teams = load_teams()
+    if drop_helper(teams, n.get("session_owner") or n["owner"], sid):
+        save_teams(teams)
+
+
+def team_view(nodes, teams, viewer):
+    """node id -> its lead's helpers, on the item each lead holds now (open),
+    for those who may see that item."""
+    out = {}
+    for t in teams.values():
+        lead = t.get("lead") or {}
+        n = current_of(nodes, lead.get("owner"), lead.get("session"))
+        if n is None or node_done(n) or not can_see(n, viewer):
+            continue
+        out[n["id"]] = [{"owner": h["owner"], "session": h["session"]} for h in t.get("helpers", [])]
+    return out
+
+
+def lead_busy(nodes, n, teams=None):
+    """n's 担当 still has work out (2026-11-27, the user: このセッションが木から
+    よく消えます): helpers in its team, or an open handoff branch under its
+    item (under the parent when n is その他, rest), n itself aside."""
+    sid = (n.get("links") or {}).get("session")
+    if not sid:
+        return False
+    owner = n.get("session_owner") or n["owner"]
+    teams = load_teams() if teams is None else teams
+    if (teams.get(f"{owner}/{sid}") or {}).get("helpers"):
+        return True
+    kids = {}
+    for m in nodes.values():
+        kids.setdefault(m.get("parent"), []).append(m)
+    todo, seen = [n.get("parent") if n.get("rest") else n["id"]], set()
+    while todo and len(seen) < 100000:
+        for m in kids.get(todo.pop(), []):
+            if m["id"] in seen:
+                continue
+            seen.add(m["id"])
+            if m["id"] != n["id"] and (m.get("links") or {}).get("handoff") and not node_done(m):
+                return True
+            todo.append(m["id"])
+    return False
+
+
+def release_waiting_leads(nodes, user, teams=None):
+    """A 担当 waiting for its team (lead_busy) whose team is done: its done
+    ball comes back and closes it. The ids changed."""
+    teams = load_teams() if teams is None else teams
+    out = []
+    for n in list(nodes.values()):
+        b = n.get("ball") or {}
+        if b.get("wait") != "team" or n.get("state") == "done" or lead_busy(nodes, n, teams):
+            continue
+        n["ball"] = {k: v for k, v in b.items() if k != "wait"}
+        n["ball"].update(kind="done", since=time.time())
+        n["updated_ts"] = time.time()
+        record(user, "ball", n["id"], {"ball": n["ball"]})
+        close(n, "ball", user)
+        out.append(n["id"])
+    return out
+
+
+def record(user, op, node_id, changes):
+    with open(HISTORY, "a") as f:
+        f.write(json.dumps({"ts": time.time(), "user": user, "op": op, "id": node_id, "changes": changes},
+                           ensure_ascii=False) + "\n")
+    os.chmod(HISTORY, 0o600)
+
+
+def in_lab(user):
+    try:
+        g = grp.getgrnam(LAB_GROUP)
+    except KeyError:
+        return False
+    try:
+        primary = pwd.getpwnam(user).pw_gid == g.gr_gid
+    except KeyError:
+        primary = False
+    return primary or user in g.gr_mem
+
+
+def can_see(node, user):
+    if node["owner"] == user or user in node.get("members", []):
+        return True
+    return node.get("visibility") == "lab" and in_lab(user)
+
+
+def can_write(node, user):
+    return node["owner"] == user or user in node.get("members", [])
+
+
+# A shared root's Discord channel and its branches' threads (the deployment notes):
+# node id -> link, written by aiza-discord-tree; handed with the node ("discord")
+# to those who see it, for the tree's 💬.
+DISCORD_LINKS = os.environ.get("AIZA_DISCORD_TREE_LINKS", "/var/lib/aiza-discord-tree/links.json")
+DISCORD_LINK_RE = re.compile(r"^https://discord\.com/channels/\d{15,21}/\d{15,21}$")
+
+
+def discord_links():
+    try:
+        with open(DISCORD_LINKS) as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {k: v for k, v in data.items() if isinstance(v, str) and DISCORD_LINK_RE.match(v)}
+
+
+def shared(n):
+    return n.get("visibility") == "lab" or bool(n.get("members"))
+
+
+def root_of(nodes, n):
+    steps = 0
+    while n.get("parent") in nodes and steps < 1000:
+        n = nodes[n["parent"]]
+        steps += 1
+    return n
+
+
+def follow_root(nodes, user, force=()):
+    """Descendants of a shared root (or of a root in force: its setting just
+    changed by its owner) take the root's setting; the others drop the mark."""
+    kids = {}
+    for m in nodes.values():
+        kids.setdefault(m.get("parent"), []).append(m)
+    seen = set()
+    for r in list(nodes.values()):
+        if r.get("parent") in nodes or not (shared(r) or r["id"] in force):
+            continue
+        stack = list(kids.get(r["id"]) or [])
+        while stack and len(seen) <= len(nodes):
+            n = stack.pop()
+            if n["id"] in seen:
+                continue
+            seen.add(n["id"])
+            stack.extend(kids.get(n["id"]) or [])
+            t = n.get("taken") or {}
+            members = set(r.get("members") or []) | {r["owner"]}
+            if t.get("state") == "taken" and t.get("by"):
+                members.add(t["by"])
+            members.discard(n["owner"])
+            want = {"visibility": r.get("visibility", "self"), "members": sorted(members)}
+            if shared(r):
+                want["follows"] = r["id"]
+            have = {k: n.get(k) for k in want}
+            if have != want or (n.get("follows") and not shared(r)):
+                n.update(want)
+                if not shared(r):
+                    n.pop("follows", None)
+                n["updated_ts"] = time.time()
+                record(user, "follow_root", n["id"], want)
+    for n in nodes.values():
+        if n["id"] not in seen and n.get("follows"):
+            n.pop("follows", None)
+
+
+def clean_title(v):
+    if not isinstance(v, str) or not v.strip():
+        raise ValueError("a title is needed")
+    t = " ".join(v.split())
+    return t[:TITLE_MAX]
+
+
+def clean_ball(v):
+    if v is None:
+        return None
+    if not isinstance(v, dict) or v.get("kind") not in BALL_KINDS:
+        raise ValueError("bad ball")
+    out = {"kind": v["kind"], "since": time.time()}
+    if isinstance(v.get("who"), str):
+        out["who"] = v["who"][:80]
+    if isinstance(v.get("until"), (int, float)) and not isinstance(v.get("until"), bool):
+        out["until"] = float(v["until"])
+    if isinstance(v.get("text"), str):
+        out["text"] = v["text"][:120]
+    return out
+
+
+def clean_links(v):
+    if v is None:
+        return {}
+    if not isinstance(v, dict):
+        raise ValueError("bad links")
+    out = {}
+    for k, rx in (("session", SESSION_RE), ("issue", ISSUE_RE), ("handoff", HANDOFF_RE), ("repo", REPO_RE),
+                  ("ref", REF_RE)):
+        if k in v and v[k] is not None:
+            if not isinstance(v[k], str) or not rx.match(v[k]):
+                raise ValueError(f"bad {k}")
+            out[k] = v[k]
+    return out
+
+
+REPORT_POS_INTS = ("at", "events", "seq", "conv_line")
+DEPLOY_WAITING = "窓口が配備を確かめる"
+SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+DEPLOY_REPO_RE = re.compile(r"^/[A-Za-z0-9._+@/-]{1,300}$")
+
+
+def clean_deploy(v):
+    """A commit to deploy: an absolute folder (plain characters, no ..) and a full SHA."""
+    if not isinstance(v, dict) or set(v) != {"repo", "sha"}:
+        raise ValueError("bad deploy")
+    repo, sha = v["repo"], v["sha"]
+    if not (isinstance(repo, str) and DEPLOY_REPO_RE.match(repo) and "/../" not in repo + "/"
+            and "//" not in repo and not repo.endswith("/..")):
+        raise ValueError("bad deploy")
+    if not (isinstance(sha, str) and SHA_RE.match(sha)):
+        raise ValueError("bad deploy")
+    return {"repo": repo, "sha": sha}
+CONV_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{7,63}$")
+
+
+def clean_report_pos(v):
+    """Where a reported session's logs stood: counts and an id, no content."""
+    if v is None:
+        return None
+    if not isinstance(v, dict) or set(v) - set(REPORT_POS_INTS) - {"conv"}:
+        raise ValueError("bad pos")
+    out = {}
+    for k in REPORT_POS_INTS:
+        if k in v:
+            if not isinstance(v[k], int) or isinstance(v[k], bool) or not 0 <= v[k] < 10**10:
+                raise ValueError("bad pos")
+            out[k] = v[k]
+    if "conv" in v:
+        if not isinstance(v["conv"], str) or not CONV_RE.match(v["conv"]):
+            raise ValueError("bad pos")
+        out["conv"] = v["conv"]
+    return out
+
+
+def clean_members(v):
+    if not isinstance(v, list) or len(v) > 50 or not all(isinstance(u, str) and USER_RE.match(u) for u in v):
+        raise ValueError("bad members")
+    return sorted(set(v))
+
+
+def is_below(nodes, node_id, maybe_parent):
+    """Whether making maybe_parent the parent of node_id would make a loop."""
+    cur, steps = maybe_parent, 0
+    while cur and steps < 1000:
+        if cur == node_id:
+            return True
+        cur = (nodes.get(cur) or {}).get("parent")
+        steps += 1
+    return False
+
+
+def managed(n):
+    """A node that follows GitHub (a repo's root, an issue), the desk's root
+    or a report to it (the work on a report is the sessions under it): no
+    rest child."""
+    links = n.get("links") or {}
+    return bool(links.get("repo") or links.get("issue") or n.get("desk") or n.get("report"))
+
+
+def children(nodes, pid):
+    return [m for m in nodes.values() if m.get("parent") == pid]
+
+
+def rest_of(nodes, pid):
+    return next((m for m in nodes.values() if m.get("parent") == pid and m.get("rest")), None)
+
+
+def ensure_rest(nodes, p, user, migrating=False, title=None):
+    """A child for p's own work (named title, else "その他"); p's session and
+    ball move to it. Made when p's session goes on working on p after p has
+    children (the ball op), or when p is opened again by hand. Returns the
+    new node or None."""
+    if p is None or managed(p) or p.get("rest") or rest_of(nodes, p["id"]):
+        return None
+    links = p.get("links") or {}
+    now = time.time()
+    sid = links.get("session")
+    rest = {"id": "n" + secrets.token_hex(6), "parent": p["id"], "title": clean_title(short_title(title)) if title and short_title(title) else REST_TITLE, "rest": True,
+            "owner": p["owner"], "members": list(p.get("members") or []), "visibility": p.get("visibility", "self"),
+            "state": p.get("state", "open"), "ball": p.get("ball"), "links": {"session": sid} if sid else {},
+            "created_ts": now, "updated_ts": now}
+    if p.get("closed_by"):
+        rest["closed_by"] = p["closed_by"]
+    if sid:
+        rest["session_owner"] = p.get("session_owner") or p["owner"]
+        rest["linked_ts"] = p.get("linked_ts") or p.get("created_ts") or now
+        if p.get("left"):
+            rest["left"] = p["left"]
+    elif migrating:
+        # A parent from before this rule, no session working on it: its
+        # children were its whole work.
+        rest["state"] = "done"
+    if title and short_title(title) != title:
+        # The backend asks for a summary of it, and sets that as the title
+        # (2026-11-22, the user: 題は要約して短くするように).
+        rest["title_src"] = str(title)[:200]
+    nodes[rest["id"]] = rest
+    record(user, "add", rest["id"], {k: rest[k] for k in ("parent", "title", "visibility", "ball", "links", "state")}
+           | {"rest": True})
+    if sid or p.get("ball"):
+        p["links"] = {k: v for k, v in links.items() if k != "session"}
+        p.pop("session_owner", None)
+        p.pop("linked_ts", None)
+        p.pop("left", None)
+        p["ball"] = None
+        p["updated_ts"] = now
+        record(user, "update", p["id"], {"links": p["links"], "ball": None, "session_owner": None})
+    return rest
+
+
+def fold_rest(nodes, pid, user):
+    """When a node's last child but the rest one goes, the rest goes back
+    into it (as before it was split)."""
+    p = nodes.get(pid)
+    kids = children(nodes, pid) if p is not None else []
+    if len(kids) != 1 or not kids[0].get("rest") or children(nodes, kids[0]["id"]):
+        return
+    rest = kids[0]
+    sid = (rest.get("links") or {}).get("session")
+    changes = {"state": rest.get("state", "open"), "ball": rest.get("ball")}
+    if sid:
+        changes["links"] = dict(p.get("links") or {}, session=sid)
+        changes["session_owner"] = rest.get("session_owner") or rest["owner"]
+        changes["linked_ts"] = rest.get("linked_ts") or time.time()
+    del nodes[rest["id"]]
+    record(user, "remove", rest["id"], {"title": rest["title"]})
+    p.update(changes)
+    p["updated_ts"] = time.time()
+    record(user, "update", pid, changes)
+
+
+def current_of(nodes, owner, sid):
+    """The node a session took on last (of those of that session's owner),
+    closed or not: one closed by hand does not hand the state on to an older
+    one (those are left)."""
+    mine = [n for n in nodes.values()
+            if (n.get("session_owner") or n["owner"]) == owner and (n.get("links") or {}).get("session") == sid]
+    if not mine:
+        return None
+    return max(mine, key=lambda n: (n.get("linked_ts") or n.get("created_ts") or 0, n.get("created_ts") or 0))
+
+
+def close(n, by, user):
+    n["state"] = "done"
+    n["closed_by"] = by
+    n.pop("left", None)
+    n["updated_ts"] = time.time()
+    record(user, "update", n["id"], {"state": "done", "closed_by": by})
+
+
+def reopen_taken(n, user):
+    """Taken on again by hand (link): a closed one is open again, or the
+    session's state would go nowhere."""
+    if n.get("state") == "done":
+        n["state"] = "open"
+        n.pop("closed_by", None)
+        if (n.get("ball") or {}).get("kind") == "done":
+            n["ball"] = None
+        n["updated_ts"] = time.time()
+        record(user, "update", n["id"], {"state": "open"})
+
+
+def moved_down(nodes, m, n):
+    """n is under m, or m is a rest child and n is under m's parent: the
+    session took m's work down with it."""
+    if is_below(nodes, m["id"], n["id"]):
+        return True
+    return bool(m.get("rest") and m.get("parent") and is_below(nodes, m["parent"], n["id"]))
+
+
+def let_go(nodes, user, m, now):
+    """m's session took another node on (not under m). Waiting for someone
+    (🙋 💤 ✉): stays so. Else back to what m was before the new message, if
+    that was a moment ago; else left."""
+    bt = m.pop("before_turn", None)
+    if (m.get("ball") or {}).get("kind") == "done":
+        close(m, "ball", user)
+        return
+    if (m.get("ball") or {}).get("kind") in ("person", "sleep", "ext"):
+        # Waiting for a person, a date or a reply: still that, not left.
+        return
+    if bt and now - (bt.get("ts") or 0) <= BEFORE_TURN_KEEP:
+        b = bt.get("ball") or {}
+        if b.get("kind") in ("person", "sleep", "ext", "done"):
+            m["ball"] = b
+            m["updated_ts"] = now
+            record(user, "ball", m["id"], {"ball": b, "back_to_before_turn": True})
+            if b["kind"] == "done":
+                close(m, "ball", user)
+            return
+    m["left"] = now
+    m["updated_ts"] = now
+    record(user, "leave", m["id"], {"left": now})
+
+
+def took_on(nodes, user, n):
+    """n's session took n on: the other open nodes it held are closed (a done
+    ball), let go of by moving down, put back as they were before the turn,
+    or left."""
+    n.pop("left", None)
+    sid = (n.get("links") or {}).get("session")
+    if not sid:
+        return
+    owner = n.get("session_owner") or n["owner"]
+    now = time.time()
+    for m in list(nodes.values()):
+        if m is n or m.get("state") == "done" or m.get("left") or (m.get("links") or {}).get("session") != sid \
+                or (m.get("session_owner") or m["owner"]) != owner:
+            continue
+        if moved_down(nodes, m, n) and not managed(m):
+            m["links"] = {k: v for k, v in (m.get("links") or {}).items() if k != "session"}
+            for k in ("session_owner", "linked_ts", "before_turn"):
+                m.pop(k, None)
+            m["ball"] = None
+            m["updated_ts"] = now
+            record(user, "moved_down", m["id"], {"to": n["id"], "links": m["links"], "ball": None})
+            if m.get("rest"):
+                close(m, "moved", user)
+            continue
+        let_go(nodes, user, m, now)
+
+
+def fill_linked_ts(nodes):
+    """Nodes from before linked_ts: when the history last linked them."""
+    want = {i: (n.get("links") or {}).get("session") for i, n in nodes.items()
+            if (n.get("links") or {}).get("session") and not n.get("linked_ts")}
+    if not want:
+        return 0
+    last = {}
+    try:
+        with open(HISTORY) as f:
+            for line in f:
+                try:
+                    e = json.loads(line)
+                except ValueError:
+                    continue
+                i = e.get("id")
+                if i in want and ((e.get("changes") or {}).get("links") or {}).get("session") == want[i]:
+                    last[i] = e.get("ts") or 0
+    except FileNotFoundError:
+        pass
+    for i in want:
+        nodes[i]["linked_ts"] = last.get(i) or nodes[i].get("created_ts") or 0
+    return len(want)
+
+
+def node_done(n):
+    return n.get("state") == "done" or (n.get("ball") or {}).get("kind") == "done"
+
+
+def own_done(n):
+    """A parent's own part (no rest child): nothing, or its session said done."""
+    if not (n.get("links") or {}).get("session"):
+        return True
+    return (n.get("ball") or {}).get("kind") == "done"
+
+
+def settle(nodes, user):
+    """A node with a rest child is done exactly when all its children are;
+    one with children but no rest child, when they all are and its own part
+    is (own_done). GitHub's and the desk's nodes keep their own state."""
+    kids = {}
+    for m in nodes.values():
+        kids.setdefault(m.get("parent"), []).append(m)
+    memo = {}
+    release_waiting_leads(nodes, user)
+
+    def done(n, depth=0):
+        if n["id"] in memo:
+            return memo[n["id"]]
+        k = kids.get(n["id"]) or []
+        if depth < 1000 and k and (any(c.get("rest") for c in k) or not managed(n)):
+            v = all(done(c, depth + 1) for c in k) and (any(c.get("rest") for c in k) or own_done(n))
+            want = "done" if v else "open"
+            if n.get("state") != want:
+                n["state"] = want
+                n["updated_ts"] = time.time()
+                record(user, "settle", n["id"], {"state": want})
+        else:
+            v = node_done(n)
+        memo[n["id"]] = v
+        return v
+    for n in nodes.values():
+        done(n)
+    for n in nodes.values():
+        hand_back_report(nodes, n, user, kids.get(n["id"]) or [])
+
+
+REPORT_CHECK = "直ったか確かめて済みに"
+
+
+def hand_back_report(nodes, n, user, kids):
+    """A report whose work under it has all ended (2026-11-20, the user:
+    タスクの木の 〜 が終わっていませんが、止めているものが有りません): the
+    report's ball still says the AI holds it, though no session follows the
+    report itself. Give it to the one who sent it, to check and close."""
+    if not n.get("report") or n.get("state") == "done" or not kids:
+        return
+    if (n.get("ball") or {}).get("kind") != "ai" or not all(node_done(c) for c in kids):
+        return
+    now = time.time()
+    n["ball"] = {"kind": "person", "since": now, "who": n["owner"], "text": REPORT_CHECK}
+    n["updated_ts"] = now
+    record(user, "ball", n["id"], {"ball": n["ball"]})
+
+
+def migrate(nodes, user="root"):
+    """Give every parent from before the rest rule its rest child; nodes
+    from before closing and leaving get them as if they had been there."""
+    fill_linked_ts(nodes)
+    made = 0
+    # Rest children are no longer made for every parent (2026-11-22): only
+    # when a parent's session goes on working on it (the ball op).
+    for n in list(nodes.values()):
+        done_ball = (n.get("ball") or {}).get("kind") == "done"
+        if n.get("state") == "done" and not n.get("closed_by"):
+            n["closed_by"] = "ball" if done_ball else "hand"
+        elif n.get("state") != "done" and done_ball and not managed(n) and not children(nodes, n["id"]):
+            close(n, "ball", user)
+    last = {}
+    for n in nodes.values():
+        sid = (n.get("links") or {}).get("session")
+        if sid:
+            k = (n.get("session_owner") or n["owner"], sid)
+            if k not in last or (n.get("linked_ts") or 0, n.get("created_ts") or 0) > \
+                    (last[k].get("linked_ts") or 0, last[k].get("created_ts") or 0):
+                last[k] = n
+    for n in last.values():
+        took_on(nodes, user, n)
+    follow_root(nodes, user)
+    settle(nodes, user)
+    return made
+
+
+def handle(user, req):
+    op = req.get("op")
+    with lock:
+        nodes = load()
+        if op == "list":
+            talk = discord_links()
+            helps = team_view(nodes, load_teams(), user)
+            out = []
+            for n in nodes.values():
+                if not can_see(n, user):
+                    continue
+                extra = {}
+                if n["id"] in talk:
+                    extra["discord"] = talk[n["id"]]
+                if n["id"] in helps:
+                    extra["helpers"] = helps[n["id"]]
+                out.append(dict(n, **extra) if extra else n)
+            # The teams this user is in (the backend's handoffs: one to a
+            # helper of the sender's team makes no branch), whatever state
+            # the 担当's item is in.
+            mine = [{"lead": t["lead"], "helpers": t.get("helpers", [])} for t in load_teams().values()
+                    if (t.get("lead") or {}).get("owner") == user or any(h.get("owner") == user for h in t.get("helpers", []))]
+            return {"ok": True, "user": user, "nodes": out, "teams": mine}
+        if op == "help":
+            # 🤝 This user's session helps the 担当 of an item (the deployment notes):
+            # only a session that holds no open item of its own (a 担当 is
+            # consulted by talkto, never a helper), and the item one the user
+            # may change. It then helps no one else.
+            n = nodes.get(req.get("id"))
+            if n is None or not can_see(n, user):
+                raise LookupError("no such node")
+            if not can_write(n, user):
+                raise PermissionError("only those who may change it")
+            # その他 (rest) too: once an item has branches, its 担当 works on
+            # its own part there (2026-11-27, the user: すでに担当を持つ
+            # セッションを協力にすると、はいを選んでもエラーになります).
+            lead_sid = (n.get("links") or {}).get("session")
+            if not lead_sid or node_done(n):
+                raise ValueError("no 担当 there")
+            lead_owner = n.get("session_owner") or n["owner"]
+            sid = req.get("session")
+            if not isinstance(sid, str) or not SESSION_RE.match(sid):
+                raise ValueError("bad session")
+            if (lead_owner, lead_sid) == (user, sid):
+                raise ValueError("it is the 担当 there")
+            cur = current_of(nodes, user, sid)
+            if cur is not None and not node_done(cur):
+                raise ValueError("a 担当 helps no one")
+            teams = load_teams()
+            drop_helper(teams, user, sid)
+            key = f"{lead_owner}/{lead_sid}"
+            t = teams.setdefault(key, {"lead": {"owner": lead_owner, "session": lead_sid}, "helpers": []})
+            t["helpers"].append({"owner": user, "session": sid, "ts": time.time()})
+            save_teams(teams)
+            record(user, "help", n["id"], {"session": sid, "lead": lead_sid})
+            return {"ok": True, "lead": t["lead"]}
+        if op == "unhelp":
+            # 🤝 A helper stops helping: its owner, or the 担当's.
+            sid, owner = req.get("session"), req.get("owner") or user
+            if not isinstance(sid, str) or not SESSION_RE.match(sid) or not USER_RE.match(owner):
+                raise ValueError("bad session")
+            teams = load_teams()
+            k = team_of_helper(teams, owner, sid)
+            if k is None:
+                return {"ok": True, "changed": False}
+            if user != owner and teams[k]["lead"]["owner"] != user:
+                raise PermissionError("not your team")
+            drop_helper(teams, owner, sid)
+            save_teams(teams)
+            record(user, "unhelp", None, {"session": sid, "owner": owner})
+            if release_waiting_leads(nodes, user, teams):   # its 担当 waited only for it
+                settle(nodes, user)
+                save(nodes)
+            return {"ok": True, "changed": True}
+        if op == "team_left":
+            # The talkto link a team needs is gone for this user's session
+            # (aiza-backend): it helps no one, and its own helpers are let go.
+            sid = req.get("session")
+            if not isinstance(sid, str) or not SESSION_RE.match(sid):
+                raise ValueError("bad session")
+            teams = load_teams()
+            changed = drop_helper(teams, user, sid)
+            if teams.pop(f"{user}/{sid}", None) is not None:
+                changed = True
+            if changed:
+                save_teams(teams)
+                record(user, "team_left", None, {"session": sid})
+                if release_waiting_leads(nodes, user, teams):
+                    settle(nodes, user)
+                    save(nodes)
+            return {"ok": True, "changed": changed}
+        if op == "history":
+            n = nodes.get(req.get("id"))
+            if n is None or not can_see(n, user):
+                raise LookupError("no such node")
+            out = []
+            try:
+                with open(HISTORY) as f:
+                    for line in f:
+                        try:
+                            e = json.loads(line)
+                        except ValueError:
+                            continue
+                        if e.get("id") == n["id"]:
+                            out.append(e)
+            except FileNotFoundError:
+                pass
+            return {"ok": True, "history": out[-500:]}
+        if op == "recent":
+            # What happened since a time to the nodes the caller may see now
+            # (the weekly summary).
+            since = req.get("since")
+            if not isinstance(since, (int, float)) or isinstance(since, bool):
+                raise ValueError("bad since")
+            seen = {i for i, n in nodes.items() if can_see(n, user)}
+            out = []
+            try:
+                with open(HISTORY) as f:
+                    for line in f:
+                        try:
+                            e = json.loads(line)
+                        except ValueError:
+                            continue
+                        if e.get("ts", 0) >= since and e.get("id") in seen:
+                            out.append(e)
+            except FileNotFoundError:
+                pass
+            return {"ok": True, "history": out[-5000:]}
+        if op == "add":
+            if len(nodes) >= MAX_NODES:
+                raise ValueError("the tree is full")
+            parent = req.get("parent")
+            p = None
+            if parent is not None:
+                p = nodes.get(parent)
+                if p is None or not can_write(p, user):
+                    raise LookupError("no such parent")
+            vis = req.get("visibility", "self")
+            if vis not in VISIBILITY:
+                raise ValueError("bad visibility")
+            now = time.time()
+            node = {"id": "n" + secrets.token_hex(6), "parent": parent, "title": clean_title(req.get("title")),
+                    "owner": user, "members": [], "visibility": vis, "state": "open",
+                    "ball": clean_ball(req.get("ball")), "links": clean_links(req.get("links")),
+                    "created_ts": now, "updated_ts": now}
+            if node["links"].get("session"):
+                node["session_owner"] = user
+                node["linked_ts"] = now
+            nodes[node["id"]] = node
+            took_on(nodes, user, node)
+            now_a_lead(node)
+            follow_root(nodes, user)
+            settle(nodes, user)
+            save(nodes)
+            record(user, "add", node["id"], {k: node[k] for k in ("parent", "title", "visibility", "ball", "links")})
+            return {"ok": True, "node": node}
+        if op == "desk":
+            n = nodes.get(req.get("id"))
+            if user != "root" or n is None or n["owner"] != "root" or n.get("parent") is not None:
+                raise LookupError("no such node")
+            n["desk"] = True
+            n["visibility"] = "lab"
+            n["updated_ts"] = time.time()
+            follow_root(nodes, user)
+            save(nodes)
+            record(user, "desk", n["id"], {"desk": True, "visibility": "lab"})
+            return {"ok": True, "node": n}
+        if op == "report":
+            p = nodes.get(req.get("desk"))
+            if p is None or not p.get("desk") or not in_lab(user):
+                raise LookupError("no such desk")
+            if len(nodes) >= MAX_NODES:
+                raise ValueError("the tree is full")
+            ref = req.get("ref")
+            links = clean_links({"ref": ref} if ref else None)
+            pos = clean_report_pos(req.get("pos")) if ref else None
+            deploy = None
+            if req.get("deploy") is not None:
+                # The commit is fetched as the user of the ref: only one's own session.
+                if not ref or ref.split("/")[1] != user:
+                    raise ValueError("a deploy request comes with one's own session")
+                deploy = clean_deploy(req["deploy"])
+            now = time.time()
+            node = {"id": "n" + secrets.token_hex(6), "parent": p["id"], "title": clean_title(req.get("title")),
+                    "owner": user, "members": [], "visibility": "lab", "state": "open",
+                    "ball": {"kind": "ai", "since": now, "text": DEPLOY_WAITING if deploy else "窓口が読む"},
+                    "links": links, "report": True, "created_ts": now, "updated_ts": now}
+            if pos:
+                node["report_pos"] = pos
+            if deploy:
+                node["deploy"] = deploy
+            nodes[node["id"]] = node   # the desk has no work of its own: no その他
+            follow_root(nodes, user)
+            settle(nodes, user)
+            save(nodes)
+            record(user, "report", node["id"], dict({"parent": p["id"], "title": node["title"], "links": links},
+                                                    **({"deploy": deploy} if deploy else {})))
+            return {"ok": True, "node": node}
+        if op == "update":
+            n = nodes.get(req.get("id"))
+            if n is None or not can_see(n, user):
+                raise LookupError("no such node")
+            if not can_write(n, user):
+                raise PermissionError("not yours")
+            rest = rest_of(nodes, n["id"])
+            if rest is not None and "links" in req and isinstance(req["links"], dict) \
+                    and req["links"].get("session"):
+                # A session taking a split-up node on takes its own work, the
+                # rest child.
+                sid = req["links"]["session"]
+                req = dict(req, links={k: v for k, v in req["links"].items() if k != "session"})
+                rl = clean_links(dict(rest.get("links") or {}, session=sid))
+                rest.update(links=rl, session_owner=user, updated_ts=time.time(), linked_ts=time.time())
+                if "ball" in req:
+                    rest["ball"] = clean_ball(req.pop("ball"))
+                record(user, "update", rest["id"], {"links": rl, "session_owner": user})
+                took_on(nodes, user, rest)
+                reopen_taken(rest, user)
+            if children(nodes, n["id"]) and not managed(n) and req.get("state") in STATES \
+                    and req["state"] != n.get("state"):
+                # By hand on a split-up node: done closes all of it, open
+                # opens its own work again (a child for it, if it has none).
+                if req["state"] == "open" and rest is None:
+                    rest = ensure_rest(nodes, n, user)
+                if rest is None and req["state"] == "open":
+                    pass
+                elif req["state"] == "done":
+                    if rest is None and not own_done(n):
+                        # Its own part too, though its session last said
+                        # otherwise (2026-11-23: a node whose session had gone
+                        # to sleep on it was made done by hand, and settle
+                        # opened it again at once).
+                        n["ball"] = clean_ball({"kind": "done"})
+                        record(user, "ball", n["id"], {"ball": n["ball"]})
+                    stack = [n["id"]]
+                    while stack:
+                        for c in children(nodes, stack.pop()):
+                            stack.append(c["id"])
+                            if not node_done(c):
+                                c["state"] = "done"
+                                c["closed_by"] = "hand"
+                                c.pop("left", None)
+                                c["updated_ts"] = time.time()
+                                record(user, "update", c["id"], {"state": "done"})
+                else:
+                    rest["state"] = "open"
+                    rest.pop("closed_by", None)
+                    if (rest.get("ball") or {}).get("kind") == "done":
+                        rest["ball"] = None
+                    rest["updated_ts"] = time.time()
+                    record(user, "update", rest["id"], {"state": "open"})
+            changes = {}
+            if "title" in req:
+                changes["title"] = clean_title(req["title"])
+                n.pop("title_src", None)
+            if "order" in req:
+                # Its place among its siblings (2026-11-23, the user: 兄弟の順番も
+                # 変えたくなる): they sort by order, else by when made.
+                o = req["order"]
+                if isinstance(o, bool) or not isinstance(o, (int, float)) or o != o or abs(o) > 1e12:
+                    raise ValueError("bad order")
+                changes["order"] = float(o)
+            if "state" in req:
+                if req["state"] not in STATES:
+                    raise ValueError("bad state")
+                changes["state"] = req["state"]
+            if "ball" in req:
+                changes["ball"] = clean_ball(req["ball"])
+            if "links" in req:
+                changes["links"] = clean_links(req["links"])
+                sid = changes["links"].get("session")
+                if sid and (sid != (n.get("links") or {}).get("session") or not n.get("session_owner")):
+                    # A session id is only unique per user: remember whose
+                    # session this is (the one who linked it).
+                    changes["session_owner"] = user if sid != (n.get("links") or {}).get("session") \
+                        else n.get("session_owner") or n["owner"]
+                elif not sid:
+                    changes["session_owner"] = None
+                if sid and (sid != (n.get("links") or {}).get("session") or req.get("relink")):
+                    # Taken on (again): this is now where its state goes.
+                    changes["linked_ts"] = time.time()
+                elif not sid:
+                    changes["linked_ts"] = None
+            if "parent" in req and req["parent"] != n.get("parent"):
+                parent = req["parent"]
+                if n.get("rest"):
+                    raise ValueError("その他 stays with its parent")
+                if parent is not None:
+                    p = nodes.get(parent)
+                    if p is None or not can_write(p, user) or is_below(nodes, n["id"], parent):
+                        raise ValueError("bad parent")
+                changes["parent"] = parent
+            if "visibility" in req or "members" in req:
+                if n["owner"] != user:
+                    raise PermissionError("only the owner changes who sees it")
+                if n.get("parent") in nodes and shared(root_of(nodes, n)):
+                    raise ValueError("it is shared as its root is; change the root")
+                if "visibility" in req:
+                    if req["visibility"] not in VISIBILITY:
+                        raise ValueError("bad visibility")
+                    changes["visibility"] = req["visibility"]
+                if "members" in req:
+                    changes["members"] = clean_members(req["members"])
+            added = sorted(set(changes.get("members") or []) - set(n.get("members") or []) - {user, n["owner"]}) \
+                if "members" in changes else []
+            old_parent = n.get("parent")
+            if "state" in changes:
+                if changes["state"] == "done" and n.get("state") != "done":
+                    changes["closed_by"] = "hand"
+                    n.pop("left", None)
+                elif changes["state"] == "open":
+                    n.pop("closed_by", None)
+            if changes:
+                n.update(changes)
+                n["updated_ts"] = time.time()
+                record(user, "update", n["id"], changes)
+            if changes.get("linked_ts"):
+                took_on(nodes, user, n)
+                reopen_taken(n, user)
+                now_a_lead(n)
+            if "parent" in changes and old_parent:
+                fold_rest(nodes, old_parent, user)
+            follow_root(nodes, user, force=(n["id"],) if n.get("parent") not in nodes
+                        and ("visibility" in changes or "members" in changes) else ())
+            settle(nodes, user)
+            save(nodes)
+            if added:
+                notify_members(user, n["id"], added)
+            return {"ok": True, "node": n}
+        if op == "remove":
+            n = nodes.get(req.get("id"))
+            if n is None or not can_see(n, user):
+                raise LookupError("no such node")
+            if n["owner"] != user:
+                raise PermissionError("only the owner removes it")
+            if any(m.get("parent") == n["id"] for m in nodes.values()):
+                raise ValueError("it still has children")
+            if n.get("rest") and len(children(nodes, n.get("parent"))) > 1:
+                raise ValueError("その他 goes only with the last of its siblings")
+            del nodes[n["id"]]
+            fold_rest(nodes, n.get("parent"), user)
+            settle(nodes, user)
+            save(nodes)
+            record(user, "remove", n["id"], {"title": n["title"]})
+            return {"ok": True}
+        if op == "take":
+            if nodes.get(req.get("id")) is not None and rest_of(nodes, req.get("id")) is not None \
+                    and can_see(nodes[req["id"]], user):
+                req = dict(req, id=rest_of(nodes, req["id"])["id"])
+            # Plan stage 14: someone who may see a node takes its work on --
+            # their new session holds it, and they may change it from now
+            # on (the user: 引き取ったら、書き換えられる人になる). What it
+            # was is kept, so the taker can undo a mistaken take.
+            n = nodes.get(req.get("id"))
+            if n is None or not can_see(n, user):
+                raise LookupError("no such node")
+            sid = req.get("session")
+            if not isinstance(sid, str) or not SESSION_RE.match(sid):
+                raise ValueError("bad session")
+            before = {k: n.get(k) for k in ("members", "links", "session_owner", "ball", "linked_ts")}
+            old = n.get("links") or {}
+            changes = {"links": dict(old, session=sid), "session_owner": user, "linked_ts": time.time(),
+                       "ball": {"kind": "ai", "since": time.time()},
+                       "taken": {"by": user, "ts": time.time(), "state": "taken", "before": before,
+                                 "from_session": old.get("session"),
+                                 "from_owner": (n.get("session_owner") or n["owner"]) if old.get("session") else None,
+                                 "notified": False}}
+            if user != n["owner"] and user not in (n.get("members") or []):
+                changes["members"] = sorted(set(n.get("members") or []) | {user})
+            n.update(changes)
+            n["updated_ts"] = time.time()
+            took_on(nodes, user, n)
+            now_a_lead(n)
+            follow_root(nodes, user)
+            settle(nodes, user)
+            save(nodes)
+            record(user, "take", n["id"], {k: v for k, v in changes.items() if k != "taken"})
+            return {"ok": True, "node": n}
+        if op == "untake":
+            n = nodes.get(req.get("id"))
+            t = (n or {}).get("taken") or {}
+            if n is None or t.get("by") != user or t.get("state") != "taken":
+                raise LookupError("nothing to undo")
+            before = t.get("before") or {}
+            changes = {k: before.get(k) for k in ("members", "links", "session_owner", "ball", "linked_ts")}
+            changes["members"] = changes["members"] or []
+            changes["links"] = changes["links"] or {}
+            n.update(changes)
+            n["taken"] = dict(t, state="undone", notified=False, before=None)
+            n["updated_ts"] = time.time()
+            follow_root(nodes, user)
+            settle(nodes, user)
+            save(nodes)
+            record(user, "untake", n["id"], changes)
+            return {"ok": True, "node": n}
+        if op == "taken_for":
+            # The take notices the previous holder's backend still owes its
+            # session (one each for a take and for its undoing).
+            out = [n for n in nodes.values() if (n.get("taken") or {}).get("from_owner") == user
+                   and not n["taken"].get("notified")]
+            return {"ok": True, "nodes": out}
+        if op == "ack_taken":
+            n = nodes.get(req.get("id"))
+            t = (n or {}).get("taken") or {}
+            if n is None or t.get("from_owner") != user:
+                raise LookupError("no such node")
+            n["taken"] = dict(t, notified=True)
+            save(nodes)
+            return {"ok": True}
+        if op == "owners_for":
+            # aiza-gateway alone (its own user): whose sessions, linked to
+            # nodes a viewer may see, it should ask that viewer's list from.
+            if user != GATEWAY_USER:
+                raise PermissionError("not for you")
+            viewer = req.get("user")
+            if not isinstance(viewer, str) or not USER_RE.match(viewer):
+                raise ValueError("bad user")
+            owners = {n.get("session_owner") or n["owner"] for n in nodes.values()
+                      if (n.get("links") or {}).get("session") and can_see(n, viewer)}
+            owners.discard(viewer)
+            return {"ok": True, "owners": sorted(owners)}
+        if op == "ball":
+            sid = req.get("session")
+            if not isinstance(sid, str) or not SESSION_RE.match(sid):
+                raise ValueError("bad session")
+            ball = clean_ball(req.get("ball"))
+            if team_of_helper(load_teams(), user, sid) is not None:
+                # 🤝 A helper writes nothing into the tree (the deployment notes).
+                return {"ok": True, "changed": []}
+            n = current_of(nodes, user, sid)
+            if n is None:
+                return {"ok": True, "changed": []}
+            done = (ball or {}).get("kind") == "done"
+            kind = (ball or {}).get("kind")
+            if n.get("state") == "done" and (n.get("closed_by") == "hand" or done or ball is None):
+                # Closed by hand: nothing follows the session from here.
+                return {"ok": True, "changed": []}
+            now = time.time()
+            if kind == "ai" and (n.get("ball") or {}).get("kind") not in (None, "ai"):
+                # A new message: what it was just before, for let_go.
+                n["before_turn"] = {"ball": n.get("ball"), "ts": now}
+            elif kind != "ai":
+                n.pop("before_turn", None)
+            if n.get("state") == "done":
+                # Closed by its done ball: the session working again opens it.
+                n["state"] = "open"
+                n.pop("closed_by", None)
+                record(user, "update", n["id"], {"state": "open"})
+            retitle = []
+            if kind in ("person", "sleep", "ext") and not n.get("rest") and not managed(n) \
+                    and children(nodes, n["id"]) and rest_of(nodes, n["id"]) is None:
+                # Its session goes on working on it after it got children:
+                # its own work becomes a child, named by what it says.
+                rest = ensure_rest(nodes, n, user, title=(ball or {}).get("text"))
+                if rest is not None:
+                    n.pop("before_turn", None)
+                    n = rest
+                    if rest.get("title_src"):
+                        retitle.append({"id": rest["id"], "title": rest["title"], "text": rest["title_src"]})
+            old = n.get("ball") or {}
+            if {k: old.get(k) for k in ("kind", "who", "until", "text")} == \
+                    {k: (ball or {}).get(k) for k in ("kind", "who", "until", "text")}:
+                return {"ok": True, "changed": []}
+            n["ball"] = ball
+            n["updated_ts"] = time.time()
+            record(user, "ball", n["id"], {"ball": ball})
+            if done and not managed(n) and not children(nodes, n["id"]):
+                if lead_busy(nodes, n):
+                    # Its team still works: it waits for them, open (shown).
+                    n["ball"] = dict(ball, kind="ai", wait="team")
+                else:
+                    close(n, "ball", user)
+            settle(nodes, user)
+            save(nodes)
+            return {"ok": True, "changed": [n["id"]], "retitle": retitle}
+    raise ValueError("unknown op")
+
+
+def serve_one(conn):
+    try:
+        uid = struct.unpack("3i", conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))[1]
+        try:
+            user = pwd.getpwuid(uid).pw_name
+        except KeyError:
+            raise PermissionError("unknown user")
+        if uid == 0:
+            user = "root"
+        conn.settimeout(10)
+        data = b""
+        while not data.endswith(b"\n") and len(data) < MAX_REQUEST:
+            chunk = conn.recv(65536)
+            if not chunk:
+                break
+            data += chunk
+        req = json.loads(data.decode("utf-8"))
+        if not isinstance(req, dict):
+            raise ValueError("bad request")
+        res = handle(user, req)
+    except (LookupError, PermissionError, ValueError) as e:
+        res = {"ok": False, "error": str(e).strip("'\"")}
+    except Exception as e:  # noqa: BLE001 -- one bad request never stops the store
+        log(f"error: {type(e).__name__}: {e}")
+        res = {"ok": False, "error": "internal error"}
+    try:
+        conn.sendall((json.dumps(res, ensure_ascii=False) + "\n").encode())
+    except OSError:
+        pass
+    finally:
+        conn.close()
+
+
+def main():
+    os.makedirs(DATA_DIR, mode=0o700, exist_ok=True)
+    os.chmod(DATA_DIR, 0o700)
+    with lock:
+        nodes = load()
+        if nodes:
+            made = migrate(nodes)
+            save(nodes)
+            if made:
+                log(f"gave {made} parents their その他")
+    os.makedirs(SOCK_DIR, mode=0o755, exist_ok=True)
+    try:
+        os.unlink(SOCK)
+    except FileNotFoundError:
+        pass
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.bind(SOCK)
+    os.chmod(SOCK, 0o666)
+    s.listen(32)
+    log(f"listening on {SOCK}")
+    while True:
+        conn, _ = s.accept()
+        threading.Thread(target=serve_one, args=(conn,), daemon=True).start()
+
+
+if __name__ == "__main__":
+    main()

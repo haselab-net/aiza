@@ -39,6 +39,7 @@ import hashlib
 import html
 import html.parser
 import json
+import subprocess
 import mimetypes
 import os
 import re
@@ -83,6 +84,60 @@ from googleapiclient.errors import HttpError
 
 ACCOUNT_PATH = MAILBOX_DIR / ".gmail" / "account"  # the logged-in address (written at login; used for links)
 TOKEN_PATH = MAILBOX_DIR / ".gmail" / "token.json"
+# Threads the box's own local check held back from the box's AI (the digest's gate, 2026-11-25): they carry the
+# label HOLD_LABEL in Gmail, and their ids are listed in HELD_PATH, because a reply that arrives later does not
+# get the label by itself. list leaves their messages out; thread / show / attachment / draft --reply-to refuse
+# them. Not a wall (the token is in reach): it keeps them out of the normal way of reading mail.
+HOLD_LABEL = os.environ.get("GMAIL_HOLD_LABEL") or SITE.get("holdLabel") or "AI保留"
+HELD_PATH = MAILBOX_DIR / ".gmail" / "held-threads"
+HELD_EXIT = 3
+
+
+def held_threads():
+    try:
+        return {l.strip() for l in HELD_PATH.read_text().splitlines() if l.strip()}
+    except OSError:
+        return set()
+
+
+_hold_label_id = None
+
+
+def hold_label_id(svc=None, create=False):
+    """The id of HOLD_LABEL ("" when it does not exist and create is False)."""
+    global _hold_label_id
+    if _hold_label_id:
+        return _hold_label_id
+    svc = svc or service()
+    for lb in _exec(svc.users().labels().list(userId="me")).get("labels", []):
+        if lb.get("name") == HOLD_LABEL:
+            _hold_label_id = lb["id"]
+            return _hold_label_id
+    if not create:
+        return ""
+    lb = _exec(svc.users().labels().create(userId="me", body={"name": HOLD_LABEL, "labelListVisibility": "labelShow",
+                                                                "messageListVisibility": "show"}))
+    _hold_label_id = lb["id"]
+    return _hold_label_id
+
+
+def is_held(msg, held=None, label=None):
+    """msg: a message (or thread) resource. Held when its thread is listed or any of its messages has the label."""
+    held = held_threads() if held is None else held
+    tid = msg.get("threadId") or (msg.get("id") if "messages" in msg else None)
+    if tid and tid in held:
+        return True
+    if label is None:
+        label = _hold_label_id or (hold_label_id() if held or HELD_PATH.exists() else "")
+    if not label:
+        return False
+    msgs = msg.get("messages") or [msg]
+    return any(label in (m.get("labelIds") or []) for m in msgs)
+
+
+def refuse_held(what):
+    sys.stderr.write(f"{what}: このスレッドはローカルの確認で保留中です(本人が新着まとめのページで「Claudeに渡す」を選ぶまで開けません)\n")
+    sys.exit(HELD_EXIT)
 
 AUTH_URI = "https://accounts.google.com/o/oauth2/auth"
 TOKEN_URI = "https://oauth2.googleapis.com/token"
@@ -308,13 +363,31 @@ def cmd_list(args):
         kwargs["labelIds"] = args.label
     if args.page_token:
         kwargs["pageToken"] = args.page_token
-    res = _exec(svc.users().messages().list(**kwargs))
+    # --all follows the pages to the end (at most 50 pages): a check that fetches before Claude reads must not stop at one page
+    for _page in range(50 if args.all else 1):
+        res = _exec(svc.users().messages().list(**kwargs))
+        _list_page(svc, res, args.held)
+        if not (args.all and res.get("nextPageToken")):
+            break
+        kwargs["pageToken"] = res["nextPageToken"]
+    if res.get("nextPageToken"):
+        print(json.dumps({"nextPageToken": res["nextPageToken"]}), file=sys.stderr)
+
+
+def _list_page(svc, res, held_only=False):
     ids = [ref["id"] for ref in res.get("messages", [])]
     got = _batch_get(svc, lambda i: svc.users().messages().get(
         userId="me", id=i, format="metadata", metadataHeaders=["From", "To", "Subject", "Date"]), ids)
+    held = held_threads()
+    label = hold_label_id(svc) if held or HELD_PATH.exists() else ""
     for i in ids:
         msg = got[i]
+        if is_held(msg, held, label) != held_only:
+            continue
         h = _headers(msg, "from", "to", "subject", "date")
+        if held_only:
+            print(json.dumps({"id": msg["id"], "threadId": msg.get("threadId"), "date": h.get("date")}))
+            continue
         print(json.dumps({
             "id": msg["id"],
             "threadId": msg.get("threadId"),
@@ -325,8 +398,6 @@ def cmd_list(args):
             "snippet": msg.get("snippet"),
             "labelIds": msg.get("labelIds", []),
         }, ensure_ascii=False))
-    if res.get("nextPageToken"):
-        print(json.dumps({"nextPageToken": res["nextPageToken"]}), file=sys.stderr)
 
 
 class _HtmlText(html.parser.HTMLParser):
@@ -430,12 +501,18 @@ def _message_json(msg, allow_html):
 
 def cmd_show(args):
     msg = _exec(service().users().messages().get(userId="me", id=args.message_id, format="full"))
+    if is_held(msg):
+        refuse_held(f"show {args.message_id}")
     print(json.dumps(_message_json(msg, args.allow_html), ensure_ascii=False, indent=2))
 
 
 def cmd_thread(args):
     """The whole conversation, oldest first. --max-body trims each body (quoted history makes them long)."""
+    if args.thread_id in held_threads():
+        refuse_held(f"thread {args.thread_id}")
     th = _exec(service().users().threads().get(userId="me", id=args.thread_id, format="full"))
+    if is_held(th):
+        refuse_held(f"thread {args.thread_id}")
     msgs = [_message_json(m, args.allow_html) for m in th.get("messages", [])]
     if args.max_body:
         for m in msgs:
@@ -492,6 +569,8 @@ def cmd_link(args):
 
 
 def cmd_attachment(args):
+    if is_held(_exec(service().users().messages().get(userId="me", id=args.message_id, format="minimal"))):
+        refuse_held(f"attachment {args.message_id}")
     att = _exec(service().users().messages().attachments().get(
         userId="me", messageId=args.message_id, id=args.attachment_id,
     ))
@@ -539,7 +618,35 @@ def cmd_label(args):
     _thread_labels(args, add=args.add or [], remove=args.remove or [])
 
 
+def _write_held(ids):
+    HELD_PATH.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=HELD_PATH.parent, prefix=".held-")
+    with os.fdopen(fd, "w") as f:
+        f.write("".join(t + "\n" for t in sorted(ids)))
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, HELD_PATH)
+
+
+def cmd_hold(args):
+    """Hold threads back from the box's AI (the digest's gate): label + the local list."""
+    _write_held(held_threads() | set(args.thread_ids))
+    _thread_labels(args, add=[hold_label_id(_modify_service(), create=True)])
+
+
+def cmd_unhold(args):
+    """The user chose to give these threads to the AI after all."""
+    _write_held(held_threads() - set(args.thread_ids))
+    label = hold_label_id(_modify_service())
+    if label:
+        _thread_labels(args, remove=[label])
+    else:
+        for t in args.thread_ids:
+            print(json.dumps({"thread": t, "ok": True}))
+
+
 def cmd_trash(args):
+    if not args.undo:
+        sys.exit("gmail.py trash は使いません: aiza-out trash <threadId>... で用意し、本人がカードで許可したら aiza-out run <id>(the deployment notes)。戻すのは --undo")
     svc = _modify_service()
     for t in args.thread_ids:
         try:
@@ -549,14 +656,15 @@ def cmd_trash(args):
             print(json.dumps({"thread": t, "ok": False, "error": str(e)[:300]}, ensure_ascii=False))
 
 
-def cmd_draft(args):
-    """Create a draft (never sends). With --reply-to, it joins that message's thread and quotes it."""
-    svc = _modify_service().users()
+def _build_message(svc, args):
+    """(EmailMessage, threadId or None) from the draft options. With --reply-to, it joins that message's thread and quotes it."""
     msg = email.message.EmailMessage(policy=email.policy.default)
     body = Path(args.body_file).read_text() if args.body_file else sys.stdin.read()
     thread_id = None
     if args.reply_to:
         orig = _exec(svc.messages().get(userId="me", id=args.reply_to, format="full"))
+        if is_held(orig):
+            refuse_held(f"reply-to {args.reply_to}")
         h = {x["name"].lower(): x["value"] for x in orig["payload"].get("headers", [])}
         thread_id = orig["threadId"]
         mid = h.get("message-id")
@@ -582,6 +690,8 @@ def cmd_draft(args):
     msg["To"] = ", ".join(args.to or [])
     if args.cc:
         msg["Cc"] = ", ".join(args.cc)
+    if getattr(args, "bcc", None):
+        msg["Bcc"] = ", ".join(args.bcc)
     msg["Subject"] = args.subject or ""
     msg.set_content(body)
     for f in args.attach or []:
@@ -589,6 +699,13 @@ def cmd_draft(args):
         ctype = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
         maintype, subtype = ctype.split("/", 1)
         msg.add_attachment(path.read_bytes(), maintype=maintype, subtype=subtype, filename=path.name)
+    return msg, thread_id
+
+
+def cmd_draft(args):
+    """Create a draft (never sends)."""
+    svc = _modify_service().users()
+    msg, thread_id = _build_message(svc, args)
     m = {"raw": base64.urlsafe_b64encode(msg.as_bytes()).decode()}
     if thread_id:
         m["threadId"] = thread_id
@@ -630,25 +747,72 @@ def cmd_draft_attach(args):
     print(json.dumps({"draft": r["id"], "messageId": r["message"]["id"], "added": added}, ensure_ascii=False))
 
 
+GATE = os.environ.get("AIZA_GATE_HOOK", "/opt/sandbox-shared/tools/bin/aiza-gate-hook")
+OUT_ID_RE = re.compile(r"^o[0-9a-f]{12}$")
+
+
+def cmd_compose(args):
+    """The whole message as a file (nothing is made in Gmail): what aiza-out
+    shows on the card's page and, once allowed, sends as it is (the deployment notes)."""
+    svc = _modify_service().users()
+    msg, thread_id = _build_message(svc, args)
+    out = Path(args.out)
+    fd = os.open(out, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "wb") as f:
+        f.write(msg.as_bytes())
+    print(json.dumps({"thread": thread_id or "", "to": msg["To"], "cc": msg["Cc"], "subject": msg["Subject"]}, ensure_ascii=False))
+
+
 def cmd_send(args):
-    """Send an existing draft. Without --yes, only show what would be sent (nothing leaves)."""
-    drafts = _modify_service().users().drafts()
-    d = _exec(drafts.get(userId="me", id=args.draft_id, format="raw"))
-    msg = email.message_from_bytes(base64.urlsafe_b64decode(d["message"]["raw"]), policy=email.policy.default)
-    body = msg.get_body(preferencelist=("plain", "html"))
-    text = body.get_content() if body else ""
-    info = {"draft": args.draft_id, "threadId": d["message"].get("threadId"), "from": msg["From"], "to": msg["To"],
-            "cc": msg["Cc"], "bcc": msg["Bcc"], "subject": msg["Subject"],
-            "attachments": [{"file": a.get_filename(), "size": len(a.get_payload(decode=True) or b"")} for a in msg.iter_attachments()],
-            "body_head": text[:600]}
-    if not args.yes:
-        print(json.dumps({**info, "sent": False, "note": "not sent; use --yes only when the user has explicitly told you to send this mail"}, ensure_ascii=False, indent=1))
-        return
-    if not (msg["To"] or msg["Cc"] or msg["Bcc"]):
-        sys.exit("draft has no recipients")
-    r = _exec(drafts.send(userId="me", body={"id": args.draft_id}), tries=1)  # no retry: a retried send could go out twice
-    print(json.dumps({"sent": True, "messageId": r["id"], "threadId": r.get("threadId"), "to": msg["To"], "subject": msg["Subject"]},
-                     ensure_ascii=False))
+    sys.exit("gmail.py send は使いません: aiza-out mail で用意し、本人がカードで許可したら aiza-out run <id> で送ります(the deployment notes)")
+
+
+def _gate_out(op, oid, h, *rest):
+    """aiza's answer through aiza-gate-hook (True = go). No gate, no go."""
+    if not os.path.exists(GATE):
+        print("the gate (aiza-gate-hook) is missing here: not done", file=sys.stderr)
+        return False
+    r = subprocess.run([sys.executable, GATE, "--out", op, oid, h, *rest], stdout=subprocess.DEVNULL, timeout=60)
+    return r.returncode == 0
+
+
+def cmd_out_run(args):
+    """Do an allowed action prepared by aiza-out (mail or trash): only the
+    one whose action.json hashes as the card did, and only once."""
+    if not OUT_ID_RE.match(args.id):
+        sys.exit("bad id")
+    d = Path(os.environ.get("AIZA_OUT_DIR") or Path.home() / ".out") / args.id
+    raw = (d / "action.json").read_bytes()
+    h = hashlib.sha256(raw).hexdigest()
+    action = json.loads(raw)
+    if action.get("kind") not in ("mail", "trash"):
+        sys.exit("gmail.py out-run: mail か trash だけ")
+    eml = None
+    if action["kind"] == "mail":
+        eml = (d / "message.eml").read_bytes()
+        if hashlib.sha256(eml).hexdigest() != action.get("eml_sha256"):
+            sys.exit("message.eml がカードのときと違う: 実行しません")
+    if not _gate_out("out-check", args.id, h):
+        sys.exit(3)  # the gate said no: nothing was tried
+    svc = _modify_service().users()
+    try:
+        if eml is not None:
+            body = {"raw": base64.urlsafe_b64encode(eml).decode()}
+            if action.get("thread"):
+                body["threadId"] = action["thread"]
+            r = _exec(svc.messages().send(userId="me", body=body), tries=1)  # no retry: a retried send could go out twice
+            note, out = "", {"sent": True, "messageId": r["id"], "threadId": r.get("threadId")}
+        else:
+            done = []
+            for t in action["threads"]:
+                _exec(svc.threads().trash(userId="me", id=t["id"]))
+                done.append(t["id"])
+            note, out = "", {"trashed": done}
+    except Exception as e:  # noqa: BLE001 -- told to aiza, then raised
+        _gate_out("out-done", args.id, h, "fail", f"{type(e).__name__}: {str(e)[:200]}")
+        raise
+    _gate_out("out-done", args.id, h, "ok", note)
+    print(json.dumps(out, ensure_ascii=False))
 
 
 def main():
@@ -664,6 +828,8 @@ def main():
     p.add_argument("-l", "--label", action="append", help="label id (repeatable), e.g. INBOX")
     p.add_argument("-n", "--limit", type=int, default=20)
     p.add_argument("--page-token", help="continue from the nextPageToken printed on stderr")
+    p.add_argument("--all", action="store_true", help="follow the pages to the end (-n is then the page size; at most 50 pages)")
+    p.add_argument("--held", action="store_true", help="only the held messages, as id / threadId / date (nothing else; the digest's gate)")
     p.set_defaults(func=cmd_list)
 
     p = sub.add_parser("show", help="show one message with decoded body")
@@ -702,7 +868,13 @@ def main():
     p.add_argument("--remove", action="append", help="label id to remove (repeatable)")
     p.set_defaults(func=cmd_label)
 
-    p = sub.add_parser("trash", help="move threads to trash (--undo to restore). Ask the user first.")
+    for name, fn, hlp in [("hold", cmd_hold, "hold threads back from the box's AI (label + local list; the digest's gate)"),
+                          ("unhold", cmd_unhold, "give held threads back (the user chose to on the digest page)")]:
+        p = sub.add_parser(name, help=hlp)
+        p.add_argument("thread_ids", nargs="+")
+        p.set_defaults(func=fn)
+
+    p = sub.add_parser("trash", help="only --undo here (restore); moving to trash is aiza-out trash")
     p.add_argument("thread_ids", nargs="+")
     p.add_argument("--undo", action="store_true")
     p.set_defaults(func=cmd_trash)
@@ -723,10 +895,24 @@ def main():
     p.add_argument("files", nargs="+")
     p.set_defaults(func=cmd_draft_attach)
 
-    p = sub.add_parser("send", help="send a draft. Without --yes it only shows what would go out. --yes only on the user's explicit instruction to send.")
-    p.add_argument("draft_id")
-    p.add_argument("--yes", action="store_true", help="really send")
+    p = sub.add_parser("send", help="(not used: aiza-out mail, then the user's card)")
+    p.add_argument("draft_id", nargs="?")
+    p.add_argument("--yes", action="store_true")
     p.set_defaults(func=cmd_send)
+
+    p = sub.add_parser("compose", help="write the whole message to a file (nothing in Gmail); same options as draft. For aiza-out mail")
+    p.add_argument("--out", required=True, help="new file to write (message.eml)")
+    for a, kw in (("--to", {"action": "append"}), ("--cc", {"action": "append"}), ("--subject", {}), ("--body-file", {}),
+                  ("--reply-to", {}), ("--attach", {"action": "append"})):
+        p.add_argument(a, **kw)
+    p.add_argument("--bcc", action="append")
+    p.add_argument("--no-quote", action="store_true")
+    p.add_argument("--from", dest="sender")
+    p.set_defaults(func=cmd_compose)
+
+    p = sub.add_parser("out-run", help="(from aiza-out run) send / trash an action the user allowed on its card")
+    p.add_argument("id")
+    p.set_defaults(func=cmd_out_run)
 
     args = ap.parse_args()
     args.func(args)

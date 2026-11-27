@@ -357,6 +357,7 @@ class SshWatcherTest(WatcherTest):
         meta_path = self.root / self.sid / "meta.json"
         meta = json.loads(meta_path.read_text())
         meta["tmux_location"] = "ssh:m"
+        meta["preset"] = "shell-m"          # the machine's own shell (a preset must run where meta says)
         meta_path.write_text(json.dumps(meta))
 
         def read_new(machine, key, name, offset):

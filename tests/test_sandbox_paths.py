@@ -28,12 +28,12 @@ class SandboxPathsTest(unittest.TestCase):
         self.host.mkdir()
         (self.host / "secret.json").write_text('{"secret": "host only"}\n')
         (self.host / "bashrc").write_text("# host file\n")
-        self.sdir = self.sandhome / ".aigw" / SID
+        self.sdir = self.sandhome / ".aiza" / SID
         (self.sdir / "outbox").mkdir(parents=True)
         stubs = {
             "SANDHOME": self.sandhome,
             "MAILBOX": None,
-            "session_roots": lambda: [self.sandhome / ".aigw"],
+            "session_roots": lambda: [self.sandhome / ".aiza"],
             "_subscribers": {},
         }
         self.saved = {k: getattr(B, k) for k in stubs}
@@ -97,17 +97,17 @@ class SandboxPathsTest(unittest.TestCase):
             B.sb_write_text(self.sdir / "quiet-next-notify", "sent")
         self.assertFalse((self.host / "new-file").exists())
 
-    def test_session_dir_or_aigw_linked_out(self):
+    def test_session_dir_or_aiza_linked_out(self):
         (self.host / "fake").mkdir()
         (self.host / "fake" / "meta.json").write_text('{"id": "fake"}')
         os.rename(self.sdir, self.sandhome / "moved")
         os.symlink(self.host / "fake", self.sdir)
         self.assertIsNone(B.load_meta(SID))
         os.unlink(self.sdir)
-        os.rename(self.sandhome / ".aigw", self.sandhome / "aigw-real")
-        os.symlink(self.host, self.sandhome / ".aigw")
+        os.rename(self.sandhome / ".aiza", self.sandhome / "aiza-real")
+        os.symlink(self.host, self.sandhome / ".aiza")
         with self.assertRaises(OSError):
-            B.sb_read_text(self.sandhome / ".aigw" / "secret.json")
+            B.sb_read_text(self.sandhome / ".aiza" / "secret.json")
 
     def test_dotdot_and_absolute_links_out(self):
         self.link("a", "../../../host/secret.json")

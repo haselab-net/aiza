@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>aigw Tutorial: Basics</title>
+<title>AI-za Tutorial: Basics</title>
 <style>
   :root {
     --bg: #ffffff; --fg: #1d2330; --muted: #5b6575; --line: #dde2ea; --card: #f5f7fa;
@@ -70,14 +70,13 @@
 <body>
 <div class="wrap">
 
-<h1>aigw Tutorial: Basics</h1>
+<h1>AI-za Tutorial: Basics</h1>
 <nav class="langs" aria-label="Language"><a href="../basic.html" lang="ja">日本語</a><a href="../en/basic.html" lang="en" class="here" aria-current="page">English</a><a href="../zh/basic.html" lang="zh-CN">简体中文</a></nav>
 <div class="editions"><a href="index.html">Start</a><a href="docker.html">Try with Docker</a><a href="basic.html" class="here">Basics</a><a href="advanced.html">Advanced</a></div>
-<div class="note">The screenshots of the chat, terminal, settings and sharing screens show aigw in Japanese. aigw itself can be switched to English in Settings → Language.</div>
 
 <p class="lead">A guide to using AI agents on a server (Claude Code and others) from the browser on your phone or PC. Basics takes you from creating an account to doing everyday AI coding. The features installed differ a little from server to server, so ask your administrator about anything that is unclear.</p>
 
-<p>aigw is a chat-style screen that opens at <code>https://&lt;server&gt;/agents/</code>. Instructions you write in the chat go to Claude Code running in your own private container on the server, and its replies come back to the chat.</p>
+<p>AI-za is a chat-style screen that opens at <code>https://&lt;server&gt;/</code>. Instructions you write in the chat go to Claude Code running in your own private container on the server, and its replies come back to the chat.</p>
 
 <nav class="toc">
 <strong>Contents</strong>
@@ -91,15 +90,15 @@
   <li><a href="#faq">Troubleshooting</a></li>
 </ol>
 </nav>
-<p>Folders, patrol, notifications, passkeys, host and root shells, other machines and so on are covered in <a href="advanced.html">Advanced</a>.</p>
+<p>Folders and work trees, By turn, patrol, notifications, passkeys, host and root sessions, other machines and so on are covered in <a href="advanced.html">Advanced</a>.</p>
 
 <!-- ===================================================================== -->
 <h2 id="account">1. Creating an account</h2>
 
-<p>If you have a Google account in a domain the administrator has allowed, you can create your own account from the aigw screen (on servers where this feature is enabled). Otherwise, ask the administrator to create one for you.</p>
+<p>If you have a Google account in a domain the administrator has allowed, you can create your own account from the AI-za screen (on servers where this feature is enabled). Otherwise, ask the administrator to create one for you.</p>
 
 <ol class="steps">
-  <li>Open <code>https://&lt;server&gt;/agents/</code> in your browser and, under “Sign in with Google”, choose <strong>an account in an allowed domain</strong>.</li>
+  <li>Open <code>https://&lt;server&gt;/</code> in your browser and, under “Sign in with Google”, choose <strong>an account in an allowed domain</strong>.</li>
   <li>If you don’t have an account yet, a “Create account” form appears. Choose a <strong>username</strong> and submit it.
     <ul>
       <li>Allowed characters are lowercase letters, digits, <code>-</code> and <code>_</code>. It must start with a lowercase letter or <code>_</code>. Up to 32 characters.</li>
@@ -107,12 +106,12 @@
     </ul>
   </li>
   <li>When you submit, <strong>your SSH private key is shown once and only once</strong>. Be sure to save it before closing the screen. It will never be shown again.</li>
-  <li>You can now use aigw. From next time on, just sign in with Google.</li>
+  <li>You can now use aiza. From next time on, just sign in with Google.</li>
 </ol>
 
 <h3>Setting up SSH access too (needed to register a passkey)</h3>
-<p>If you only use aigw, you don’t need SSH. However, <a href="advanced.html#passkey">registering a passkey for Email and the host shell</a> requires one SSH login, so it saves trouble to do it early. Follow whichever procedure matches your PC.</p>
-<div class="note">Some servers accept SSH only from inside the organization’s network. In that case, when connecting by SSH from outside, first get onto the internal network using the method your administrator provides. The aigw screen (in the browser) works from outside as is.</div>
+<p>If you only use AI-za, you don’t need SSH. However, <a href="advanced.html#passkey">registering a passkey for mailbox and host sessions</a> requires one SSH login, so it saves trouble to do it early. Follow whichever procedure matches your PC.</p>
+<div class="note">Some servers accept SSH only from inside the organization’s network. In that case, when connecting by SSH from outside, first get onto the internal network using the method your administrator provides. The AI-za screen (in the browser) works from outside as is.</div>
 
 <h4>Mac, Linux, and MSYS2 on Windows (Git Bash works the same)</h4>
 <pre><code># On your PC: save the key you received and restrict its permissions
@@ -142,76 +141,130 @@ ssh -i $key &lt;username&gt;@&lt;server&gt;</code></pre>
 <p>Until you set it at this first login, your password cannot be used by anyone. From the second time on, you can log in with the same command.</p>
 
 <h4>Avoiding typing <code>-i</code> every time</h4>
-<p>Put the following in your config file and <code>ssh aigw</code> alone will log you in. The config file is <code>~/.ssh/config</code> on Mac, Linux and MSYS2, and <code>C:\Users\&lt;Windows name&gt;\.ssh\config</code> (no extension) with the Windows built-in one. In either case, <code>ssh</code> reads the <code>~</code> in <code>IdentityFile</code> as your home.</p>
-<pre><code>Host aigw
+<p>Put the following in your config file and <code>ssh aiza</code> alone will log you in. The config file is <code>~/.ssh/config</code> on Mac, Linux and MSYS2, and <code>C:\Users\&lt;Windows name&gt;\.ssh\config</code> (no extension) with the Windows built-in one. In either case, <code>ssh</code> reads the <code>~</code> in <code>IdentityFile</code> as your home.</p>
+<pre><code>Host aiza
     HostName &lt;server&gt;
     User &lt;username&gt;
     IdentityFile ~/.ssh/id_ed25519_&lt;username&gt;</code></pre>
 
-<div class="note">If you cannot log in to aigw with an account the administrator created for you, log in by SSH and run <code>aigw-set-email you@example.com</code> once. You can then log in with the Google account for that email address.</div>
+<div class="note">If you cannot log in to AI-za with an account the administrator created for you, log in by SSH and run <code>aiza-set-email you@example.com</code> once. You can then log in with the Google account for that email address.</div>
 
 <!-- ===================================================================== -->
 <h2 id="screens">2. Finding your way around the screens</h2>
 
-<p>aigw has two screens: the “session list” and the “chat”. A session is one workplace that keeps running on the server (Claude Code or a shell).</p>
+<p>Along the top of AI-za are three tabs: <strong>Work</strong> (sessions and work trees), <strong>Inbox</strong> (a digest of new mail and the like; only for people who use it) and <strong>Settings</strong>. A session is one workplace that keeps running on the server (Claude Code or a shell); opening one brings up the <strong>chat</strong> screen. Open <code>https://&lt;server&gt;/</code> in your browser and you land on Work.</p>
 
-<h3>Session list (top screen)</h3>
+<h3>Work (top screen)</h3>
 <div class="shot">
-  <figure><img src="../img/01-top.png" alt="The aigw top screen. Machine selector and username at the top, below them the box for creating a new session, then the list of sessions"><figcaption>The top screen, with “Claude” selected in the creation box at the top</figcaption></figure>
+  <figure><img src="img/01-top.png" alt="The Work tab of AI-za. Tabs (Work, Settings) at the top, below them the view tabs (Tree, By turn, Week, Usage), a row of tools, the Show filter, and a folder holding a work tree and sessions"><figcaption>The 🌳 Tree view of Work. The folder “Research” holds a work tree (🌳 “Conference prep”) and sessions</figcaption></figure>
   <div class="side">
     <table>
       <tr><th>Where</th><th>What it means</th></tr>
-      <tr><td>The <code>server</code> selector</td><td>Which machine to run on (other machines connected over ssh, if any, are listed here). The <strong>Settings</strong> screen is also chosen here</td></tr>
-      <tr><td>Username</td><td>Tap to log out</td></tr>
-      <tr><td><code>Doc</code></td><td>A screen for reading the server’s documentation (not on every server)</td></tr>
-      <tr><td>🔍 📋 🔔</td><td>Chat search, the Windows machines board, the notification list (<a href="advanced.html">Advanced</a>)</td></tr>
-      <tr><td><code>⟳</code></td><td>Reload (swiping the top bar downward does the same)</td></tr>
-      <tr><td>🔑 / 🔓</td><td>Shows you are unlocked with a passkey. 🔑 is up to host, 🔓 is up to root. Tap to lock immediately</td></tr>
-      <tr><td>Creation box</td><td>Choose the kind, folder and name, then <strong>Start</strong></td></tr>
-      <tr><td>Icon before the name</td><td>The kind of session. 🛠️ sandbox (everyday Claude etc.), 📫 Email, 🏠 host, 🔒 root, 💻 another machine connected over ssh</td></tr>
-      <tr><td>📁 rows</td><td>Folders. Tap to open or close (<a href="advanced.html#folders">Advanced</a>)</td></tr>
+      <tr><td>Logo</td><td>What is AI-za (an explanation)</td></tr>
+      <tr><td>Work, Inbox, Settings</td><td>Tabs. The number on Work is how many items are “Your turn”. The browser’s Back button does not go back from one tab to another</td></tr>
+      <tr><td>📖</td><td>A screen for reading the server’s documentation (not on every server)</td></tr>
+      <tr><td>Microphone</td><td>Read-aloud and voice mode (<a href="advanced.html">Advanced</a>)</td></tr>
+      <tr><td>🌳 Tree, 🙋 By turn, 📅 Week, 📊 Usage</td><td>Ways to view your work. 🌳 Tree shows folders, work trees and sessions; 🙋 By turn lists things by whose turn it is (<a href="advanced.html#tree">Advanced</a>)</td></tr>
+      <tr><td>＋ 🤖 AI</td><td>Start a new session (<a href="#coding">Chapter 3</a>)</td></tr>
+      <tr><td>＋ 📁 / ＋ 🌳</td><td>Make a folder / make a new job (tree). When a branch of a tree is selected, ＋ 🌳 adds a branch under it</td></tr>
+      <tr><td>🔍 Search</td><td>Search the contents of your chats</td></tr>
+      <tr><td>↕</td><td>Arrange. Drag the ⠿ at the left of a row to move it into a folder or under an item of a tree (<a href="advanced.html#folders">Advanced</a>)</td></tr>
+      <tr><td>Below ＋ and ↕</td><td>The input area for the button you pressed opens right below the row of tools, and that button gets a blue outline. Press the same button again or <kbd>Esc</kbd> to close it</td></tr>
+      <tr><td>Show</td><td>All / 🙋 Your turn / ⏳ Stuck 3 days. “Stopped sessions too” also shows stopped sessions</td></tr>
+      <tr><td>Folder and tree rows</td><td><strong>Press once to select</strong> (the frame lights up blue). <strong>Press a selected row again to open or close it</strong> (the ▶/▼ at the bottom right of 📁 or 🌳 also opens and closes it). The ＋ buttons in the row of tools create things inside the selected folder or branch</td></tr>
+      <tr><td>📁 and 🌳</td><td>📁 is a folder, 🌳 the root of a work tree. The small mark at the bottom right is ▶ closed or ▼ open (▽ on a tree means finished branches are shown too). A 🔒 at the bottom left of 🌳 means the tree is not shared with anyone. Nesting is shown by frames. A gray <strong>&gt;_</strong> mark is a <strong>directory</strong> (a place on the server, such as a working directory), which is not one of AI-za’s folders</td></tr>
+      <tr><td>Icon before the name</td><td>Where the session runs. 🛠️ devbox (everyday Claude etc.), 📫 mailbox, 🏠 host, 🔒 root, 💻 another machine connected over ssh (with 🖥 and the machine name on the row’s second line)</td></tr>
       <tr><td>● on each row</td><td>Green means running, grey means stopped. <strong>Tap a green one to stop it; tap a grey one with a blue ring to resume where it left off</strong> (both ask for confirmation)</td></tr>
-      <tr><td>⠿ ✏️ 🔗 🗄 🗑</td><td>Reorder · rename · link to another session · archive (only hides it from the list) · delete</td></tr>
-      <tr><td>👥 Shared logs</td><td>Sessions others have shared with you, in one folder per owner (<a href="#share">Chapter 4</a>)</td></tr>
+      <tr><td>⋯ at the right of a row</td><td>For a session: rename, link to another session, archive (only hides it from the list), delete. For a folder: Rename, Set working directory, Share the folder…, Archive, delete (only when empty). For a branch of a tree: Mark done, share and more (<a href="advanced.html#tree">Advanced</a>)</td></tr>
+      <tr><td>At the very bottom</td><td>🗄 the archive, 🧑‍🤝‍🧑 shared logs (sessions others have shared with you, <a href="#share">Chapter 4</a>), 🖥 Machines (the Windows machines board)</td></tr>
     </table>
+  </div>
+</div>
+
+<h3 id="tree-intro">Work trees (in brief)</h3>
+<p>A <strong>work tree</strong> writes one job (for example “Conference prep”) as branches (“Rehearse the talk”, “Prepare for Q&amp;A” …) and shows, for each branch, <strong>whose turn it is now</strong> (🙋 a person, 🤖 AI, 💤 waiting, ✓ done). It is for seeing where a job that people and AI work on together is stuck.</p>
+<ul>
+  <li><strong>Where it is</strong>: in the Work 🌳 Tree, a row with 🌳 is a tree’s root (“Conference prep” and “Tidy the data” in the picture above). Trees can sit in folders. Make one with “＋ 🌳” on the top row.</li>
+  <li><strong>Linked to sessions</strong>: a branch can be linked to a session. The session shows under the branch, and the branch’s turn follows the session’s state (waiting for you, working, done …). A session started with “＋ 🤖 AI” while a branch is selected is linked to that branch. Claude also adds branches and marks them done from inside its session.</li>
+  <li><strong>Sharing a tree</strong>: people who can see a tree can open its linked <strong>devbox</strong> sessions read-only (they are shared automatically). mailbox, host and root sessions are not shared through the tree; share them separately if you want others to see them (<a href="#share">Chapter 4</a>).</li>
+</ul>
+<p>How to make branches, 🧭 leads and 🤝 helpers, and who can see a tree are in <a href="advanced.html#tree">Advanced</a>.</p>
+
+<h3>Settings</h3>
+<div class="shot">
+  <figure><img src="img/07-settings.png" alt="The Settings tab. Cards for Display (Language), AI logins (a row for each place under Claude, Codex and Other hosts) and Read-aloud and voice"><figcaption>The Settings tab. Claude is logged in on devbox and gpu-1; the other rows are not logged in yet</figcaption></figure>
+  <div class="side">
+    <p>The cards are stacked vertically: <strong>Display</strong> (the display language), <strong>AI logins</strong>, <strong>Read-aloud and voice</strong>, <strong>Notifications</strong> (whether to notify this device) and <strong>Account</strong> (Log out).</p>
+    <p><strong>First of all, log in to Claude for the devbox on the AI logins card</strong> (<a href="#login">“Logging in to Claude” below</a>). Claude does not work in places where you are not logged in.</p>
   </div>
 </div>
 
 <h3>Chat screen</h3>
 <div class="shot">
-  <figure><img src="../img/02-chat.png" alt="The chat screen. Back button and session name at the top, the conversation in the middle, the key row and input box at the bottom"><figcaption>Having Claude create hello.py</figcaption></figure>
+  <figure><img src="img/02-chat.png" alt="The chat screen. At the top the Back button, session name, microphone, 🖥️ and ⋯; below them the patrol bar; the conversation in the middle; the key row and input box at the bottom"><figcaption>Having Claude create hello.py</figcaption></figure>
   <div class="side">
     <table>
       <tr><th>Where</th><th>What it means</th></tr>
-      <tr><td><code>←</code></td><td>Back to the list (you can also swipe the screen to the right). Long-press it to use it as a link that opens the list in another tab</td></tr>
+      <tr><td><code>←</code></td><td>Back to the tab you opened it from (swiping the screen to the right or the browser’s Back button also works)</td></tr>
       <tr><td>● (left of the name)</td><td>Whether it is running. <strong>If green, tap to stop; if grey, tap to resume where it left off</strong> (asks for confirmation)</td></tr>
+      <tr><td>Microphone</td><td>Voice input and read-aloud (<a href="advanced.html">Advanced</a>)</td></tr>
       <tr><td>🖥️</td><td>Open or close the terminal screen (the screen panel). <a href="#screen-vs-chat">Chapter 6</a></td></tr>
-      <tr><td>🧑‍🤝‍🧑</td><td>Share this session with others (<a href="#share">Chapter 4</a>). Saving the conversation (💾) is in here too</td></tr>
+      <tr><td>⋯</td><td>This session’s menu: 🔗 Link with another session, 💾 Save the conversation log, 📨 Move into Email, 📮 Send to the desk (bug / request), and sharing with others (<a href="#share">Chapter 4</a>)</td></tr>
+      <tr><td>Patrol bar</td><td>The bar below the header. ‹ Prev / Next › move to the previous or next session in the list. ✏️ rename, 🗄 archive and 🗑 delete are here too (<a href="advanced.html#patrol">Advanced</a>)</td></tr>
       <tr><td>Key row</td><td><kbd>Ctrl</kbd> <kbd>⇧</kbd> <kbd>Alt</kbd> <kbd>↑</kbd> <kbd>↓</kbd> … scrolls sideways, with 📎 (attach a file) at the right end. <a href="#keys">Chapter 5</a></td></tr>
       <tr><td><strong>Send</strong> / <strong>Run</strong></td><td>Run adds Enter, Send does not. <a href="#keys">Chapter 5</a></td></tr>
     </table>
-    <p>Tapping the chat’s name (right of 🛠️) opens the “patrol” bar for moving to the previous or next session (<a href="advanced.html#patrol">Advanced</a>). Sessions keep running even if you close the browser. Reopen one from the list and you can pick up right where it is. On a phone, if you “Add to Home Screen”, you get a notification when a reply arrives (on iPhone this is required).</p>
+    <p>The patrol bar is open from the start. Tap the chat’s name (right of 🛠️) to close it, and again to open it. Sessions keep running even if you close the browser. Reopen one from Work and you can pick up right where it is. On a phone, if you “Add to Home Screen”, you get a notification when a reply arrives (on iPhone this is required).</p>
   </div>
 </div>
 
 <!-- ===================================================================== -->
 <h2 id="coding">3. Everyday AI coding</h2>
 
-<p>Normally you just choose <strong>Claude</strong>, create a session, and give instructions in the chat. Claude creates files and runs commands inside your own private container (the sandbox).</p>
+<p>Normally you just choose <strong>Claude</strong>, create a session, and give instructions in the chat. Claude creates files and runs commands inside your own private container (the <strong>devbox</strong>).</p>
+
+<h3 id="login">Logging in to Claude (the first time)</h3>
+<p>Before using Claude, log in with your Claude account <strong>once for each place you use it</strong>. Do the devbox, which you use every day, first.</p>
+<div class="shot">
+  <figure><img src="img/20-login.png" alt="The “Claude ログイン” (Claude login) chat. An explanation of the steps at the top, and the login URL below it"><figcaption>The chat opened by “Log in” in Settings. Tap the URL to open it</figcaption></figure>
+  <div class="side">
+<ol class="steps">
+  <li>Press <strong>Settings</strong> in the tabs at the top and look at the <strong>AI logins</strong> card. Under the <strong>Claude</strong> heading there is a row for each place (devbox, host, and root for people allowed it), and if there are other machines, a row for each machine under <strong>Other hosts</strong>.</li>
+  <li>Each row shows its current state on the right: if logged in, <strong>the account’s email address</strong> (with the auth method, organization and plan); if not, <strong>“Not logged in”</strong> in yellow. While it is being checked it shows “Checking…”, and to people who can’t use that place it shows “No access”.</li>
+  <li>Press <strong>Log in</strong> on the <strong>devbox</strong> row. A chat called “Claude ログイン” (Claude login) opens.</li>
+  <li>Tap the URL that appears in the chat to open it in your browser, log in with the Claude account you want to use, and <strong>approve</strong>.</li>
+  <li>Copy the code shown, go back to the AI-za chat, paste it into the input box and press <strong>Run</strong>. The pasted code does not appear in the chat, and that is normal.</li>
+  <li>A single line saying success or failure appears, and the login chat disappears from the list automatically. Go back to Settings with <code>←</code>; once the devbox row shows your email address, you are done. If it doesn’t change right away, refresh with the ⟳ next to the heading.</li>
+</ol>
+  </div>
+</div>
+<ul>
+  <li><strong>Separate for each place</strong>: the devbox, host, root and other machines are each logged in separately. To use Claude on the host or another machine, follow the same steps on that row too (<a href="advanced.html#settings">Advanced</a>).</li>
+  <li><strong>If you start a session on a devbox or host where you are not logged in</strong>: a login chat opens instead of the session. Finish steps 4–6 above, then start the session again.</li>
+  <li><strong>If you stopped halfway</strong>: only one login at a time per place. Pressing Log in again opens the unfinished login chat as it is. <strong>A code obtained from a different URL you opened earlier won’t work</strong>, so open the URL shown in that chat again.</li>
+  <li><strong>Switching accounts</strong>: press <strong>Log out</strong> on that row (asks for confirmation), then Log in again.</li>
+  <li><strong>Codex</strong> (a ChatGPT account) is logged in the same way from the Codex rows of the same card. The direction is reversed, though: on the page the URL opens, you <strong>enter the code shown in the AI-za chat</strong>.</li>
+  <li><strong>🧑‍🤝‍🧑 Everyone's logins</strong> at the bottom of the card shows, for everyone on this server, which accounts they are logged in to and where (view only; root logins are shown only to people who have root unlocked).</li>
+</ul>
 
 <h3>Creating a session</h3>
+<div class="shot">
+  <figure><img src="img/17-start.png" alt="The Start a session screen. Where to put it (Research), what to run (Claude) and where (devbox), the name (claudeD2) and Start, the working directory (sandhome), resume (New), and Don’t ask before each AI action"><figcaption>After selecting the folder “Research” and pressing “＋ 🤖 AI”. It opens right below the row of tools, with “Research” filled in as where to put it</figcaption></figure>
+  <div class="side">
 <ol class="steps">
-  <li>In the creation box, choose <strong>Claude</strong> as the kind.</li>
-  <li>Choose the working folder in the 📁 row. It starts at <code>sandhome</code> (your home inside the container).
-    <ul>
-      <li>Use “Open a subfolder…” to go down one level at a time, and <code>↑</code> to go up.</li>
-      <li><code>＋</code> creates a new folder where you are.</li>
-    </ul>
-  </li>
+  <li>If there is a folder you want the session in, first press its row once to select it (the frame lights up blue). If you select a branch of a work tree, the session will work on that branch.</li>
+  <li>Press <strong>＋ 🤖 AI</strong> in the row of tools above the 🌳 Tree in Work. The Start a session screen opens right below the row of tools (press ＋ 🤖 AI again or ✕ to close it).</li>
+  <li>Choose <strong>Claude</strong> for what to run and <strong>devbox</strong> for where to run it (this combination is selected from the start). Other machines connected over ssh are listed under where to run it too.</li>
+  <li>The name comes pre-filled with a suggestion such as <code>claudeD</code> (the AI’s name plus one letter for the place, with a number added if the name is taken). You can change it.</li>
+  <li>📍 Where to put it is already filled in with the folder or branch you selected. You can change it here (if nothing was selected, it is “(in no folder)”).</li>
+  <li>Choose the <strong>working directory</strong> (a place on the server) in the row with the gray <strong>&gt;_</strong> mark. It starts at <code>sandhome</code> (your home inside the container). Use “Open a subdirectory…” to go down one level at a time, <code>↑</code> to go up, and <code>＋</code> to create a new directory where you are.</li>
   <li>Normally leave the ⏱ field at “New”. To continue an earlier conversation, choose it here (see “Picking up later” below).</li>
-  <li>You can normally leave “Skip permission prompts” on. Since this is inside the container, nothing outside is affected when Claude rewrites files.</li>
-  <li>Give it a name (optional) and press <strong>Start</strong>; the chat screen appears.</li>
+  <li>You can normally leave “Don’t ask before each AI action” on. Since this is inside the container, nothing outside is affected when Claude rewrites files.</li>
+  <li>Press <strong>Start</strong> and the chat screen appears. Going back from the chat returns you to the tab you opened it from.</li>
+  <li>If you start on a devbox or host where you have not logged in to Claude yet, a login screen opens instead. Log in, then start again (<a href="#login">“Logging in to Claude” above</a>).</li>
 </ol>
+  </div>
+</div>
 
 <h3>Giving instructions and getting results</h3>
 <ul>
@@ -223,7 +276,7 @@ ssh -i $key &lt;username&gt;@&lt;server&gt;</code></pre>
 
 <h3>Picking up later</h3>
 <ul>
-  <li>Sessions keep running, so you can continue by opening them from the list. Archiving ones you aren’t using with 🗄 tidies up the list (view archived ones with “🗄 Open the archive” below the list, and bring them back with 📤).</li>
+  <li>Sessions keep running, so you can continue by opening them from the 🌳 Tree in Work. Archiving ones you aren’t using with 🗄 in the row’s ⋯ (or in the chat’s patrol bar) tidies up the list (view archived ones with “🗄 Open the archive” at the very bottom, and bring them back with 📤). Stopped sessions are hidden at first; “Stopped sessions too” shows them.</li>
   <li><strong>Stop</strong>: tap the green ● and confirm to stop it. Claude is sent <kbd>Ctrl</kbd>+<kbd>C</kbd> twice, the same as its usual way of quitting, so the conversation is saved (any command running in the background is stopped).</li>
   <li><strong>Resume</strong>: tap the grey ● (with a blue ring) of a stopped session and confirm, and it resumes <strong>where it left off</strong> in the same folder. The same session simply continues, and the chat so far is kept. A session that was running Claude inside a shell also resumes from where Claude left off.</li>
   <li>Even if you delete a session, the conversation remains. When creating a new one, choose the same folder and pick from the date and summary in the ⏱ field to resume where it left off.</li>
@@ -232,21 +285,21 @@ ssh -i $key &lt;username&gt;@&lt;server&gt;</code></pre>
 <!-- ===================================================================== -->
 <h2 id="share">4. Sharing with others</h2>
 <div class="shot">
-  <figure><img src="../img/09-share.png" alt="The share panel. A button to save the conversation log, an explanation of read-only, selectors for who (Everyone) and type (Read-only), and a Share button"><figcaption>The share panel opened with 🧑‍🤝‍🧑. It starts at “Everyone, Read-only”</figcaption></figure>
+  <figure><img src="img/09-share.png" alt="The menu under the chat’s ⋯. Buttons for Link with another session, Save the conversation log, Move into Email and Send to the desk, an explanation of read-only, selectors for who (Everyone) and type (Read-only), and a Share button"><figcaption>The menu opened with the chat’s ⋯. The lower part is for sharing. It starts at “Everyone, Read-only”</figcaption></figure>
   <div class="side">
     <ul>
-      <li>Press 🧑‍🤝‍🧑 on the chat screen, choose who and what type, and press <strong>Share</strong>. It starts at <strong>Everyone, Read-only</strong>.</li>
-      <li><strong>Read-only</strong>: the other person sees only the chat log. They cannot use the screen panel, send or stop. <strong>Everyone</strong> means all aigw users on this server.</li>
-      <li><strong>Co-work</strong>: available only when you enter a name under “A specific user”. The other person can also send messages, type keys and stop. If you share a host shell for co-work, the other person can run commands with your permissions.</li>
-      <li>Root shells can only be shared read-only. Email sessions cannot be shared.</li>
+      <li>Press <strong>⋯</strong> at the top right of the chat screen, choose who and what type in the lower part, and press <strong>Share</strong>. It starts at <strong>Everyone, Read-only</strong>.</li>
+      <li><strong>Read-only</strong>: the other person sees only the chat log. They cannot use the screen panel, send or stop. <strong>Everyone</strong> means all AI-za users on this server.</li>
+      <li><strong>Co-work</strong>: available only when you enter a name under “A specific user”. The other person can also send messages, type keys and stop. If you share a host session for co-work, the other person can run commands with your permissions.</li>
+      <li>Root sessions can only be shared read-only. mailbox sessions can be shared <strong>only with a named user</strong> (not with Everyone). Read-only shows the chat log; co-working also lets them send and stop. Only you can answer the cards that allow sending out.</li>
       <li>To stop sharing, press <strong>Remove</strong> next to the person listed in the panel.</li>
     </ul>
   </div>
 </div>
 <div class="shot">
-  <figure><img src="../img/10-shared.png" alt="“Shared logs” below the session list, opened. There are folders per owner (alice, bob), with a read-only session in alice’s folder"><figcaption>Sessions others share with you go into “👥 Shared logs”</figcaption></figure>
+  <figure><img src="img/10-shared.png" alt="“Shared logs” at the bottom of Work, opened. There is a folder per owner (v), with a read-only session (“Paper draft”) inside"><figcaption>Sessions others share with you go into “🧑‍🤝‍🧑 Shared logs”</figcaption></figure>
   <div class="side">
-    <p>Sessions others have shared with you go into <strong>👥 Open shared logs</strong> below the list (like the archive, it starts closed). Open it to see one folder (📁) per owner; open a folder to see that person’s sessions. When you open a read-only session there is no input box, and “&lt;name&gt;’s shared log (read-only)” appears at the top.</p>
+    <p>Sessions others have shared with you go into <strong>🧑‍🤝‍🧑 Open shared logs</strong> at the very bottom (like the archive, it starts closed). Open it to see one folder (📁) per owner; open a folder to see that person’s sessions. When you open a read-only session there is no input box, and “&lt;name&gt;’s shared log (read-only)” appears at the top.</p>
   </div>
 </div>
 
@@ -264,8 +317,8 @@ ssh -i $key &lt;username&gt;@&lt;server&gt;</code></pre>
 
 <h3>The key row (soft keyboard)</h3>
 <div class="shot">
-  <figure><img src="../img/05-menu-down.png" alt="Claude’s model selection menu shown in the screen panel, with the cursor mark on the third item"><figcaption>Pressing <kbd>↓</kbd> in the <code>/model</code> menu. That ❯ moved can be seen only in the screen panel</figcaption></figure>
-  <figure><img src="../img/06-ctrl.png" alt="Ctrl pressed and turned blue, with letter and digit keys shown"><figcaption>Pressing <kbd>Ctrl</kbd> brings up letters and digits. Then <kbd>c</kbd> gives Ctrl+C</figcaption></figure>
+  <figure><img src="img/05-menu-down.png" alt="Claude’s model selection menu shown in the screen panel, with the cursor mark on the second item"><figcaption>Pressing <kbd>↓</kbd> in the <code>/model</code> menu. That ❯ moved can be seen only in the screen panel</figcaption></figure>
+  <figure><img src="img/06-ctrl.png" alt="Ctrl pressed and turned blue, with letter and digit keys shown"><figcaption>Pressing <kbd>Ctrl</kbd> brings up letters and digits. Then <kbd>c</kbd> gives Ctrl+C</figcaption></figure>
   <div class="side">
     <ul>
       <li><kbd>↑</kbd> <kbd>↓</kbd> <kbd>←</kbd> <kbd>→</kbd> <kbd>Tab</kbd> <kbd>⇧Tab</kbd> <kbd>Esc</kbd> <kbd>⏎</kbd>(Enter)<kbd>⌫</kbd> <kbd>Del</kbd> <kbd>🏡</kbd>(Home)<kbd>End</kbd> <kbd>PgU</kbd> <kbd>PgD</kbd> <kbd>Spc</kbd> are sent as soon as you tap them.</li>
@@ -287,7 +340,7 @@ ssh -i $key &lt;username&gt;@&lt;server&gt;</code></pre>
 <!-- ===================================================================== -->
 <h2 id="screen-vs-chat">6. How the terminal screen and the chat relate</h2>
 
-<p>On the server, Claude and shells run <strong>inside a real terminal</strong>. aigw shows it to you in two forms.</p>
+<p>On the server, Claude and shells run <strong>inside a real terminal</strong>. AI-za shows it to you in two forms.</p>
 
 <div class="diagram" role="img" aria-label="The terminal's contents are appended to the chat as a record, and shown as they are in the screen panel">
 <svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg" font-size="13">
@@ -312,10 +365,10 @@ ssh -i $key &lt;username&gt;@&lt;server&gt;</code></pre>
 </div>
 
 <div class="shot">
-  <figure><img src="../img/03-screen.png" alt="Chat screen with the screen panel open. The top half is a monospaced terminal screen, the bottom half the chat bubbles"><figcaption>Press 🖥️ to open the screen panel at the top. Below is the usual chat</figcaption></figure>
+  <figure><img src="img/03-screen.png" alt="Chat screen with the screen panel open. The top half is a monospaced terminal screen, the bottom half the chat bubbles"><figcaption>Press 🖥️ to open the screen panel at the top. Below is the usual chat</figcaption></figure>
   <div class="side">
     <ul>
-      <li>The <strong>chat</strong> is a record. New output piles up as bubbles in order, and you can read it back later or save it with 💾 inside 🧑‍🤝‍🧑.</li>
+      <li>The <strong>chat</strong> is a record. New output piles up as bubbles in order, and you can read it back later or save it with 💾 inside ⋯.</li>
       <li>The <strong>screen panel</strong> is the current screen itself. “In-place rewrites”, such as the ❯ moving in a selection menu or a progress display changing, don’t appear in the chat, so watch them in the screen panel.</li>
       <li>Keys work on both. When a menu appears, open the screen panel and operate it with the key row.</li>
       <li>Scroll the screen panel all the way up to go back through screens that have scrolled away. “● Back to live” at the top left returns to the current screen.</li>
@@ -328,21 +381,21 @@ ssh -i $key &lt;username&gt;@&lt;server&gt;</code></pre>
 <h2 id="faq">7. Troubleshooting</h2>
 <div class="scroll"><table>
   <tr><th>Symptom</th><th>What to do</th></tr>
-  <tr><td>Can’t log in to aigw</td><td>Check that you chose an account in an allowed domain. If the administrator created your account, run <code>aigw-set-email</code> over SSH (<a href="#account">Chapter 1</a>)</td></tr>
+  <tr><td>Can’t log in to AI-za</td><td>Check that you chose an account in an allowed domain. If the administrator created your account, run <code>aiza-set-email</code> over SSH (<a href="#account">Chapter 1</a>)</td></tr>
   <tr><td>SSH won’t connect, times out, or asks about an unknown host key</td><td>The server may accept SSH only from the internal network. Get onto the internal network using the method your administrator provides, then SSH (<a href="#account">Chapter 1</a>). If you connected from outside and saved the wrong key, remove it with <code>ssh-keygen -R &lt;server&gt;</code></td></tr>
-  <tr><td>Claude doesn’t reply, or asks you to log in</td><td>On the Settings screen, check whether that location’s row says “Not logged in”, and log in (<a href="advanced.html#settings">Advanced</a>)</td></tr>
+  <tr><td>Claude doesn’t reply, or asks you to log in</td><td>On the Settings screen, check whether that location’s row says “Not logged in” (in yellow), and log in (<a href="#login">Chapter 3</a>). If it still doesn’t work after logging in, refresh with the ⟳ next to the card’s heading, and check that it isn’t a different account</td></tr>
   <tr><td>The chat seems stuck</td><td>Open the screen panel with 🖥️. It is often waiting on a menu or a confirmation question, so answer with the key row</td></tr>
-  <tr><td>Pressed Run but Claude doesn’t move (the text stays in its input box)</td><td>aigw notices within a few seconds, shows ⚠ in the chat, and resends Enter every 30 seconds. Once it goes through, an “accepted” message appears. If you are in a hurry, pressing <strong>Run</strong> without typing anything does the same</td></tr>
-  <tr><td>Want the screens in English or Chinese</td><td>Choose in the selector next to the heading on the Settings screen (<a href="advanced.html#settings">Advanced</a>)</td></tr>
+  <tr><td>Pressed Run but Claude doesn’t move (the text stays in its input box)</td><td>AI-za notices within a few seconds, shows ⚠ in the chat, and resends Enter every 30 seconds. Once it goes through, an “accepted” message appears. If you are in a hurry, pressing <strong>Run</strong> without typing anything does the same</td></tr>
+  <tr><td>Want the screens in English or Chinese</td><td>Choose under “Display” in the Settings tab (<a href="advanced.html#settings">Advanced</a>)</td></tr>
   <tr><td>Pressing keys seems to have no effect</td><td>In-place rewrites don’t appear in the chat. Check in the screen panel (<a href="#screen-vs-chat">Chapter 6</a>)</td></tr>
-  <tr><td>Email or the host shell asks to “unlock” and won’t proceed</td><td>Check that you registered a passkey, and on that device (<a href="advanced.html#passkey">Advanced</a>). If a locked banner is shown, tap it</td></tr>
+  <tr><td>A mailbox or host session asks to “unlock” and won’t proceed</td><td>Check that you registered a passkey, and on that device (<a href="advanced.html#passkey">Advanced</a>). If a locked banner is shown, tap it</td></tr>
   <tr><td>Want to stop what Claude is doing</td><td><kbd>Esc</kbd>. To stop the whole session, tap the green ● left of the name to stop it (the conversation is saved, and tapping the grey ● resumes it where it left off)</td></tr>
-  <tr><td>The screen is out of date</td><td>⟳ at the top right, or swipe the top bar downward</td></tr>
-  <tr><td>Can’t find a session</td><td>It may be inside a folder. Tap a 📁 row to open it. If you remember archiving it, use “🗄 Open the archive” below the list (<a href="advanced.html#folders">Advanced</a>)</td></tr>
+  <tr><td>The screen is out of date</td><td>Reload the page (for an app added to the Home Screen, close it and open it again)</td></tr>
+  <tr><td>Can’t find a session</td><td>It may be inside a folder or under a branch of a work tree. Tap a 📁 row to open it. Stopped ones appear with “Stopped sessions too”. If you remember archiving it, use “🗄 Open the archive” at the very bottom (<a href="advanced.html#folders">Advanced</a>)</td></tr>
   <tr><td>Still stuck</td><td>Ask your administrator</td></tr>
 </table></div>
 
-<footer>aigw Tutorial · Basics · 2026-11-06 · Screenshots taken at phone width. Usernames, machine names and the like have been replaced, or the screenshots were taken of the same screens with mock data</footer>
+<footer>AI-za Tutorial · Basics · 2026-11-27 · Screenshots taken at phone width. Usernames, machine names and the like have been replaced, or the screenshots were taken of the same screens with mock data</footer>
 </div>
 </body>
 </html>

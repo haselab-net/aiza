@@ -1,0 +1,8 @@
+[Unit]
+Description=Count who used aiza how much (the deployment notes)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/aiza-usage-collect
+Nice=10
+IOSchedulingClass=idle

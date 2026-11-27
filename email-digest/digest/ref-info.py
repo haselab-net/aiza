@@ -2,6 +2,7 @@
 # まとめ項目の refs(mail:<threadId>)に、差出人・件名・時刻・リンクを付ける(2026-11-05 ユーザー依頼)
 # 使い方: ref-info.py <threadId>...  → {"mail:<threadId>": {"label", "time", "url", "mobile"}} を JSON で出す(add.mjs が呼ぶ)
 #        ref-info.py --keys <threadId>... → {"<threadId>": {"subj", "addrs", "reply"}}(同じ話のスレッドを見分ける。add.mjs が呼ぶ)
+#        ref-info.py --latest <threadId>... → {"<threadId>": {"id", "time", "from", "me"}}(スレッドの最新のメッセージ。下書きは除く。match.mjs・add.mjs が呼ぶ)
 #        ref-info.py --fill            → items.json の refs を持つ項目で、refInfo の無いものを埋める(既存の項目の後付け用)
 import importlib.util, json, os, sys, email.utils, re
 from datetime import timedelta, timezone
@@ -67,7 +68,39 @@ def keys(tids):
     return out
 
 
+def latest(tids):
+    """{threadId: {"id", "time", "from", "me"}}: スレッドの最新のメッセージ(下書きは除く)。me は本人が送ったもの(SENT か本人の送信元アドレス)。
+    返信の突き合わせ(match.mjs)と、本人の返信の確認(add.mjs)が使う"""
+    if not tids:
+        return {}
+    svc = g.service()
+    got = g._batch_get(svc, lambda t: svc.users().threads().get(
+        userId="me", id=t, format="metadata", metadataHeaders=["From", "Date"]), tids)
+    try:
+        me = {x["sendAsEmail"].lower() for x in svc.users().settings().sendAs().list(userId="me").execute().get("sendAs", [])}
+    except Exception:
+        me = set()
+    out = {}
+    for t in tids:
+        msgs = [m for m in (got.get(t) or {}).get("messages") or [] if "DRAFT" not in (m.get("labelIds") or [])]
+        if not msgs:
+            continue
+        last = msgs[-1]
+        h = g._headers(last, "from", "date")
+        name, addr = email.utils.parseaddr(h.get("from", ""))
+        try:
+            tm = email.utils.parsedate_to_datetime(h["date"]).astimezone(JST).strftime("%Y-%m-%dT%H:%M")
+        except Exception:
+            continue
+        out[t] = {"id": last.get("id"), "time": tm, "from": name or addr,
+                  "me": "SENT" in (last.get("labelIds") or []) or addr.lower() in me}
+    return out
+
+
 if __name__ == "__main__":
+    if sys.argv[1:2] == ["--latest"]:
+        print(json.dumps(latest(sys.argv[2:]), ensure_ascii=False))
+        sys.exit(0)
     if sys.argv[1:2] == ["--keys"]:
         print(json.dumps(keys(sys.argv[2:]), ensure_ascii=False))
         sys.exit(0)

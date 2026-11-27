@@ -1,0 +1,9 @@
+# aiza-discord-tree-check.service -- 1日1回、Discord の各チャンネルの見える人を実物と照らして直す(the deployment notes)。
+# 木か名簿が変わったときの同期(aiza-discord-tree.path)では気づけないもの: 研究室を抜けた人、Discord 側で手で足された overwrite。
+[Unit]
+Description=aiza: check the tree's Discord channels against who should see them
+ConditionPathExists=/etc/aiza/discord-bot.token
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/aiza-discord-tree sync --check

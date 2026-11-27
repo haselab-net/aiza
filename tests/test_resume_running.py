@@ -39,7 +39,7 @@ class ResumeRunningTest(unittest.TestCase):
     def test_refused_while_running(self):
         self.rows = [{"id": "840952c959d1", "alive": True, "claude_session_id": CONV}]
         with self.assertRaises(B.ConversationRunning) as cm:
-            B.create_session("claude-tui", "SPIDAR", resume=CONV)
+            B.create_session("claude-tui", "Robot", resume=CONV)
         self.assertEqual(cm.exception.session_id, "840952c959d1")
 
     def test_not_refused_when_stopped_or_other_conversation(self):

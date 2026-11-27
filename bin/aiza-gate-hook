@@ -1,0 +1,151 @@
+#!/usr/bin/env python3
+"""aiza-gate-hook -- the gate in front of outward actions from the Email box
+(the deployment notes, 2026-11-20). The user: 確認は本人のカード1回だけ.
+
+An outward action (sending mail, moving mail to the trash, posting to Slack
+or Discord, sending a web form) is prepared with `aiza-out`, which asks
+aiza for a card; the user allows it on the card (or its page, which shows
+everything it would do); then `aiza-out run <id>` does it -- and only that
+one, as the card showed it, once. aiza keeps the answer on the host, bound
+to the hash of what was prepared; nothing in the box counts as an answer.
+
+  As a PreToolUse hook (Claude, and Codex in the box): the ways around the
+  card are refused -- `gmail.py send`, `gmail.py trash` (but --undo), and
+  the Gmail connector's send / reply / forward / trash tools.
+  `--out <op> <id> <hash> [ok|fail] [note]` (from gmail.py out-run): asks
+  aiza (POST /gate) and exits 0 only on its yes.
+
+Not a wall: the box's agent could still reach Gmail or a web page some
+other way. It stops doing so by mistake, or because a mail said so.
+"""
+import os as _aiza_os  # aigw-legacy: sessions started before the rename (2026-11-23) only have AIGW_*
+for _k in [k for k in _aiza_os.environ if k.startswith("AIGW_")]:
+    _aiza_os.environ.setdefault("AIZA_" + _k[5:], _aiza_os.environ[_k].replace("/.aigw/", "/.aiza/").replace("/.aigw-state/", "/.aiza-state/"))
+import json
+import os
+import re
+import sys
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+GATE_URL = os.environ.get("AIZA_GATE_URL") or f"http://172.17.0.1:{23000 + os.getuid() - 1000}/gate"
+ASK_TIMEOUT = 15
+SESSION_RE = re.compile(r"^[0-9a-f]{12}$")
+SEND_RE = re.compile(r"gmail\.py\S*\s+send\b")
+TRASH_RE = re.compile(r"gmail\.py\S*\s+trash\b([^;&|\n]*)")
+CONNECTOR_RE = re.compile(r"^mcp__.*gmail.*__(send_message|send_email|send_draft|reply|reply_all|forward|"
+                          r"trash_message|trash_thread|delete_message|delete_thread)$", re.I)
+HOW = "aiza-out で用意して本人の許可のカードを待ち、許可されたら aiza-out run <id> で実行してください(the deployment notes)。"
+
+
+def log(entry):
+    d = Path.home() / ".gate"
+    d.mkdir(mode=0o700, exist_ok=True)
+    fd = os.open(d / "log.jsonl", os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    with os.fdopen(fd, "a") as f:
+        f.write(json.dumps(dict({"ts": time.time()}, **entry), ensure_ascii=False) + "\n")
+
+
+def this_session():
+    """This aiza session's id (the folder of $AIZA_TALKTO), or None."""
+    talkto = os.environ.get("AIZA_TALKTO")
+    sid = Path(talkto).parent.name if talkto else None
+    return sid if sid and SESSION_RE.match(sid) else None
+
+
+def ask_aiza(body, session=None):
+    """aiza's answer, or {"ok": False, "why"} on any failure."""
+    session = session or this_session()
+    if not session:
+        return {"ok": False, "why": "AI座 のセッションの外"}
+    data = json.dumps(dict(body, session=session), ensure_ascii=False).encode()
+    req = urllib.request.Request(GATE_URL, data=data, method="POST", headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=ASK_TIMEOUT) as r:
+            ans = json.loads(r.read(65536))
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        return {"ok": False, "why": f"AI座 に届かない({type(e).__name__})"}
+    if not isinstance(ans, dict) or not isinstance(ans.get("ok"), bool):
+        return {"ok": False, "why": "AI座 の答えが読めない"}
+    return ans
+
+
+INTERP = re.compile(r"\b(python3?|node|sh|bash|zsh|perl|ruby|jq|awk|sed|tee|xargs|source|eval|exec)\b|^\s*\.\s")
+
+
+def strip_text_heredocs(c):
+    """A here-document that is only text for a command (talkto's message,
+    say) is not looked at; one fed to an interpreter is."""
+    lines, out, i = c.split("\n"), [], 0
+    while i < len(lines):
+        line = lines[i]
+        out.append(line)
+        i += 1
+        m = re.search(r"<<-?\s*['\"]?(\w+)['\"]?", line)
+        if m and not INTERP.search(line):
+            while i < len(lines) and lines[i].strip() != m.group(1):
+                i += 1
+            i += 1
+    return "\n".join(out)
+
+
+def deny(reason):
+    return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                   "permissionDecisionReason": reason}}
+
+
+def decide(payload):
+    """The hook's stdout dict, or None to let the tool run as it would."""
+    tool = payload.get("tool_name") or ""
+    inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+    if CONNECTOR_RE.match(tool):
+        log({"tool": tool, "decision": "deny", "why": "connector"})
+        return deny("関所: Gmail のコネクタからは送らない・消さない。" + HOW)
+    if tool != "Bash":
+        return None
+    cmd = strip_text_heredocs(str(inp.get("command") or ""))
+    if SEND_RE.search(cmd):
+        log({"decision": "deny", "why": "gmail.py send"})
+        return deny("関所: gmail.py send は使いません。" + HOW)
+    for rest in TRASH_RE.findall(cmd):
+        if "--undo" not in rest:
+            log({"decision": "deny", "why": "gmail.py trash"})
+            return deny("関所: gmail.py trash は使いません(戻す --undo は使えます)。" + HOW)
+    return None
+
+
+def main():
+    if len(sys.argv) >= 5 and sys.argv[1] == "--out":
+        op, oid, h = sys.argv[2:5]
+        body = {"op": op, "id": oid, "hash": h}
+        if op == "out-done":
+            body["ok"] = len(sys.argv) > 5 and sys.argv[5] == "ok"
+            body["note"] = sys.argv[6] if len(sys.argv) > 6 else ""
+        ans = ask_aiza(body)
+        log({"op": op, "id": oid, "hash": h, "decision": "pass" if ans.get("ok") else "deny",
+             **({"why": str(ans.get("why"))[:200]} if not ans.get("ok") else {})})
+        if not ans.get("ok"):
+            print(f"関所: {ans.get('why') or '確かめられない'}", file=sys.stderr)
+            sys.exit(1)
+        return
+    try:
+        payload = json.load(sys.stdin)
+    except ValueError:
+        return
+    if not isinstance(payload, dict):
+        return
+    try:
+        out = decide(payload)
+    except Exception as e:  # noqa: BLE001 -- on a fault, the ways around the card stay shut
+        cmd = str((payload.get("tool_input") or {}).get("command") or "") if isinstance(payload.get("tool_input"), dict) else ""
+        out = deny(f"関所: 確かめられなかった({type(e).__name__})") if (
+            CONNECTOR_RE.match(payload.get("tool_name") or "") or SEND_RE.search(cmd) or TRASH_RE.search(cmd)) else None
+    if out is not None:
+        print(json.dumps(out, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    main()
+    sys.exit(0)

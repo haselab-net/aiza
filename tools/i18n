@@ -1,0 +1,53 @@
+#!/usr/bin/env python3
+"""Look up the display language's words (the deployment notes).
+
+    tools/i18n list.new_name        a key: its Japanese, English and Chinese, and where it is defined
+    tools/i18n 'list.'              keys that start so
+    tools/i18n 新しい名前           keys whose words (any language) contain it (case-insensitive)
+
+Reads the dictionaries as text (static/i18n.js, ext/*/static/*.js, the site
+pages, email-digest/digest/i18n.mjs); runs no page code.
+"""
+import json
+import re
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+FILES = ([ROOT / "static" / "i18n.js"] + sorted((ROOT / "ext").glob("*/static/*.js"))
+         + sorted((ROOT / "ext" / "site" / "host" / "opt" / "aiza" / "static").glob("*.html")))
+DIGEST = ROOT / "email-digest" / "digest" / "i18n.mjs"
+S = r'"(?:[^"\\]|\\.)*"'
+ENTRY = re.compile(r'^\s*"([a-z][a-z0-9_.]+)": \{\n\s*ja: (' + S + r'),\n\s*en: (' + S + r'),\n\s*"zh-CN": (' + S + r'),\n\s*\},', re.M)
+ONE_LINE = re.compile(r'^\s*"(mail\.[a-z0-9_.]+)": \{ ja: (' + S + r'), en: (' + S + r'), \'zh-CN\': (' + S + r') \},', re.M)
+
+
+def words():
+    out = []
+    for f in FILES:
+        for m in ENTRY.finditer(f.read_text()):
+            out.append((m.group(1), *(json.loads(x) for x in m.group(2, 3, 4)), f))
+    if DIGEST.exists():
+        for m in ONE_LINE.finditer(DIGEST.read_text()):
+            out.append((m.group(1), *(json.loads(x) for x in m.group(2, 3, 4)), DIGEST))
+    return out
+
+
+def main(argv):
+    if len(argv) != 1 or argv[0] in ("-h", "--help"):
+        print(__doc__.strip())
+        return 0 if argv and argv[0] in ("-h", "--help") else 2
+    q = argv[0]
+    ws = words()
+    exact = [w for w in ws if w[0] == q]
+    hits = exact or [w for w in ws if w[0].startswith(q)] if re.fullmatch(r"[a-z][a-z0-9_.]*", q) else []
+    if not hits:
+        ql = q.lower()
+        hits = [w for w in ws if any(ql in x.lower() for x in w[1:4])]
+    for k, ja, en, zh, f in hits:
+        print(f"{k}  ({f.relative_to(ROOT)})\n  ja: {ja}\n  en: {en}\n  zh-CN: {zh}")
+    return 0 if hits else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

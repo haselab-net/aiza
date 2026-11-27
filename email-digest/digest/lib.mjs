@@ -16,14 +16,34 @@ const DB = `${DATA}/items.json`;
 export const loadItems = () => { try { return JSON.parse(fs.readFileSync(DB, 'utf8')); } catch { return { items: [], runs: [] }; } };
 export const saveItems = d => { fs.writeFileSync(DB + '.tmp', JSON.stringify(d, null, 1)); fs.renameSync(DB + '.tmp', DB); };
 export const nowJst = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 16);
-// 待ちが成立した項目をスマホに知らせる。aigw の notify 専用リスナー(docker0、172.17.0.1:23000+(uid-1000))に、
+// 項目の最新のメッセージが本人のものか(本人の返信だけではセッションを起こさない、2026-11-17 ユーザー)。
+// 項目の fromMe(定期チェックの Claude・見張りが付ける)が先。無ければ from が設定の本人(名前・アカウント・nameRe 全体)そのものか
+export function fromMe(it) {
+  if (typeof it.fromMe === 'boolean') return it.fromMe;
+  const f = String(it.from || '').trim().toLowerCase(); if (!f) return false;
+  const me = [conf.me && conf.me.name, conf.account].filter(Boolean).map(s => String(s).toLowerCase());
+  if (me.includes(f) || me.some(m => m.includes('@') && f.includes(m))) return true;
+  try { return !!(conf.me && conf.me.nameRe) && new RegExp(`^(?:${conf.me.nameRe})$`, 'i').test(f); } catch { return false; }
+}
+// 内容で続きにできる前の項目(add.mjs の continues・item.mjs --open、2026-11-24 ユーザー): まとめ以外で、未読・未決・既読・待ち、
+// または既決でもセッションがあって 30 日以内のもの(使い終えたセッションに続きを渡す)
+export const CONT_DAYS = 30;
+export const contTarget = (p, now = Date.now()) => !!p && !/^misc:/.test(p.id || '') && p.source !== 'misc' && !p.held &&
+  (p.status !== '既決' || (!!p.session && (p.time || '') >= new Date(now + 9 * 3600e3 - CONT_DAYS * 86400e3).toISOString().slice(0, 16)));
+// 本人以外から返信が来た項目(2026-11-17 ユーザー): 既読・未決・未読・既決のどれでも未読に戻し、本人が画面で変えた印(byUser)を外し、
+// ページに「↩ 返信」を出す(replied。本人がページで状態を変えると消える)
+export function markReplied(it, at, from) {
+  if (it.status === '既決') { it.reopened = nowJst(); delete it.synced; }
+  it.status = '未読'; it.byUser = false; it.replied = { at: at || '', from: from || '' };
+}
+// 待ちが成立した項目をスマホに知らせる。aiza の notify 専用リスナー(docker0、172.17.0.1:23000+(uid-1000))に、
 // セッションに依らない通知(タップでまとめページを開く)を頼む。届かなくても待ちの成立は済んでいるので、失敗は wait.log に残すだけ
-// 送り先は設定の notifyUrl(local/config.json。無ければ uid から決まる aigw の notify 専用リスナー。conf.mjs)
+// 送り先は設定の notifyUrl(local/config.json。無ければ uid から決まる aiza の notify 専用リスナー。conf.mjs)
 export function notifyUrl() {
   if (!conf.notifyUrl) throw new Error('設定の notifyUrl が空');
   return conf.notifyUrl;
 }
-// aigw の上限(title 60字・message 300字、超えると 400)に合わせて切る。10分に12件を超えると 429
+// aiza の上限(title 60字・message 300字、超えると 400)に合わせて切る。10分に12件を超えると 429
 const cut = (t, n) => [...t].length > n ? [...t].slice(0, n - 1).join('') + '…' : t;
 async function post(title, message) {
   const body = { title: cut(title, 60), message: cut(message, 300), url: conf.pageUrl.replace(/^https?:\/\/[^/]+/, '') };

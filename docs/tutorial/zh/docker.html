@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>aigw 教程 用 Docker 试用</title>
+<title>AI座 教程 用 Docker 试用</title>
 <style>
   :root {
     --bg: #ffffff; --fg: #1d2330; --muted: #5b6575; --line: #dde2ea; --card: #f5f7fa;
@@ -70,13 +70,13 @@
 <body>
 <div class="wrap">
 
-<h1>aigw 教程 用 Docker 试用</h1>
+<h1>AI座 教程 用 Docker 试用</h1>
 <nav class="langs" aria-label="Language"><a href="../docker.html" lang="ja">日本語</a><a href="../en/docker.html" lang="en">English</a><a href="docker.html" lang="zh-CN" class="here" aria-current="page">简体中文</a></nav>
 <div class="editions"><a href="index.html">入口</a><a href="docker.html" class="here">用 Docker 试用</a><a href="basic.html">基础篇</a><a href="advanced.html">进阶篇</a></div>
 
-<p class="lead">在自己的电脑（或自己管理的服务器）上，用一个 Docker 容器运行并试用 aigw 的步骤。不需要服务器管理员，大约 15 分钟就能在浏览器里用上 Shell 和 Claude Code 会话。</p>
+<p class="lead">在自己的电脑（或自己管理的服务器）上，用一个 Docker 容器运行并试用 AI座 的步骤。不需要服务器管理员，大约 15 分钟就能在浏览器里用上 Shell 和 Claude Code 会话。</p>
 
-<p>基础篇和进阶篇面向管理员搭建的正式服务器（用 Google 登录，每个用户有自己的容器）。这个演示是“在本地运行一人份 aigw”的临时构成，有些功能无法使用（<a href="#limits">第 8 章</a>）。</p>
+<p>基础篇和进阶篇面向管理员搭建的正式服务器（用 Google 登录，每个用户有自己的容器）。这个演示是“在本地运行一人份 AI座”的临时构成，有些功能无法使用（<a href="#limits">第 8 章</a>）。</p>
 
 <nav class="toc">
 <strong>目录</strong>
@@ -105,19 +105,19 @@
 
 <!-- ===================================================================== -->
 <h2 id="build">2. 获取代码并构建镜像</h2>
-<pre><code>git clone https://github.com/haselab-net/aigw.git
-cd aigw
-docker build -f docker/Dockerfile -t aigw-demo .</code></pre>
-<p>需要几分钟（安装 Debian、Python、tmux 以及 Claude Code 的原生版本）。不需要 Claude Code 的话，用 <code>docker build --build-arg WITH_CLAUDE=0 -f docker/Dockerfile -t aigw-demo .</code> 可以构建得更小更快。</p>
+<pre><code>git clone https://github.com/haselab-net/aiza.git
+cd aiza
+docker build -f docker/Dockerfile -t aiza-demo .</code></pre>
+<p>需要几分钟（安装 Debian、Python、tmux 以及 Claude Code 的原生版本）。不需要 Claude Code 的话，用 <code>docker build --build-arg WITH_CLAUDE=0 -f docker/Dockerfile -t aiza-demo .</code> 可以构建得更小更快。</p>
 
 <!-- ===================================================================== -->
 <h2 id="run">3. 启动</h2>
-<pre><code>docker run -d --name aigw-demo -p 127.0.0.1:8878:8878 -v aigw-demo-home:/home/demo aigw-demo</code></pre>
+<pre><code>docker run -d --name aiza-demo -p 127.0.0.1:8878:8878 -v aiza-demo-home:/home/demo aiza-demo</code></pre>
 <div class="scroll"><table>
   <tr><th>参数</th><th>含义</th></tr>
-  <tr><td><code>-d --name aigw-demo</code></td><td>在后台运行，命名为 <code>aigw-demo</code></td></tr>
+  <tr><td><code>-d --name aiza-demo</code></td><td>在后台运行，命名为 <code>aiza-demo</code></td></tr>
   <tr><td><code>-p 127.0.0.1:8878:8878</code></td><td>只能从这台电脑上通过 <code>8878</code> 端口打开。<strong>请不要去掉 <code>127.0.0.1:</code></strong>（去掉后，同一网络中的任何人都能进入演示）</td></tr>
-  <tr><td><code>-v aigw-demo-home:/home/demo</code></td><td>把演示用户的主目录（你的文件、Claude Code 的登录）放在 Docker 卷里，重建容器后也会保留</td></tr>
+  <tr><td><code>-v aiza-demo-home:/home/demo</code></td><td>把演示用户的主目录（你的文件、Claude Code 的登录）放在 Docker 卷里，重建容器后也会保留</td></tr>
 </table></div>
 <p>如果 <code>8878</code> 端口已被占用，把左边的数字改掉，例如 <code>-p 127.0.0.1:18878:8878</code>，下面的 URL 也改用这个端口。</p>
 <div class="note"><strong>在远程服务器上运行时</strong>：不要对外开放端口，而是在自己的电脑上用 <code>ssh -L 8878:127.0.0.1:8878 &lt;服务器&gt;</code> 连接后，在本地浏览器中打开。</div>
@@ -129,10 +129,10 @@ docker build -f docker/Dockerfile -t aigw-demo .</code></pre>
   <div class="side">
     <ol class="steps">
       <li>在浏览器中打开 <code>http://localhost:8878/agents/</code>。</li>
-      <li>点击“<strong>Log in as the demo user</strong>”，就会显示会话列表。</li>
+      <li>点击“<strong>Log in as the demo user</strong>”，就会显示工作界面。</li>
     </ol>
     <div class="warn"><strong>演示没有 Google 登录。</strong>能打开这个页面的任何人都会成为唯一的演示用户（<code>demo</code>），并能在容器中使用 Shell。请不要让不可信的人使用；在登录了演示的浏览器中，也不要一直开着不可信的网页。</div>
-    <p>只有用 <code>localhost</code> 或 <code>127.0.0.1</code> 地址打开时才能登录。想用其他名字打开时，在 <code>docker run</code> 中加上 <code>-e AIGW_DEMO_HOSTS=名字</code>。</p>
+    <p>只有用 <code>localhost</code> 或 <code>127.0.0.1</code> 地址打开时才能登录。想用其他名字打开时，在 <code>docker run</code> 中加上 <code>-e AIZA_DEMO_HOSTS=名字</code>。</p>
     <p>Safari 在这种形式（http 的 localhost）下不接受登录的 Cookie，登录后也进不了列表。请使用 Chrome、Edge 或 Firefox。</p>
   </div>
 </div>
@@ -140,45 +140,43 @@ docker build -f docker/Dockerfile -t aigw-demo .</code></pre>
 <!-- ===================================================================== -->
 <h2 id="shell">5. 使用 Shell 会话</h2>
 <div class="shot">
-  <figure><img src="img/22-docker-list.png" alt="会话列表"><figcaption>会话列表（创建了两个之后）</figcaption></figure>
+  <figure><img src="img/22-docker-list.png" alt="工作界面。上方一排 ＋ 🤖 AI 等按钮下面，是 Shell 会话和 Claude 登录会话的行"><figcaption>工作界面（创建了两个会话之后）</figcaption></figure>
   <div class="side">
     <ol class="steps">
-      <li>在最上面的选择框中选“<strong>Shell(沙箱内)</strong>”，输入名字（可以留空），点击“<strong>开始</strong>”。</li>
-      <li>列表中会多出这个会话。点击名字即可打开。</li>
+      <li>按上方一排的“<strong>＋ 🤖 AI</strong>”，开始会话的界面会在它正下方打开。</li>
+      <li>“运行什么”选“<strong>Shell</strong>”，“在哪里运行”选“<strong>devbox</strong>”，确认名称（已预先填入候选）后按“<strong>开始</strong>”。</li>
+      <li>会进入聊天界面。用 <code>←</code> 回到工作，会多出一行。点按该行可再次打开。</li>
     </ol>
-    <p>列表中的 ✏️ 是改名，🔗 是与其他会话连接（会话连接，见进阶篇），🗄 是归档，🗑 是删除。会话在你停止之前会一直在容器中运行，关掉浏览器后也能接着看。</p>
+    <p>“在哪里运行”中，演示版只能用 devbox（主机和 root 需要用通行密钥解锁，演示版没有这个机制）。</p>
+    <p>行右侧的 ⋯ 里有重命名、与其他会话联动（进阶篇）、归档、删除。会话只要不停止，就会在容器中一直运行，关掉浏览器后也能接着看。</p>
   </div>
 </div>
 <div class="shot">
-  <figure><img src="img/23-docker-shell.png" alt="Shell 会话"><figcaption>发送命令之后</figcaption></figure>
+  <figure><img src="img/23-docker-shell.png" alt="Shell 会话。发送的命令在右边，结果在左边"><figcaption>发送命令之后</figcaption></figure>
   <div class="side">
     <ol class="steps">
-      <li>在下方的输入框中写命令，点击“<strong>执行</strong>”（带 Enter 发送）。“发送”只发送文字，不带 Enter。</li>
-      <li>你发送的内容显示在右边，终端的输出显示在左边，就像聊天一样。</li>
-      <li>输入框上方的 <kbd>Ctrl</kbd>、<kbd>Alt</kbd>、方向键等按钮，在手机上也能发送特殊按键（例如先按 <kbd>Ctrl</kbd> 再按 <kbd>C</kbd>）。</li>
-      <li>上方的 🖥️ 可以查看终端画面本身。</li>
+      <li>在下方输入框写入命令并按“<strong>执行</strong>”（带回车发送）。“发送”只发送文字，不带回车。</li>
+      <li>发送的内容在右边，终端输出的结果在左边，像聊天一样排列。</li>
+      <li>用输入框上方的 <kbd>Ctrl</kbd>、<kbd>Alt</kbd>、方向键等按钮，在手机上也能发送特殊按键（先按 <kbd>Ctrl</kbd> 再按 <kbd>C</kbd> 等）。</li>
+      <li>用上方的 🖥️ 可以查看终端画面本身。</li>
     </ol>
-    <p>Shell 以 <code>demo</code> 身份在容器中运行，主目录是 <code>/home/demo/sandhome</code>（代替正式服务器上的“自己专属的容器”）。</p>
+    <p>Shell 在容器中以 <code>demo</code> 身份运行，主目录是 <code>/home/demo/sandhome</code>（代替正式环境中的“自己专用的容器”）。</p>
   </div>
 </div>
 
 <!-- ===================================================================== -->
 <h2 id="claude">6. 使用 Claude Code</h2>
 <div class="shot">
-  <figure><img src="img/24-docker-claude.png" alt="Claude Code 的初始画面"><figcaption>第一次启动的 Claude Code（用 🖥️ 打开了画面）</figcaption></figure>
+  <figure><img src="img/24-docker-claude.png" alt="“Claude ログイン”（Claude 登录）的聊天。上方是步骤说明，下面是登录用的 URL"><figcaption>第一次开始 Claude 时打开的登录聊天</figcaption></figure>
   <div class="side">
     <ol class="steps">
-      <li>在最上面的选择框中选“<strong>Claude</strong>”，点击“<strong>开始</strong>”。下面的 📁 一行可以选择工作文件夹（<code>sandhome</code> 之下）。</li>
-      <li>打开会话，用上方的 🖥️ 显示画面。<strong>仅第一次</strong>，Claude Code 会要求进行设置：
-        <ul>
-          <li>选择文字风格：用输入框上方的 <kbd>↑</kbd> <kbd>↓</kbd> 移动，在输入框为空时点“执行”确定。</li>
-          <li>选择登录方式后会显示一个 URL。在浏览器中打开它并登录，把显示的代码粘贴到输入框中，点“执行”。</li>
-        </ul>
-      </li>
-      <li>之后只要在聊天中写下指令并点“执行”即可。Claude Code 会在 <code>sandhome</code> 中创建文件、运行命令。</li>
+      <li>用“<strong>＋ 🤖 AI</strong>”，“运行什么”选“<strong>Claude</strong>”，“在哪里运行”选“<strong>devbox</strong>”（默认就是这个组合），按“<strong>开始</strong>”。在带灰色 <strong>&gt;_</strong> 标记的行中可以选择工作目录（<code>sandhome</code> 之下）。</li>
+      <li><strong>第一次</strong>时 Claude Code 还没有登录，所以会改为打开“<strong>Claude ログイン</strong>”（Claude 登录）的聊天。点按出现的 URL 在浏览器中打开，用 Claude 账号授权，再把显示的代码粘贴到聊天的输入框并按“<strong>执行</strong>”。</li>
+      <li>登录完成后，再从“＋ 🤖 AI”开始 Claude。第一次时 Claude Code 可能会询问一些设置（文字配色等）：用 🖥️ 打开画面，用输入框上方的 <kbd>↑</kbd> <kbd>↓</kbd> 选择，在输入框为空时按“执行”确定。</li>
+      <li>之后只需在聊天中写下指示并按“执行”。Claude Code 会在 <code>sandhome</code> 中创建文件、运行命令。</li>
     </ol>
-    <p>登录信息保存在 <code>/home/demo</code> 下，只要加了 <code>-v aigw-demo-home:/home/demo</code>，重建容器后也会保留。</p>
-    <p>勾选“跳过权限确认”时，Claude Code 执行命令前不会每次都询问。它只在容器中操作；取消勾选则每次都会询问。</p>
+    <p>登录信息保存在 <code>/home/demo</code>，所以只要加上 <code>-v aiza-demo-home:/home/demo</code>，重建容器后也会保留。</p>
+    <p>勾选“不逐一确认 AI 的操作”时，Claude Code 会不经确认直接执行命令。它只在容器中运行，但取消勾选后每次都会要求确认。</p>
   </div>
 </div>
 <p>界面说明、按键输入、聊天与终端画面的关系，<a href="basic.html">基础篇</a>的第 2、3、5、6 章同样适用。</p>
@@ -187,20 +185,21 @@ docker build -f docker/Dockerfile -t aigw-demo .</code></pre>
 <h2 id="stop">7. 停止、删除与数据存放位置</h2>
 <div class="scroll"><table>
   <tr><th>想做的事</th><th>命令</th></tr>
-  <tr><td>停止 / 再次启动</td><td><code>docker stop aigw-demo</code> / <code>docker start aigw-demo</code></td></tr>
-  <tr><td>更新到新版本</td><td><code>git pull</code> 后，执行第 2 章的 <code>docker build</code>、<code>docker rm -f aigw-demo</code>、第 3 章的 <code>docker run</code></td></tr>
-  <tr><td>删除容器（保留数据）</td><td><code>docker rm -f aigw-demo</code></td></tr>
-  <tr><td>连数据一起删除</td><td>在上面的基础上再执行 <code>docker volume rm aigw-demo-home</code></td></tr>
-  <tr><td>进入容器</td><td><code>docker exec -it -u demo aigw-demo bash</code></td></tr>
+  <tr><td>停止 / 再次启动</td><td><code>docker stop aiza-demo</code> / <code>docker start aiza-demo</code></td></tr>
+  <tr><td>更新到新版本</td><td><code>git pull</code> 后，执行第 2 章的 <code>docker build</code>、<code>docker rm -f aiza-demo</code>、第 3 章的 <code>docker run</code></td></tr>
+  <tr><td>删除容器（保留数据）</td><td><code>docker rm -f aiza-demo</code></td></tr>
+  <tr><td>连数据一起删除</td><td>在上面的基础上再执行 <code>docker volume rm aiza-demo-home</code></td></tr>
+  <tr><td>进入容器</td><td><code>docker exec -it -u demo aiza-demo bash</code></td></tr>
 </table></div>
-<p>你创建的文件在 <code>/home/demo/sandhome</code>（卷 <code>aigw-demo-home</code> 中）。会话列表和记录也在 <code>/home/demo</code> 下，保留卷的话，下次启动时可以接着使用。重建容器后登录会失效，请再点一次“Log in as the demo user”。</p>
+<p>你创建的文件在 <code>/home/demo/sandhome</code>（卷 <code>aiza-demo-home</code> 中）。会话列表和记录也在 <code>/home/demo</code> 下，保留卷的话，下次启动时可以接着使用。重建容器后登录会失效，请再点一次“Log in as the demo user”。</p>
 
 <!-- ===================================================================== -->
 <h2 id="limits">8. 演示中不能做的事</h2>
 <div class="scroll"><table>
   <tr><th>功能</th><th>在演示中</th></tr>
   <tr><td>Google 登录、多个用户、自助注册</td><td>没有。只有一个用户 <code>demo</code></td></tr>
-  <tr><td>“Shell(沙箱外,主机)”、root Shell、通行密钥</td><td>不能使用（没有安装通行密钥解锁的机制）。即使显示按钮也会失败</td></tr>
+  <tr><td>“主机”“root”这两个位置、通行密钥</td><td>不能使用（没有安装通行密钥解锁的机制）。即使能选择也会失败</td></tr>
+  <tr><td>“mailbox”这个位置</td><td>没有配置，所以不会出现</td></tr>
   <tr><td>Codex</td><td>镜像中没有</td></tr>
   <tr><td>通过 ssh 连接的其他机器、Windows 机器黑板</td><td>没有配置，不会显示</td></tr>
   <tr><td>手机通知（Web Push）</td><td>没有密钥，不会发送</td></tr>
@@ -217,7 +216,7 @@ docker build -f docker/Dockerfile -t aigw-demo .</code></pre>
   <li>要按正式构成运行，请看仓库 <code>README.md</code> 中的“導入時に必要な設定”（安装设置）。</li>
 </ul>
 
-<footer>aigw 教程 用 Docker 试用 · 2026-11-14 · 截图按手机宽度拍摄，运行的是本演示（<code>docker/</code>）</footer>
+<footer>AI座 教程 用 Docker 试用 · 2026-11-27 · 截图按手机宽度拍摄，运行的是本演示（<code>docker/</code>）</footer>
 </div>
 </body>
 </html>

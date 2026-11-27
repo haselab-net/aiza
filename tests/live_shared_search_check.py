@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Checks the running aigw for chat-search leaks across users
-(the deployment notes). Run as root on the host, after deploying aigw-backend or
-aigw-gateway:
+"""Checks the running aiza for chat-search leaks across users
+(the deployment notes). Run as root on the host, after deploying aiza-backend or
+aiza-gateway:
 
     sudo python3 tests/live_shared_search_check.py [--base https://<host>]
 
 For every user with a running backend, and every viewer -> owner pair in
-the gateway's shares index, it logs in as the viewer (aigw-mint-session-cookie) and searches the owner's logs through
+the gateway's shares index, it logs in as the viewer (aiza-mint-session-cookie) and searches the owner's logs through
 the gateway with queries that match nearly everything, with and without a
-forged X-Aigw-On-Behalf-Of header. Every hit must be a session whose
+forged X-Aiza-On-Behalf-Of header. Every hit must be a session whose
 meta.json lists the viewer in shared_with. It also searches every other
 user's logs as each viewer (only sessions shared with the viewer may appear) and the viewer's own logs
 with a forged header (must be the viewer's own only). Read-only; exits 1 on
@@ -27,8 +27,8 @@ import urllib.error
 import urllib.request
 from urllib.parse import quote
 
-SHARES_INDEX = "/var/lib/aigw/shares.json"
-MINT = "/usr/local/bin/aigw-mint-session-cookie"
+SHARES_INDEX = "/var/lib/aiza/shares.json"
+MINT = "/usr/local/bin/aiza-mint-session-cookie"
 QUERIES = ["e", "a", "の", "claude", "1"]
 SESSION_ID_RE = re.compile(r"^[a-f0-9]{8,32}$")
 
@@ -37,7 +37,7 @@ def metas(user):
     """Every session meta of `user`, from any session root under their home."""
     home = pwd.getpwnam(user).pw_dir
     out = {}
-    for p in glob.glob(os.path.join(home, "**", ".aigw", "*", "meta.json"), recursive=True):
+    for p in glob.glob(os.path.join(home, "**", ".aiza", "*", "meta.json"), recursive=True):
         sid = os.path.basename(os.path.dirname(p))
         if not SESSION_ID_RE.match(sid):
             continue
@@ -54,9 +54,9 @@ def shared_ids(owner, viewer):
 
 
 def backend_users():
-    out = subprocess.run(["systemctl", "list-units", "aigw-backend@*.service", "--no-legend",
+    out = subprocess.run(["systemctl", "list-units", "aiza-backend@*.service", "--no-legend",
                           "--state=active", "--plain"], capture_output=True, text=True).stdout
-    return {m.group(1) for m in re.finditer(r"aigw-backend@([^.\s]+)\.service", out)}
+    return {m.group(1) for m in re.finditer(r"aiza-backend@([^.\s]+)\.service", out)}
 
 
 def cookie(user):
@@ -67,9 +67,9 @@ def cookie(user):
 
 def search(base, ck, path, q, spoof=None):
     req = urllib.request.Request(f"{base}/agents/api{path}?q={quote(q)}")
-    req.add_header("Cookie", f"aigw_session={ck}")
+    req.add_header("Cookie", f"aiza_session={ck}")
     if spoof:
-        req.add_header("X-Aigw-On-Behalf-Of", spoof)
+        req.add_header("X-Aiza-On-Behalf-Of", spoof)
     try:
         with urllib.request.urlopen(req, timeout=60) as resp:
             r = json.load(resp)

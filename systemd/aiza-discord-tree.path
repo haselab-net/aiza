@@ -1,0 +1,11 @@
+[Unit]
+Description=Run aiza-discord-tree when the work tree or the lab roster changes (the deployment notes)
+
+[Path]
+# the store writes nodes.json by rename; PathChanged sees that too
+PathChanged=/var/lib/aiza-tree/nodes.json
+PathChanged=/srv/labnotes/members.md
+Unit=aiza-discord-tree.service
+
+[Install]
+WantedBy=multi-user.target

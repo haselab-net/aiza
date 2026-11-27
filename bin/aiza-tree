@@ -1,0 +1,105 @@
+#!/usr/bin/env python3
+"""aiza-tree -- this session's place in the work tree (the plan's stage 2:
+one job split into children, each showing who holds the ball).
+
+Like talkto and aiza-board, it never talks over the network: it appends one
+JSON line with a "tree" request to $AIZA_TALKTO and waits for this session's
+backend to answer in talkto_status.jsonl next to it.
+"""
+import os as _aiza_os  # aigw-legacy: sessions started before the rename (2026-11-23) only have AIGW_*
+for _k in [k for k in _aiza_os.environ if k.startswith("AIGW_")]:
+    _aiza_os.environ.setdefault("AIZA_" + _k[5:], _aiza_os.environ[_k].replace("/.aigw/", "/.aiza/").replace("/.aigw-state/", "/.aiza-state/"))
+import json
+import os
+import secrets
+import sys
+import time
+
+WAIT_SECONDS = 15
+
+HELP = """\
+使い方:
+  aiza-tree                     このセッションのノードと、その下の枝を見る
+  aiza-tree split "<題>"         このセッションのノードの下に子を足す(ノードが無ければ、セッションの名前で作る)。題は要約して20字程度
+  aiza-tree split --under <ID> "<題>"
+                                その項目の下に子を足す。今の仕事と別の仕事を枝にするときは、find で合う親を探してこれで
+  aiza-tree find <語>…           開いている項目を題(と親の題)で探す(ID と道筋を出す)
+  aiza-tree link <ノードID>       その項目をこのセッションが担当する(ほかのセッションの項目なら、その下にこのセッションの子を作る)
+  aiza-tree done [<ノードID>]     ノードを済みにする(省くとこのセッションのノード)
+  aiza-tree reopen [<ノードID>]   済みにしたノードを開き直す(省くとこのセッションのノード)
+
+仕事を子に分けたら split で枝にしてください。talkto で別のセッションに引き継ぎ、返事を
+「済み — 〈相手〉へ引き継ぎ」で終えると、引き継ぎも自動でこのセッションのノードの枝になります。
+ボール(🙋 人・🤖 AI・💤 寝かせ)は、結びついたセッションの状態の行から自動で決まります。
+木は AI座 の ✅ の画面で見られます。最初は本人だけに見え、座の中に広げるのは画面から。
+
+オプション: -h, --help  この説明
+"""
+
+
+def main(argv):
+    if not argv or argv[0] in ("show", "list"):
+        req = {"cmd": "show"}
+    elif argv[0] in ("-h", "--help", "-help", "help"):
+        print(HELP, end="")
+        return 0
+    elif argv[0] == "split":
+        rest, under = argv[1:], None
+        if rest and rest[0] == "--under" or rest and rest[0].startswith("--under="):
+            if rest[0] == "--under":
+                if len(rest) < 2:
+                    print("aiza-tree: --under の後にノードの ID がありません", file=sys.stderr)
+                    return 2
+                under, rest = rest[1], rest[2:]
+            else:
+                under, rest = rest[0].split("=", 1)[1], rest[1:]
+        title = " ".join(rest).strip()
+        if not title:
+            print('aiza-tree: 題がありません(aiza-tree split [--under <ID>] "<題>")', file=sys.stderr)
+            return 2
+        req = {"cmd": "split", "title": title}
+        if under:
+            req["under"] = under
+    elif argv[0] == "find":
+        req = {"cmd": "find", "q": " ".join(argv[1:])}
+    elif argv[0] == "link":
+        if len(argv) < 2:
+            print("aiza-tree: ノードの ID がありません(aiza-tree link <ノードID>)", file=sys.stderr)
+            return 2
+        req = {"cmd": "link", "id": argv[1]}
+    elif argv[0] == "done":
+        req = {"cmd": "done", "id": argv[1] if len(argv) > 1 else None}
+    elif argv[0] == "reopen":
+        req = {"cmd": "reopen", "id": argv[1] if len(argv) > 1 else None}
+    else:
+        print(f"aiza-tree: 知らない指示です: {argv[0]}(aiza-tree --help)", file=sys.stderr)
+        return 2
+    path = os.environ.get("AIZA_TALKTO")
+    if not path:
+        print("aiza-tree: $AIZA_TALKTO がありません -- AI座 が始めたセッションの中で使ってください", file=sys.stderr)
+        return 1
+    item_id = secrets.token_hex(8)
+    with open(path, "a") as f:
+        f.write(json.dumps({"ts": time.time(), "id": item_id, "tree": req}, ensure_ascii=False) + "\n")
+    status_path = os.path.join(os.path.dirname(path), "talkto_status.jsonl")
+    deadline = time.time() + WAIT_SECONDS
+    while time.time() < deadline:
+        try:
+            with open(status_path) as f:
+                for raw in f:
+                    try:
+                        obj = json.loads(raw)
+                    except ValueError:
+                        continue
+                    if isinstance(obj, dict) and obj.get("id") == item_id:
+                        print(obj.get("msg") or obj.get("status"))
+                        return 0 if obj.get("status") == "ok" else 1
+        except OSError:
+            pass
+        time.sleep(0.3)
+    print("aiza-tree: 返事がありません(AI座 のこのセッションの見張りが止まっているかもしれません)", file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

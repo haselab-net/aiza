@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>aigw チュートリアル</title>
+<title>AI座 チュートリアル</title>
 <style>
   :root {
     --bg: #ffffff; --fg: #1d2330; --muted: #5b6575; --line: #dde2ea; --card: #f5f7fa;
@@ -70,22 +70,22 @@
 <body>
 <div class="wrap">
 
-<h1>aigw チュートリアル 発展編</h1>
+<h1>AI座 チュートリアル 発展編</h1>
 <nav class="langs" aria-label="Language"><a href="advanced.html" lang="ja" class="here" aria-current="page">日本語</a><a href="en/advanced.html" lang="en">English</a><a href="zh/advanced.html" lang="zh-CN">简体中文</a></nav>
 <div class="editions"><a href="index.html">入口</a><a href="docker.html">Docker で試す</a><a href="basic.html">基本編</a><a href="advanced.html" class="here">発展編</a></div>
 
-<p class="lead"><a href="basic.html">基本編</a>の続きです。セッションが増えてきたときの整理(フォルダ・巡回・通知)、他のセッションとの連携、砂場の外(Email・ホスト・ルート)、他のマシンの使い方を説明します。</p>
+<p class="lead"><a href="basic.html">基本編</a>の続きです。セッションが増えてきたときの整理(フォルダ・仕事の木・巡回・番ごと)、他のセッションとの連携、devbox の外(mailbox・ホスト・ルート)、他のマシンの使い方を説明します。</p>
 
 <nav class="toc">
 <strong>目次</strong>
 <ol>
-  <li><a href="#folders">フォルダで整理する</a></li>
+  <li><a href="#folders">フォルダと仕事の木で整理する</a></li>
   <li><a href="#patrol">確認待ちと巡回</a></li>
-  <li><a href="#notifications">通知の一覧</a></li>
+  <li><a href="#tree">仕事の木と「番ごと」</a></li>
   <li><a href="#links">セッション同士をつなぐ</a></li>
-  <li><a href="#where">砂場・ホスト・ルート・Email の違い</a></li>
+  <li><a href="#where">devbox・mailbox・ホスト・ルートの違い</a></li>
   <li><a href="#settings">設定画面と Claude へのログイン</a></li>
-  <li><a href="#passkey">Email とパスキー(鍵)の登録</a></li>
+  <li><a href="#passkey">mailbox とパスキー(鍵)の登録</a></li>
   <li><a href="#root">ルートになるための手順</a></li>
   <li><a href="#machines">他のマシンと Windows 機の黒板</a></li>
   <li><a href="#faq">困ったとき</a></li>
@@ -93,45 +93,48 @@
 </nav>
 
 <!-- ===================================================================== -->
-<h2 id="folders">1. フォルダで整理する</h2>
+<h2 id="folders">1. フォルダと仕事の木で整理する</h2>
 
-<p>セッションはフォルダにまとめられます。フォルダの中にフォルダを作ることもでき、段数に制限はありません。</p>
+<p>仕事の 🌳 木では、セッションを<strong>フォルダ</strong>にまとめ、さらに<strong>仕事の木</strong>(やることを枝分けして書いたもの、<a href="#tree">3章</a>)の項目の下に置けます。フォルダの中にフォルダを作ることもでき、段数に制限はありません。</p>
 
 <div class="shot">
-  <figure><img src="img/11-folders.png" alt="一覧にフォルダ「研究」があり、その中にフォルダ「ロボット」、さらにその中にセッションが2つ。ロボットのフォルダには共有中の印"><figcaption>「研究」の中の「ロボット」を開いたところ。👥 はフォルダごと共有中の印</figcaption></figure>
+  <figure><img src="img/11-folders.png" alt="↕ を押した並べ替えの画面。フォルダ「研究」、その中の仕事の木「学会の準備」と項目、項目の下のセッション、各行の左に ⠿"><figcaption>↕ を押したところ。各行の左の ⠿ で引っぱって動かす</figcaption></figure>
   <div class="side">
     <ul>
-      <li><strong>作る</strong>: 一覧の上の「＋ フォルダを作る」。フォルダの中に作るときは、そのフォルダの行の <strong>＋</strong> →「この中にフォルダを作る」。</li>
-      <li><strong>入れる・動かす</strong>: 行の左の ⠿ をつかんで、フォルダの行の上で離すとその中に入ります。行と行の間で離すと、そこへ並べ替えます。フォルダごと別のフォルダに入れることもできます。</li>
-      <li><strong>開く・閉じる</strong>: フォルダの行をタップ。行の数字は中のセッションの数、「確認待ち」は中で返事を待っているものの数です。</li>
+      <li><strong>選ぶ・開く</strong>: フォルダの行を<strong>1回押すと選び</strong>(枠が青く光る)、<strong>選んだ行をもう一度押すと開く・閉じる</strong>。📁 の右下の ▶/▼ を押すと、選ばずにすぐ開閉します。行の数字は中のセッションの数です。開いたフォルダは、中ごと枠で囲まれます。</li>
+      <li><strong>作る</strong>: 上の段の「＋ 📁」を押すと、上の段のすぐ下に名前の欄が開きます。名前を書いて「作る」(または <kbd>Enter</kbd>)。フォルダを選んでいれば、その中に作ります。</li>
+      <li><strong>入れる・動かす</strong>: 上の段の <strong>↕</strong> を押すと、各行の左に ⠿ が出ます。⠿ をつかんで、フォルダの行の上で離すとその中に入ります。行と行の間で離すと、そこへ並べ替えます。フォルダごと、仕事の木ごと別のフォルダに入れることもできます。終わったらもう一度 ↕。</li>
+      <li><strong>セッションを仕事の木の項目へ</strong>: セッションの ⠿ を木の項目の上で離すと、その項目の下に入ります(項目とセッションが結びつく)。項目が済むと、セッションはフォルダの中に戻ります。</li>
       <li><strong>まとめて止める・再開する</strong>: フォルダの行の ● をタップすると、中で動いているセッションをすべて止めます。止めたあとの灰色の ● をタップすると、そのとき止めたものをまとめて再開します。</li>
-      <li><strong>アーカイブ</strong>: 🗄 でフォルダごとアーカイブ。消すのは空のフォルダだけです(🗑)。</li>
+      <li><strong>フォルダの ⋯</strong>: ✏️ 名前を変更・作業ディレクトリを設定・🧑‍🤝‍🧑 フォルダごと共有・🗄 アーカイブへ移動(フォルダごと)・🗑 削除(空のフォルダだけ)。</li>
+      <li>セッションの行の ⋯ には、名前の変更・🔗 つなぐ・🗄 アーカイブ・🗑 削除が入っています。</li>
     </ul>
   </div>
 </div>
 
-<h3>作業フォルダ</h3>
+<h3>作業ディレクトリ</h3>
 <div class="shot">
-  <figure><img src="img/12-folder-menu.png" alt="フォルダの ✏️ を押して出たメニュー。名前を変更、作業フォルダを設定、フォルダごと共有"><figcaption>フォルダの ✏️ のメニュー</figcaption></figure>
+  <figure><img src="img/12-folder-menu.png" alt="フォルダ「研究」の ⋯ を押して出たメニュー。名前を変更、作業ディレクトリを設定、フォルダごと共有、アーカイブへ移動"><figcaption>フォルダの ⋯ のメニュー</figcaption></figure>
   <div class="side">
-    <p>フォルダに<strong>作業フォルダ</strong>(サーバー上の場所)を1つ持たせられます。✏️ →「作業フォルダを設定」で、<code>robot</code> のように書きます。</p>
+    <p>フォルダに<strong>作業ディレクトリ</strong>(サーバー上の場所)を1つ持たせられます。⋯ →「作業ディレクトリを設定」で、<code>robot</code> のように書きます。</p>
     <ul>
-      <li>場所は相対で書きます。砂場のセッションなら <code>~/sandhome/robot</code>、ホストのシェルなら自分のホームの下、ルートのシェルなら <code>/root</code> の下の、同じ名前の場所です。</li>
-      <li>そのフォルダの <strong>＋</strong> →「このフォルダで新しいセッション」を押すと、一覧の上の作成欄に「📁 ロボット · 作業フォルダ ~/robot」と出ます。<strong>開始</strong>を押すと、その場所でセッションが始まり、そのフォルダに入ります。場所が無ければ作られます。</li>
-      <li>どこから作っても、作業フォルダの中で始めた新しいセッションは、自動でそのフォルダに入ります。</li>
-      <li>作業フォルダを書いていないフォルダは、上のフォルダのものを使います。</li>
+      <li>場所は相対で書きます。devbox のセッションなら <code>~/sandhome/robot</code>、ホストのセッションなら自分のホームの下、ルートのセッションなら <code>/root</code> の下の、同じ名前の場所です。</li>
+      <li>そのフォルダを選んで上の段の <strong>＋ 🤖 AI</strong> を押すと、始める画面の置く場所にそのフォルダが入って開きます。<strong>開始</strong>を押すと、作業ディレクトリの場所でセッションが始まり、そのフォルダに入ります。場所が無ければ作られます。</li>
+      <li>どこから作っても、作業ディレクトリの中で始めた新しいセッションは、自動でそのフォルダに入ります。</li>
+      <li>作業ディレクトリを書いていないフォルダは、上のフォルダのものを使います。</li>
     </ul>
   </div>
 </div>
 
 <h3>フォルダごと共有する</h3>
-<p>✏️ →「フォルダごと共有…」で、中のセッションすべてを共有できます(下のフォルダや、あとから入れたものも)。相手と「閲覧のみ/共同作業」の選び方は、1つずつの共有(<a href="basic.html#share">基本編</a>)と同じです。ルートのシェルは閲覧のみになり、Email はフォルダでは共有されません。共有中のフォルダには 👥 が付きます。</p>
+<p>⋯ →「🧑‍🤝‍🧑 フォルダごと共有…」で、中のセッションすべてを共有できます(下のフォルダや、あとから入れたものも)。相手と「閲覧のみ/共同作業」の選び方は、1つずつの共有(<a href="basic.html#share">基本編</a>)と同じです。ルートのセッションは閲覧のみになり、mailbox のセッションは、<strong>名前を指定した相手</strong>への共有でだけ届きます(「全員」に共有したフォルダは mailbox には効きません)。共同作業のフォルダなら、mailbox の Claude・Codex は共同作業、mailbox のシェルは閲覧のみになります。共有中のフォルダには 🧑‍🤝‍🧑 が付きます。</p>
 
 <h3>アーカイブの中のフォルダ</h3>
 <div class="shot">
-  <figure><img src="img/16-archive.png" alt="アーカイブを開いたところ。アーカイブの中にも「研究」「ロボット」のフォルダがあり、その中にアーカイブしたセッション"><figcaption>アーカイブの中も、同じフォルダの形で並ぶ</figcaption></figure>
+  <figure><img src="img/16-archive.png" alt="一番下の「アーカイブを開く」を開いたところ。済んだ木「前の学会」とその枝、アーカイブしたセッション"><figcaption>一番下の「🗄 アーカイブを開く」。済んだ仕事の木もここに入る</figcaption></figure>
   <div class="side">
-    <p>フォルダの中でアーカイブしたセッションは、「🗄 アーカイブを開く」の中でも同じフォルダの下に並びます。📤 で戻すと元のフォルダに戻ります。フォルダごとアーカイブしたものは、そのフォルダの行の 📤 でまとめて戻せます。</p>
+    <p>フォルダの中でアーカイブしたセッションは、「🗄 アーカイブを開く」の中でも同じフォルダの下に並びます。📤 で戻すと元のフォルダに戻ります。フォルダごとアーカイブしたもの(⋯ の 🗄)は、そのフォルダの行の 📤 でまとめて戻せます。</p>
+    <p>全部の項目が済んだ仕事の木も、アーカイブの中に移ります。↕ で、アーカイブの中のフォルダへ動かすこともできます。</p>
   </div>
 </div>
 
@@ -141,140 +144,174 @@
 <p>Claude が返事を待っている(作業が終わった、計画の承認を求めている、など)セッションには、一覧の名前の横に黄色い「確認待ち」が付きます。</p>
 
 <div class="shot">
-  <figure><img src="img/13-patrol.png" alt="チャット画面の上の巡回の帯。フォルダの場所、前・次のボタン、1/5、絞り込みの選択欄、アーカイブとゴミ箱のボタン"><figcaption>チャットの名前をタップすると開く巡回の帯</figcaption></figure>
+  <figure><img src="img/02-chat.png" alt="チャット画面の見出しの下の巡回の帯。フォルダの場所、前・次のボタン、7/7、絞り込みの選択欄、名前の変更・アーカイブ・ゴミ箱のボタン"><figcaption>チャットの見出しの下にある巡回の帯</figcaption></figure>
   <div class="side">
     <ul>
-      <li>チャット画面で<strong>名前の部分をタップ</strong>すると、巡回の帯が開きます(もう一度タップで閉じる)。</li>
+      <li>巡回の帯は、チャットの見出しのすぐ下に初めから開いています。<strong>名前の部分をタップ</strong>すると閉じ、もう一度タップで開きます(このブラウザが覚えます)。</li>
       <li><strong>‹ 前・次 ›</strong> で、一覧に戻らずに前後のセッションへ移ります。順番は一覧(フォルダの中も含む)の順です。</li>
       <li>選択欄で「全部・動いているもの・確認待ち」を選べます。「確認待ち」にすると、返事を待っているものだけを順に回れます。</li>
-      <li>🗄 で今のセッションをアーカイブ、🗑 で会話ログを削除して、そのまま次へ移ります。</li>
+      <li>✏️ で今のセッションの名前を変更、🗄 でアーカイブ、🗑 で会話ログを削除して、そのまま次へ移ります。</li>
       <li>帯の上の小さな字は、そのセッションが一覧のどのフォルダにあるかです。</li>
     </ul>
   </div>
 </div>
 
 <!-- ===================================================================== -->
-<h2 id="notifications">3. 通知の一覧</h2>
+<h2 id="tree">3. 仕事の木と「番ごと」</h2>
 
+<p><strong>仕事の木</strong>は、1つの仕事(例えば「学会の準備」)を枝(「発表練習」「予稿」…)に分けて書いたものです。枝ごとに「いま誰の番か」(🙋 人・🤖 AI・💤 待ち・✓ 済み)を持ち、セッションと結びつけられます。AI座 の Claude はセッションの中から自分で枝を足したり、済みにしたりします。</p>
+<ul>
+  <li><strong>見た目</strong>: 木の根の行には 🌳 が付きます(右下の ▶ 閉じている・▼ 開いている・▽ 済んだ枝も出している。左下の 🔒 は誰とも共有していない木)。下に枝のある枝は、その下ごと枠で囲まれます。</li>
+  <li><strong>選ぶ・開く</strong>: フォルダと同じく、枝の行を<strong>1回押すと選び</strong>、<strong>選んだ行をもう一度押すと開く・閉じる</strong>。選ぶと、その枝の枠全体が光ります。</li>
+  <li><strong>木を作る</strong>: 上の段の「＋ 🌳」で、上の段のすぐ下に開く欄に名前を書きます。フォルダを選んでいればそのフォルダに置かれます。選んでいなければ「フォルダに入れていない木」に並ぶので、↕ でフォルダへ動かします(根の ⋯ の「📁 置くフォルダ…」でも選べます)。</li>
+  <li><strong>枝を足す</strong>: 枝(または根)を選んで「＋ 🌳」。題で足すか、GitHub の Issue につなぐかを選べます。</li>
+  <li><strong>枝でセッションを始める</strong>: 枝を選んで「＋ 🤖 AI」。枝にまだセッションが無ければ、始めたセッションがその枝の担当(下の「担当と協力」)になります。もうセッションがあれば、その下に枝を作って担当になります。ほかの人がセッションで持っている枝を選ぶと、🤛 引き取る(自分の新しいセッションで受け持つ)になります。</li>
+  <li><strong>枝の ⋯</strong>: ✓ 済みにする(↺ 開き直す)・🧑‍🤝‍🧑 共有(見られる人・書ける人)・⛓ 何が止めているか・💬 参照・📁 置くフォルダ(根だけ)・✏️ 名前を変える、などです。作るもの(枝・セッション)は ⋯ ではなく上の段の ＋ で作ります。</li>
+  <li>枝の横の「🙋 あなた」などの印は、いまの番です。<strong>赤い「◯日止まっている」</strong>は、番が動かないまま3日以上たったものです。上の「出すもの」で「🙋 あなたの番」「⏳ 3日止まり」に絞れます。</li>
+  <li>済んだ枝は「✓ 済みの枝 ◯ 件」にたたまれます。</li>
+</ul>
+
+<h3 id="team">🧭 担当と 🤝 協力</h3>
 <div class="shot">
-  <figure><img src="img/14-notifications.png" alt="通知の一覧。日時・セッション名・本文が並び、それぞれにアーカイブのボタン"><figcaption>🔔 で開く通知の一覧。赤い ● はまだ見ていないもの</figcaption></figure>
+  <figure><img src="img/19-team.png" alt="木「実験データの整理」の行に「🧭 実験データの整理 · 🤝 表を作る・グラフを描く」と出て、枠の中に担当と協力のセッションの行が見出し付きで並ぶ"><figcaption>枝「実験データの整理」の担当と、それを手伝う協力の2つ</figcaption></figure>
   <div class="side">
+    <p>1つの枝を何人(何セッション)かで受け持つときの形です。</p>
     <ul>
-      <li>画面の上の 🔔 で、これまでに届いた通知(プッシュ)の一覧が開きます。赤い数字はまだ見ていない数です。</li>
-      <li>それぞれに日時・セッションの名前・本文が出ます。押すとそのセッションを開きます。</li>
-      <li>一覧に出たものは表示済みになります。🗄 で1件、「すべてアーカイブ」でまとめてアーカイブできます。</li>
-      <li><strong>済んだものは自動でアーカイブに移ります</strong>: 通知のあとにそのセッションへ自分が何か送った、セッションが終わった・アーカイブした・消した、のどれか。理由はアーカイブの欄に出ます。</li>
+      <li><strong>🧭 担当</strong>: 枝に結ばれたセッション。枝の番(🙋・🤖・💤・✓)を書くのは担当だけです。</li>
+      <li><strong>🤝 協力</strong>: 担当を手伝うセッション。協力は木に何も書きません。担当が別の枝へ移れば、協力も一緒に移ります。</li>
+      <li>担当のいる枝の行には「🧭 担当 · 🤝 協力」の名前が出て、枝の枠の中に担当と協力のセッションの行が見出し付きで並びます。</li>
+      <li><strong>協力にする</strong>: ↕ を押し、手伝わせたいセッションの ⠿ を、担当のいる枝(または担当のセッションの行)に落とします。確認が出ます。今は自分のセッションどうしだけです。</li>
+      <li><strong>やめる・外す</strong>: 枝の ⋯ の「🤝 協力をやめる」「🧭 担当を外す」。↕ でセッションを木の枠の外へ落としても外れます。外れたセッションはフォルダに戻ります。</li>
+      <li>枝を閉じていても、担当のセッションの行は出ます(協力は数だけ)。開くと協力の行も出ます。</li>
+      <li>分けて「済み」を言える区切りがあれば枝に分け、一緒に1つの物を作るなら分けずに担当と協力にします。</li>
+    </ul>
+  </div>
+</div>
+
+<h3>🙋 番ごと</h3>
+<div class="shot">
+  <figure><img src="img/18-ball.png" alt="番ごとの画面。あなたの番、AI 作業中、待ち(寝かせ)、あなたの番(木の項目)、ほかの人の番"><figcaption>🙋 番ごと。誰の番かで分けた一覧</figcaption></figure>
+  <div class="side">
+    <p>セッションと仕事の木の枝を、<strong>誰の番か</strong>で分けて並べます。上から「あなたの番」「AI 作業中」「待ち(寝かせ)」、そして木の枝の「あなたの番」です。ほかの人の番や、まだ誰の番でもないものは、たたんであります。</p>
+    <ul>
+      <li>✓ で済み、💤 で「いつまで寝かせるか」を選んで寝かせます。⏰ で寝かせを早めに起こします。</li>
+      <li>枝の 🌳 を押すと、🌳 木の中のその枝へ移ります。</li>
+      <li>タブの「仕事」の横の数字は、あなたの番の数です。スマホに通知が来たら、ここを見ます。</li>
     </ul>
   </div>
 </div>
 
 <!-- ===================================================================== -->
 <h2 id="links">4. セッション同士をつなぐ</h2>
-<p>一覧の 🔗 で、2つのセッション(例えば、砂場の Claude とホストの Claude)をつなげます。つながると、片方の Claude が <code>talkto "…"</code> を実行したときだけ、その文が相手の入力欄に届きます。何でも自動で転送するわけではありません。使い方は Claude 自身が <code>talkto --help</code> で調べられます。</p>
+<p>セッションの行の ⋯(またはチャットの ⋯)の 🔗 で、2つのセッション(例えば、devbox の Claude とホストの Claude)をつなげます。つながると、片方の Claude が <code>talkto "…"</code> を実行したときだけ、その文が相手の入力欄に届きます。何でも自動で転送するわけではありません。使い方は Claude 自身が <code>talkto --help</code> で調べられます。</p>
 
 <!-- ===================================================================== -->
-<h2 id="where">5. 砂場・ホスト・ルート・Email の違い</h2>
+<h2 id="where">5. devbox・mailbox・ホスト・ルートの違い</h2>
 
-<p>作成欄の種類は「どこで動くか」が違います。普段使うのは<strong>砂場</strong>(Claude・Codex・Shell (sandbox内))だけです。</p>
+<p>始める画面では「何で」(Claude・Codex・Shell)と「どこで」(devbox・mailbox・ホスト・ルート・他のマシン)を別々に選びます。どの組み合わせでも始められます(例えば、ホストの Claude、mailbox の Codex、mailbox の Shell)。普段使うのは <strong>devbox</strong> だけで、最初は「Claude」×「devbox」が選ばれています。mailbox は設定されたサーバーにだけ、ルートはルート階層のパスキーを持つ人にだけ出ます。</p>
 
-<div class="diagram" role="img" aria-label="砂場と Email の箱はサーバーの中の別々のコンテナ、ホストとルートはコンテナの外で、外に出るにはパスキーが要る">
+<div class="diagram" role="img" aria-label="devbox と mailbox はサーバーの中の別々のコンテナ、ホストとルートはコンテナの外で、外に出るにはパスキーが要る">
 <svg viewBox="0 0 760 330" xmlns="http://www.w3.org/2000/svg" font-size="13">
-  <text x="24" y="28" font-size="15" font-weight="600">コンテナの外(ホスト・ルート・Email)に出るにはパスキーが要る</text>
+  <text x="24" y="28" font-size="15" font-weight="600">devbox の外(mailbox・ホスト・ルート)に出るにはパスキーが要る</text>
   <rect class="box" x="24" y="48" width="712" height="262" rx="10"/>
   <text x="40" y="72" font-weight="600">サーバー</text>
   <rect class="acc" x="48" y="92" width="300" height="96" rx="8"/>
-  <text x="64" y="118" font-weight="600">砂場(自分専用のコンテナ)</text>
-  <text x="64" y="140" class="q" font-size="12">Claude / Codex / Shell (sandbox内)</text>
+  <text x="64" y="118" font-weight="600">devbox(自分専用のコンテナ)</text>
+  <text x="64" y="140" class="q" font-size="12">Claude / Codex / Shell</text>
   <text x="64" y="158" class="q" font-size="12">見えるのは ~/sandhome だけ</text>
   <text x="64" y="176" class="q" font-size="12">パスキー不要。普段はここ</text>
   <rect class="wrn" x="412" y="92" width="300" height="96" rx="8"/>
-  <text x="428" y="118" font-weight="600">Email の箱(もう1つのコンテナ)</text>
-  <text x="428" y="140" class="q" font-size="12">Email(設定されたサーバーだけ)</text>
-  <text x="428" y="158" class="q" font-size="12">見えるのは ~/mailbox だけ。砂場からは見えない</text>
+  <text x="428" y="118" font-weight="600">mailbox(もう1つのコンテナ)</text>
+  <text x="428" y="140" class="q" font-size="12">Claude / Codex / Shell。設定されたサーバーだけ</text>
+  <text x="428" y="158" class="q" font-size="12">~/mailbox と ~/sandhome が見える。devbox からは見えない</text>
   <text x="428" y="176" class="q" font-size="12">🔑 ホスト階層のパスキーで解錠</text>
   <rect class="wrn" x="48" y="208" width="300" height="84" rx="8"/>
   <text x="64" y="234" font-weight="600">ホスト(コンテナの外、自分の権限)</text>
-  <text x="64" y="256" class="q" font-size="12">Shell (sandbox外・ホスト)。本物のホームが見える</text>
+  <text x="64" y="256" class="q" font-size="12">Claude / Codex / Shell。本物のホームが見える</text>
   <text x="64" y="274" class="q" font-size="12">🔑 ホスト階層のパスキーで解錠</text>
   <rect class="wrn" x="412" y="208" width="300" height="84" rx="8"/>
   <text x="428" y="234" font-weight="600">ルート(サーバーの管理者権限)</text>
-  <text x="428" y="256" class="q" font-size="12">Shell (root・sandbox外)。許可された人だけに出る</text>
+  <text x="428" y="256" class="q" font-size="12">Claude / Codex / Shell。許可された人だけに出る</text>
   <text x="428" y="274" class="q" font-size="12">🔓 ルート階層のパスキーで解錠</text>
 </svg>
 </div>
 
 <div class="scroll"><table>
-  <tr><th>種類(作成欄の表示)</th><th>動く場所</th><th>見えるもの</th><th>パスキー</th><th>使いどころ</th></tr>
-  <tr><td><strong>Claude</strong> / Codex / Shell (sandbox内)</td><td>砂場: 自分専用のコンテナ</td><td><code>~/sandhome</code> だけ</td><td>不要</td><td>普段の開発すべて</td></tr>
-  <tr><td><strong>Email</strong></td><td>Email の箱: 砂場とは別のコンテナ(設定されたサーバーだけ)</td><td><code>~/mailbox</code> だけ</td><td>🔑 ホスト階層</td><td>メールや個人情報など、開発用の砂場に置きたくないもの</td></tr>
-  <tr><td>Shell (sandbox外・ホスト)</td><td>サーバーそのもの、自分の権限</td><td>本物のホーム(<code>~/</code>)など</td><td>🔑 ホスト階層</td><td>コンテナの外のファイルを触るとき</td></tr>
-  <tr><td>Shell (root・sandbox外)</td><td>サーバーそのもの、root</td><td>すべて</td><td>🔓 ルート階層</td><td>サーバーの管理。許可された人だけに表示</td></tr>
+  <tr><th>始める画面の選択(何で × どこで)</th><th>動く場所</th><th>見えるもの</th><th>パスキー</th><th>使いどころ</th></tr>
+  <tr><td><strong>Claude</strong> / Codex / Shell × <strong>devbox</strong></td><td>devbox: 自分専用のコンテナ</td><td><code>~/sandhome</code> だけ</td><td>不要</td><td>普段の開発すべて</td></tr>
+  <tr><td>Claude / Codex / Shell × <strong>mailbox</strong></td><td>mailbox: devbox とは別のコンテナ(設定されたサーバーだけ)</td><td><code>~/mailbox</code> と <code>~/sandhome</code>(読み書き)</td><td>🔑 ホスト階層</td><td>メールや個人情報など、開発用の devbox に置きたくないもの</td></tr>
+  <tr><td>Claude / Codex / Shell × ホスト</td><td>サーバーそのもの、自分の権限</td><td>本物のホーム(<code>~/</code>)など</td><td>🔑 ホスト階層</td><td>コンテナの外のファイルを触るとき</td></tr>
+  <tr><td>Claude / Codex / Shell × ルート</td><td>サーバーそのもの、root</td><td>すべて</td><td>🔓 ルート階層</td><td>サーバーの管理。許可された人だけに表示</td></tr>
 </table></div>
 
 <ul>
-  <li><strong>なぜ砂場が普段使いなのか</strong>: コンテナの中では、Claude が何を実行しても自分の <code>~/sandhome</code> の外には届きません。だから権限確認をスキップしても安全です。</li>
-  <li><strong>Email の箱を分ける理由</strong>: 砂場では、<code>npm install</code> で入ってきた他人のパッケージも動きます。メールのような情報をそこに置くと、それらからも読めてしまいます。Email の箱は砂場から見えない別のコンテナで、会話の記録も <code>~/mailbox</code> の側に残ります。</li>
-  <li>マシン選択で ssh でつないだ他のマシンを選ぶと、その機械の Claude やシェルも使えます。砂場とはファイルを共有しません(<a href="#machines">9章</a>)。</li>
-  <li>一覧では、名前の前のアイコンで種類が分かります: 🛠️ 砂場、📫 Email、🏠 ホスト、🔒 ルート、💻 他のマシン。</li>
+  <li><strong>なぜ devbox が普段使いなのか</strong>: コンテナの中では、Claude が何を実行しても自分の <code>~/sandhome</code> の外には届きません。だから権限確認をスキップしても安全です。</li>
+  <li><strong>mailbox を分ける理由</strong>: devbox では、<code>npm install</code> で入ってきた他人のパッケージも動きます。メールのような情報をそこに置くと、それらからも読めてしまいます。mailbox は devbox から見えない別のコンテナで、会話の記録も <code>~/mailbox</code> の側に残ります。逆に mailbox からは <code>~/sandhome</code> が読み書きできるので、devbox とファイルを受け渡せます(メールの中身を <code>~/sandhome</code> に置くと devbox から読めるようになるので、置くかどうかは気をつけてください)。</li>
+  <li>「どこで」で ssh でつないだ他のマシンを選ぶと、その機械の Claude やシェルも使えます。devbox とはファイルを共有しません(<a href="#machines">9章</a>)。</li>
+  <li>一覧では、名前の前のアイコンで種類が分かります: 🛠️ devbox、📫 mailbox、🏠 ホスト、🔒 ルート、💻 他のマシン。</li>
 </ul>
 
 <!-- ===================================================================== -->
 <h2 id="settings">6. 設定画面と Claude へのログイン</h2>
 
-<p>Claude を初めて使う前に、<strong>使う場所ごとに1回ずつ</strong> Claude にログインします。砂場・ホスト・ルート・他のマシンでログイン情報は別々です。Email の箱だけは設定画面に行が無く、<a href="#passkey">箱の中で</a>ログインします。</p>
+<p>Claude を初めて使う前に、<strong>使う場所ごとに1回ずつ</strong> Claude にログインします。devbox での手順は<a href="basic.html#login">基本編の「Claude にログインする」</a>にあります。ここでは、そのほかの場所と、設定のほかのカードを説明します。</p>
 
 <div class="shot">
-  <figure><img src="img/07-settings.png" alt="設定画面。Accounts の見出しの下に sandbox内・sandbox外(host)・root の行があり、それぞれにログインとログアウトのボタン"><figcaption>設定画面。各行にログイン中のアカウントが出る。見出しの横は表示言語の選択欄</figcaption></figure>
+  <figure><img src="img/07-settings.png" alt="設定のタブ。表示言語、AI のログイン(Claude・Codex の場所ごとの行)、読み上げと音声、通知、アカウントのカード"><figcaption>設定のタブ。行ごとに、ログイン中のアカウントか「未ログイン」が出る</figcaption></figure>
   <div class="side">
     <h3>開き方</h3>
-    <p>トップ画面のマシン選択(<code>server</code> の欄)で<strong>設定</strong>を選びます。戻るときは、同じ欄で <code>server</code>(このサーバー)を選び直します。</p>
-    <h3>ログインの手順</h3>
-    <ol class="steps">
-      <li>「Accounts」の <strong>sandbox内</strong> の行(ホストや他のマシンで使うならその行)の <strong>ログイン</strong> を押します。ログイン用のチャット画面が開きます。</li>
-      <li>チャットに URL が出るので、タップしてブラウザで開き、Claude のアカウントで承認します。</li>
-      <li>表示されたコードをコピーし、チャットの入力欄に貼り付けて <strong>実行</strong>。<strong>貼ったコードは画面に表示されません</strong>が、それで正常です。</li>
-      <li>成功・失敗の1行が出てログイン用のセッションは自動で消えます。設定画面の行にメールアドレスが出ていれば完了です。</li>
-    </ol>
+    <p>画面の上のタブの <strong>設定</strong> を押します。</p>
+    <h3>場所ごとのログイン</h3>
     <ul>
-      <li>行の文字が「Not logged in」(黄色)のところでは、その場所の Claude は動きません。</li>
-      <li><strong>Codex</strong> の欄も同じ手順です(ChatGPT のアカウント)。</li>
-      <li>見出しの横の ⟳ で状態を取り直せます。</li>
-      <li>見出しの横の選択欄で <strong>表示言語</strong>(日本語・English・简体中文)を変えられます。選んだ言語は保存され、ほかの端末でもログインすれば同じになります。ログイン画面の下でも選べます。</li>
-      <li>いちばん下の <strong>👥 全員のログイン一覧</strong> で、このサーバーの全員が、どこでどの Claude・ChatGPT のアカウントにログインしているかを見られます(見るだけ)。ルートのログインは、ルートの解錠中の人にだけ出ます。</li>
-      <li>その上の <strong>Kill Chrome</strong> は、自分用のテスト用ブラウザ(ヘッドフル Chrome)を止めるボタンです。重くなったときに押してかまいません。次に使えば自動でまた起動します。</li>
+      <li><strong>AI のログイン</strong>のカードには、<strong>Claude</strong>・<strong>Codex</strong> の見出しの下に場所ごとの行があります。どの行も <strong>ログイン</strong>・<strong>ログアウト</strong> ができ、手順は devbox と同じです(URL を開いて承認し、コードをチャットに貼る)。</li>
+      <li><strong>devbox</strong>: 普段のセッション(🛠️)が使う Claude。最初にここを済ませます。</li>
+      <li><strong>ホスト</strong>: ホストのセッション(🏠)が使う Claude。devbox とは別のログインです。</li>
+      <li><strong>ルート</strong>: ルートのセッション(🔒)が使う Claude。ルートを許された人にだけ行が出ます(<a href="#root">8章</a>)。</li>
+      <li><strong>Other hosts</strong>: ssh でつないだほかのマシン(💻)ごとの Claude。届くマシンだけ行が出ます。マシンのアカウントを何人かで共用しているときは、ログイン・ログアウトがそのマシンを使う全員に効きます。</li>
+      <li><strong>mailbox</strong> の Claude は設定に行がありません。<a href="#passkey">mailbox の中で</a>ログインします。</li>
+      <li><strong>Codex</strong> の行は、URL を開いたページに、AI座 のチャットに出ている<strong>コードを入力</strong>します(Claude と向きが逆)。ChatGPT のアカウントを使います。</li>
+      <li>行の文字が「未ログイン」「Not logged in」(黄色)のところでは、その場所の AI は動きません。⟳ で全部の行を取り直せます。</li>
+      <li>カードの一番下の <strong>🧑‍🤝‍🧑 全員のログイン一覧</strong> で、このサーバーの全員が、どこでどの Claude・ChatGPT のアカウントにログインしているかを見られます(見るだけ)。ルートのログインは、ルートの解錠中の人にだけ出ます。</li>
+    </ul>
+    <h3>そのほかのカード</h3>
+    <ul>
+      <li><strong>表示</strong>: 表示言語(日本語・English・简体中文)。選んだ言語は保存され、ほかの端末でもログインすれば同じになります。ログイン画面の下でも選べます。</li>
+      <li><strong>読み上げと音声</strong>: 返事の読み上げや音声モードの声・速さ。マイクのメニューの「設定」からもここへ来ます。</li>
+      <li><strong>通知</strong>: この端末に通知するかの切り替え。端末ごとの設定です。</li>
+      <li><strong>サーバー独自のカード</strong>: サーバーによっては、そのサーバーだけの設定のカードが出ます。</li>
+      <li><strong>アカウント</strong>: ログアウト。</li>
     </ul>
   </div>
 </div>
 
 <!-- ===================================================================== -->
-<h2 id="passkey">7. Email とパスキー(鍵)の登録</h2>
+<h2 id="passkey">7. mailbox とパスキー(鍵)の登録</h2>
 
-<p>Email・ホスト・ルートのようにコンテナの外へ出るときは、<strong>パスキー</strong>(スマホの指紋・顔認証や PC の PIN で守られた鍵)で解錠します。aigw のログインが盗まれても、手元の端末が無ければ外には出られないようにするためです。</p>
+<p>mailbox・ホスト・ルートのように devbox の外へ出るときは、<strong>パスキー</strong>(スマホの指紋・顔認証や PC の PIN で守られた鍵)で解錠します。AI座 のログインが盗まれても、手元の端末が無ければ外には出られないようにするためです。</p>
 
 <h3>パスキーを登録する(最初の1回)</h3>
 <ol class="steps">
   <li>PC から SSH でサーバーに入ります(<a href="basic.html#account">基本編 1章</a>)。SSH が内側のネットワークからだけのサーバーでは、先に内側に入ります。<pre><code>ssh <ユーザー名>@<サーバー>
-aigw-passkey register</code></pre></li>
-  <li>URL が表示されます。<strong>5分以内</strong>に、パスキーを置きたい端末(普段 aigw を使うスマホなど)のブラウザで開きます。この URL は外からでも開けます(内側のネットワークが要るのは SSH だけ)。</li>
+aiza-passkey register</code></pre></li>
+  <li>URL が表示されます。<strong>5分以内</strong>に、パスキーを置きたい端末(普段 AI座 を使うスマホなど)のブラウザで開きます。この URL は外からでも開けます(内側のネットワークが要るのは SSH だけ)。</li>
   <li>「パスキー登録」のページで <strong>パスキーを登録する</strong> を押し、指紋・顔認証・PIN で確認します。</li>
   <li>完了の表示が出たら終わりです。端末を増やしたいときは、その端末でもう一度同じ手順を行います。</li>
 </ol>
-<div class="note">パスキーはサーバーごとです。別のサーバーでも使うなら、そちらでも登録します。登録済みの一覧は <code>aigw-passkey list</code>、今の状態は <code>aigw-passkey status</code> で見られます。</div>
+<div class="note">パスキーはサーバーごとです。別のサーバーでも使うなら、そちらでも登録します。登録済みの一覧は <code>aiza-passkey list</code>、今の状態は <code>aiza-passkey status</code> で見られます。</div>
 
-<h3>Email を使う</h3>
-<div class="shot">
-  <figure><img src="img/08-email-bar.png" alt="作成欄で Email を選んだところ。フォルダは Email、続きからの欄は新規"><figcaption>作成欄で Email を選んだところ</figcaption></figure>
-  <div class="side">
+<h3>mailbox を使う</h3>
+<div>
+  <div>
     <ol class="steps">
-      <li>作成欄で <strong>Email</strong> を選びます(設定されたサーバーにだけあります)。フォルダは自分の <code>~/mailbox</code> から始まり、Claude と同じように下のフォルダを選んだり、<code>＋</code> で作ったりできます。</li>
+      <li>始める画面(<a href="basic.html#coding">基本編</a>)で、何でを <strong>Claude</strong>、どこでを <strong>mailbox</strong> にします(mailbox は設定されたサーバーにだけあります)。作業ディレクトリは自分の <code>~/mailbox</code> から始まり、Claude と同じように下のディレクトリを選んだり、<code>＋</code> で作ったりできます。</li>
       <li><strong>開始</strong>を押すと、端末のパスキーの確認が出ます。指紋などで確認すると、右上に 🔑 が付いて解錠され、セッションが始まります。</li>
-      <li><strong>初めての Email セッションだけ</strong>、箱の中の Claude がログインを求めます。🖥️ で画面パネルを開き、キーの列の <kbd>↑</kbd> <kbd>↓</kbd> <kbd>⏎</kbd> でログイン方法(Claude のアカウント)を選び、出てきた URL を開いて承認し、表示されたコードを入力欄に貼って <strong>実行</strong> します。続けて権限確認をスキップしてよいかの確認が出たら、同意する方を選びます。2回目からは出ません。</li>
-      <li>あとは砂場の Claude と同じ使い方です。<code>~/mailbox</code> は最初は空なので、使いたい道具(メールを読むスクリプトなど)は自分で、または Claude に頼んで用意します。</li>
+      <li><strong>初めての mailbox の Claude のセッションだけ</strong>、mailbox の中の Claude がログインを求めます。🖥️ で画面パネルを開き、キーの列の <kbd>↑</kbd> <kbd>↓</kbd> <kbd>⏎</kbd> でログイン方法(Claude のアカウント)を選び、出てきた URL を開いて承認し、表示されたコードを入力欄に貼って <strong>実行</strong> します。続けて権限確認をスキップしてよいかの確認が出たら、同意する方を選びます。2回目からは出ません。</li>
+      <li>あとは devbox の Claude と同じ使い方です。<code>~/mailbox</code> は最初は空なので、使いたい道具(メールを読むスクリプトなど)は自分で、または Claude に頼んで用意します。</li>
     </ol>
     <ul>
       <li>解錠は、施錠するか<strong>2時間</strong>たつまで続きます。</li>
-      <li>右上の 🔑 をタップすると、すぐに施錠できます。施錠中に Email のセッションを開くと「🔒 … 解錠する」の帯が出るので、タップして解錠します。</li>
-      <li>Email の箱は、砂場の Claude からは見えません。逆に、Email の中身を砂場に持ち出す指示も出さないようにしてください。</li>
+      <li>右上の 🔑 をタップすると、すぐに施錠できます。施錠中に mailbox のセッションを開くと「🔒 … 解錠する」の帯が出るので、タップして解錠します。</li>
+      <li>mailbox は、devbox の Claude からは見えません。逆に、mailbox の中身を devbox に持ち出す指示も出さないようにしてください。</li>
     </ul>
   </div>
 </div>
@@ -284,14 +321,14 @@ aigw-passkey register</code></pre></li>
 
 <p>ルート(サーバーの管理者権限)は、<strong>管理者が許可した人だけ</strong>が使えます。経路は2つあり、どちらも本人の操作が要ります。</p>
 
-<h3>aigw の「Shell (root・sandbox外)」を使う</h3>
+<h3>AI座 で「ルート」の場所を使う</h3>
 <ol class="steps">
-  <li>管理者に頼みます。管理者がサーバーで次を実行し、表示された URL を渡してくれます。<pre><code>sudo aigw-passkey register <ユーザー名> --tier root</code></pre></li>
-  <li>受け取った URL を<strong>5分以内</strong>に、自分の端末のブラウザで開いて <strong>パスキーを登録する</strong> を押します。これがルート階層のパスキーです(ホストと Email の解錠にも使えます)。</li>
-  <li>aigw を再読み込みすると、作成欄に <strong>Shell (root・sandbox外)</strong> が出ます。選んで <strong>開始</strong> を押し、パスキーで確認すると右上が 🔓 になり、root のシェルが開きます。</li>
-  <li>root のシェルで Claude を使うには、設定画面の <strong>root</strong> の行で Claude にログインしておきます(<a href="#settings">6章</a>)。</li>
+  <li>管理者に頼みます。管理者がサーバーで次を実行し、表示された URL を渡してくれます。<pre><code>sudo aiza-passkey register <ユーザー名> --tier root</code></pre></li>
+  <li>受け取った URL を<strong>5分以内</strong>に、自分の端末のブラウザで開いて <strong>パスキーを登録する</strong> を押します。これがルート階層のパスキーです(ホストと mailbox の解錠にも使えます)。</li>
+  <li>AI座 を再読み込みすると、始める画面の「どこで」に <strong>ルート</strong> が出ます。「Shell」と「ルート」を選んで <strong>開始</strong> を押し、パスキーで確認すると右上が 🔓 になり、root のシェルが開きます。</li>
+  <li>ルートで Claude を使う(「Claude」と「ルート」を選ぶ)には、設定の「AI のログイン」の「Claude」の <strong>ルート</strong> の行で Claude にログインしておきます(<a href="#settings">6章</a>)。</li>
 </ol>
-<div class="warn"><strong>施錠しても、root のシェルの中の作業は止まりません。</strong> 窓が閉じると aigw から見えなくなるだけで、次に解錠すれば同じ画面に戻れます。</div>
+<div class="warn"><strong>施錠しても、root のシェルの中の作業は止まりません。</strong> 窓が閉じると AI座 から見えなくなるだけで、次に解錠すれば同じ画面に戻れます。</div>
 
 <h3>SSH で <code>sudo</code> を使う</h3>
 <p>サーバーで <code>sudo</code> を許可されている人は、SSH で入って <code>sudo</code> を使えます。誰に許可するかは管理者が決めます。</p>
@@ -299,23 +336,23 @@ aigw-passkey register</code></pre></li>
 <!-- ===================================================================== -->
 <h2 id="machines">9. 他のマシンと Windows 機の黒板</h2>
 
-<p>サーバーに ssh でつないだ他のマシン(GPU の載った Windows 機など)があれば、マシン選択(<code>server</code> の欄)に並びます。選ぶと、一覧と作成欄がそのマシンのものになり、そのマシンの上で Claude やシェルを動かせます。届かないマシン(電源が切れているなど)は出ません。</p>
+<p>サーバーに ssh でつないだ他のマシン(GPU の載った Windows 機など)があれば、始める画面の「どこで」に並びます。選ぶと、そのマシンの上で Claude やシェルを動かせます。届かないマシン(電源が切れているなど)は出ません。</p>
 <ul>
-  <li>Windows 機では、作成欄で作業ドライブとフォルダ(<code>C:</code>・<code>D:</code> …)を選べます。前の会話の続きも選べます。</li>
+  <li>Windows 機では、始める画面で作業ドライブとディレクトリ(<code>C:</code>・<code>D:</code> …)を選べます。前の会話の続きも選べます。</li>
   <li>🐚/🪟 の切り替えで、画面の無いところ(🐚)か、ログオン中のデスクトップ(🪟、画面付きのアプリを動かすとき)かを選びます。</li>
-  <li>他のマシンのセッションは、一覧で 💻 が付きます。</li>
+  <li>他のマシンのセッションは、行に 💻 が付き、2行目に 🖥 マシン名が出ます。</li>
 </ul>
 
 <h3>Windows 機の黒板</h3>
 <div class="shot">
-  <figure><img src="img/15-board.png" alt="Windows 機の黒板。機械ごとに、使っている人とセッション、することと状態(使用中・30分以上動きなし・終了)"><figcaption>📋 で開く黒板(名前は模擬のもの)</figcaption></figure>
+  <figure><img src="img/15-board.png" alt="Windows 機の黒板。機械ごとに、使っている人とセッション、状態(使用中・届かない)と「＋ 使う」"><figcaption>一番下の 🖥 マシンで開く黒板(名前は模擬のもの)</figcaption></figure>
   <div class="side">
-    <p>Windows 機は何人かで使うので、「どれを、誰のどのセッションが使っているか」が分かる黒板があります。画面の上の 📋 で開きます。<strong>人も Claude も、使う前に黒板を見るだけで、書き込む必要はありません。</strong></p>
+    <p>Windows 機は何人かで使うので、「どれを、誰のどのセッションが使っているか」が分かる黒板があります。仕事の 🌳 木の一番下の <strong>🖥 マシン</strong> で開きます。<strong>人も Claude も、使う前に黒板を見るだけで、書き込む必要はありません。</strong></p>
     <ul>
-      <li><strong>自動</strong>: その Windows 機で動いている aigw のセッションは、自動で載ります。</li>
-      <li><strong>SSH・自動</strong>: 砂場やホストのセッションの中から <code>ssh</code>・<code>scp</code>・<code>sftp</code>・<code>rsync</code> で Windows 機につないでいると、それも自動で載ります。つなぎ終わると「終了(SSH終了)」になります。</li>
+      <li><strong>自動</strong>: その Windows 機で動いている AI座 のセッションは、自動で載ります。</li>
+      <li><strong>SSH・自動</strong>: devbox やホストのセッションの中から <code>ssh</code>・<code>scp</code>・<code>sftp</code>・<code>rsync</code> で Windows 機につないでいると、それも自動で載ります。つなぎ終わると「終了(SSH終了)」になります。</li>
       <li>3分ごとに確かめて、止まった・落ちたセッションは「終了」、チャットに30分以上動きが無いものは「30分以上動きなし」と出ます。</li>
-      <li>することをメモしておきたいときだけ、✏️ で書き添えたり、「＋ 使う」で手書きしたりできます(手書きは自分で「解除」するまで残ります)。セッションの中からは <code>aigw-board</code> で黒板を見られます。</li>
+      <li>することをメモしておきたいときだけ、✏️ で書き添えたり、「＋ 使う」で手書きしたりできます(手書きは自分で「解除」するまで残ります)。セッションの中からは <code>aiza-board</code> で黒板を見られます。</li>
       <li>使う前に黒板を見て、使っている人がいれば相談してください。</li>
     </ul>
   </div>
@@ -325,16 +362,16 @@ aigw-passkey register</code></pre></li>
 <h2 id="faq">10. 困ったとき</h2>
 <div class="scroll"><table>
   <tr><th>症状</th><th>対処</th></tr>
-  <tr><td>セッションが見つからない</td><td>フォルダの中かもしれません。フォルダの行をタップして開く。フォルダをうっかり別のフォルダの上で離して、中に入れてしまったこともあります。アーカイブの中も見る(<a href="#folders">1章</a>)</td></tr>
-  <tr><td>Email やホストのシェルが「解錠」を求めて進まない</td><td>パスキーを登録したか、その端末で登録したかを確認(<a href="#passkey">7章</a>)。施錠中の帯が出ていればタップ</td></tr>
-  <tr><td>名前が 🔒 になっている</td><td>Email・ホスト・ルートのセッションは、解錠するまで名前を隠します。一覧の上の帯から解錠する</td></tr>
-  <tr><td>Claude が何も返さない・ログインを求められる</td><td>設定画面で、その場所の行が「Not logged in」になっていないか確認してログイン(<a href="#settings">6章</a>)</td></tr>
-  <tr><td>他のマシンがマシン選択に出ない</td><td>そのマシンに届いていません(電源・ネットワーク)。管理者に相談</td></tr>
-  <tr><td>Windows 機を誰かが使っているか知りたい</td><td>📋 の黒板を見る(<a href="#machines">9章</a>)</td></tr>
-  <tr><td>通知が多すぎる</td><td>🔔 の一覧で「すべてアーカイブ」。済んだものは自動で移ります(<a href="#notifications">3章</a>)</td></tr>
+  <tr><td>セッションが見つからない</td><td>フォルダの中や、仕事の木の枝の下かもしれません。フォルダの行をタップして開く。止まったセッションは「止まったセッションも」を入れると出ます。「出すもの」が「全部」になっているかも確認。アーカイブの中も見る(<a href="#folders">1章</a>)</td></tr>
+  <tr><td>mailbox やホストのセッションが「解錠」を求めて進まない</td><td>パスキーを登録したか、その端末で登録したかを確認(<a href="#passkey">7章</a>)。施錠中の帯が出ていればタップ</td></tr>
+  <tr><td>名前が 🔒 になっている</td><td>mailbox・ホスト・ルートのセッションは、解錠するまで名前を隠します。一覧の上の帯から解錠する</td></tr>
+  <tr><td>Claude が何も返さない・ログインを求められる</td><td>設定画面で、その場所の行が「未ログイン」(黄色)になっていないか確認してログイン(<a href="#settings">6章</a>)</td></tr>
+  <tr><td>他のマシンが「どこで」に出ない</td><td>そのマシンに届いていません(電源・ネットワーク)。管理者に相談</td></tr>
+  <tr><td>Windows 機を誰かが使っているか知りたい</td><td>一番下の 🖥 マシンの黒板を見る(<a href="#machines">9章</a>)</td></tr>
+  <tr><td>通知が多すぎる</td><td>🙋 番ごとで、済んだものを ✓、後でよいものを 💤 寝かせる(<a href="#tree">3章</a>)。この端末に要らなければ設定の「通知」を切る</td></tr>
   <tr><td>基本的な操作が分からない</td><td><a href="basic.html#faq">基本編の「困ったとき」</a></td></tr>
 </table></div>
-<footer>aigw チュートリアル 発展編 · 2026-11-06 · 画面写真はスマホ幅で撮影。ユーザー名・マシン名などは置き換えたもの、または模擬のデータを載せた同じ画面で撮ったもの</footer>
+<footer>AI座 チュートリアル 発展編 · 2026-11-27 · 画面写真はスマホ幅で撮影。ユーザー名・マシン名などは置き換えたもの、または模擬のデータを載せた同じ画面で撮ったもの</footer>
 </div>
 </body>
 </html>

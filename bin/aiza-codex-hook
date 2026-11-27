@@ -1,0 +1,354 @@
+#!/usr/bin/env python3
+"""Relay an interactive Codex conversation to its aiza session."""
+import os as _aiza_os  # aigw-legacy: sessions started before the rename (2026-11-23) only have AIGW_*
+for _k in [k for k in _aiza_os.environ if k.startswith("AIGW_")]:
+    _aiza_os.environ.setdefault("AIZA_" + _k[5:], _aiza_os.environ[_k].replace("/.aigw/", "/.aiza/").replace("/.aigw-state/", "/.aiza-state/"))
+import fcntl
+import json
+import os
+from pathlib import Path
+import re
+import pwd
+import secrets
+import stat
+import subprocess
+import sys
+import time
+_lib = Path(__file__).resolve().parent.parent / 'lib'
+if not (_lib / 'aiza_session_io.py').is_file():
+    _lib = Path('/opt/sandbox-shared/tools/lib')
+sys.path.insert(0, str(_lib))
+from codex_chat import parse_chunk
+from aiza_status import RULE, rule
+from aiza_session_io import open_output_directory, open_private, read_json, open_talkto
+
+
+def session_dir():
+    talkto = os.environ.get('AIZA_TALKTO')
+    if not talkto or Path(talkto).name != 'talkto_out.jsonl':
+        return None
+    return Path(talkto).parent
+
+
+
+def transcript(path, sid):
+    p = Path(path)
+    if not p.name.startswith('rollout-') or p.suffix != '.jsonl':
+        return None
+    source = p.open('rb')
+    try:
+        first = json.loads(source.readline())
+        meta = first.get('payload', {})
+        if (first.get('type') != 'session_meta' or not isinstance(meta, dict)
+                or (meta.get('id') or meta.get('session_id')) != sid
+                or meta.get('source') != 'cli'):
+            source.close()
+            return None
+        return source
+    except BaseException:
+        source.close()
+        raise
+
+
+def valid_entry(entry):
+    return (isinstance(entry, dict) and type(entry.get('offset')) is int
+            and entry['offset'] >= 0 and isinstance(entry.get('parser'), dict)
+            and isinstance(entry['parser'].get('thread', ''), str)
+            and type(entry['parser'].get('paginated', False)) is bool)
+
+
+def sync(path, sid):
+    directory = session_dir()
+    if directory is None:
+        return False
+    source = transcript(path, sid)
+    if source is None:
+        return False
+    with source:
+        dfd = open_output_directory(directory)
+        try:
+            statefd = open_private(dfd, 'codex-relay-state.json', os.O_RDWR | os.O_CREAT)
+            with os.fdopen(statefd, 'r+') as f:
+                fcntl.flock(f, fcntl.LOCK_EX)
+                try: state = json.load(f)
+                except ValueError: state = {}
+                if not isinstance(state, dict): state = {}
+                entry = state.get(sid)
+                if not valid_entry(entry) or source.seek(0, 2) < entry['offset']:
+                    entry = state[sid] = {'offset': 0, 'parser': {}}
+                source.seek(entry['offset'])
+                changed = False
+                while True:
+                    buf = source.read(4 * 1024 * 1024)
+                    if not buf: break
+                    if not buf.endswith(b'\n'): buf += source.readline()
+                    used, events = parse_chunk(buf, entry['parser'], entry['offset'])
+                    if not used: break
+                    if events:
+                        outfd = open_private(dfd, 'codex-chat.jsonl', os.O_WRONLY | os.O_APPEND | os.O_CREAT)
+                        with os.fdopen(outfd, 'a') as out:
+                            for event in events:
+                                out.write(json.dumps({'type': 'aiza_codex_event', 'event': event}, ensure_ascii=False) + '\n')
+                            out.flush(); os.fsync(out.fileno())
+                    entry['offset'] += used
+                    changed = True
+                    source.seek(entry['offset'])
+                    if used < len(buf): break
+                if changed:
+                    entry['updated'] = time.time()
+                    # Bound checkpoint growth. Replaying an evicted thread remains ID-deduplicated.
+                    if len(state) > 64:
+                        others = sorted((k for k in state if k != sid),
+                                        key=lambda k: state[k].get('updated', 0) if isinstance(state[k], dict) and isinstance(state[k].get('updated', 0), (int, float)) else 0)
+                        for key in others[:len(state)-64]: del state[key]
+                    f.seek(0);json.dump(state, f);f.truncate();f.flush();os.fsync(f.fileno())
+        finally:
+            os.close(dfd)
+    return True
+
+
+def process_info(pid):
+    try:
+        raw = Path(f'/proc/{pid}/stat').read_text()
+        fields = raw.rsplit(')', 1)[1].split()
+        return {'name': raw.split('(', 1)[1].rsplit(')', 1)[0],
+                'ppid': int(fields[1]), 'pgrp': int(fields[2]),
+                'tty': int(fields[4]), 'tpgid': int(fields[5]), 'starttime': int(fields[19])}
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def mailbox_session():
+    # Only the mailbox container's own session tree may use a launcher binding.
+    if os.geteuid() == 0 or not Path('/.dockerenv').exists():
+        return False
+    home = Path(pwd.getpwuid(os.getuid()).pw_dir) / 'mailbox'
+    directory = session_dir()
+    return (os.environ.get('HOME') == str(home)
+            and directory is not None and directory.parent == home / '.aiza'
+            and re.fullmatch(r'[0-9a-f]{12}', directory.name) is not None)
+
+
+def pane_foreground(pid, info):
+    if not info['tty'] or info['tpgid'] != info['pgrp']:
+        return False
+    # docker exec owns a different PTY from the host tmux pane. The mailbox
+    # launcher binds this registration to the process it execs, never its children.
+    binding = os.environ.get('AIZA_CODEX_MAILBOX_PROCESS', '')
+    if binding and mailbox_session():
+        if not re.fullmatch(r'[1-9][0-9]*:[0-9]+:[1-9][0-9]*', binding):
+            return False
+        # Codex may be nondumpable: /proc/PID/fd/0 is then unreadable even to
+        # its hook. The launcher fstat'ed stdin before exec and bound its device.
+        return binding == f"{pid}:{info.get('starttime')}:{info['tty'] & 0xffffffff}"
+    pane = os.environ.get('TMUX_PANE', '')
+    if not re.fullmatch(r'%[0-9]+', pane): return False
+    try:
+        result = subprocess.run(['tmux', 'display-message', '-p', '-t', pane, '#{pane_tty}'],
+                                capture_output=True, text=True, timeout=2, check=True)
+        tty = result.stdout.strip()
+        if not tty.startswith('/dev/'): return False
+        pane_stat = os.stat(tty)
+        stdin_stat = os.stat(f'/proc/{pid}/fd/0')
+        return (stat.S_ISCHR(pane_stat.st_mode) and stat.S_ISCHR(stdin_stat.st_mode)
+                and pane_stat.st_rdev == stdin_stat.st_rdev)
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def codex_parent():
+    pid = os.getppid()
+    for _ in range(40):
+        info = process_info(pid)
+        if info is None: return None
+        if info['name'] == 'codex':
+            # Noninteractive exec, tool children and background agents are not the pane.
+            if pane_foreground(pid, info):
+                return pid, info['starttime']
+            return None
+        if info['name'].startswith('tmux'): return None
+        pid = info['ppid']
+        if pid <= 1: break
+    return None
+
+
+def same_process(pid, starttime):
+    info = process_info(pid)
+    return info is not None and info['starttime'] == starttime
+
+
+def follow(path, sid, pid, starttime):
+    directory = session_dir()
+    if directory is None or not same_process(pid, starttime): return
+    dfd = open_output_directory(directory)
+    try:
+        fd = open_private(dfd, 'codex-relay-' + sid + '.lock', os.O_WRONLY | os.O_CREAT)
+    finally: os.close(dfd)
+    with os.fdopen(fd, 'w') as lock:
+        try: fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError: return
+        while True:
+            # Confirm the registration before flushing; an old worker cannot reactivate itself.
+            dfd = open_output_directory(directory)
+            try: current = read_json(dfd, 'codex-active.json')
+            finally: os.close(dfd)
+            if current.get('session_id') != sid or current.get('starttime') != starttime: return
+            sync(path, sid)
+            if not same_process(pid, starttime):
+                set_active(sid, False, pid, starttime)
+                return
+            time.sleep(1)
+
+
+def set_active(sid, active, pid, starttime):
+    dfd = open_output_directory(session_dir())
+    try:
+        if not active:
+            current = read_json(dfd, 'codex-active.json')
+            if current.get('session_id') != sid or current.get('starttime') != starttime: return
+        # Atomic replacement prevents a concurrent reader from seeing half a JSON record.
+        name = '.codex-active-' + secrets.token_hex(16)
+        try:
+            fd = open_private(dfd, name, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+            with os.fdopen(fd, 'w') as f:
+                json.dump({'session_id': sid, 'active': active, 'pid': pid, 'starttime': starttime}, f)
+                f.flush(); os.fsync(f.fileno())
+            os.replace(name, 'codex-active.json', src_dir_fd=dfd, dst_dir_fd=dfd)
+        finally:
+            try: os.unlink(name, dir_fd=dfd)
+            except FileNotFoundError: pass
+    finally: os.close(dfd)
+
+
+def append_task(task):
+    dfd = open_output_directory(session_dir())
+    try:
+        fd = open_talkto(dfd, os.O_WRONLY | os.O_APPEND | os.O_CREAT)
+        with os.fdopen(fd, 'a') as f: f.write(json.dumps({'task': task}, ensure_ascii=False) + '\n')
+    finally: os.close(dfd)
+
+
+def log_failure(kind):
+    # Fixed fields only: no payloads, filenames, exception text or conversation contents.
+    try:
+        dfd = open_output_directory(session_dir())
+        try:
+            fd = open_private(dfd, 'codex-relay-errors.jsonl', os.O_WRONLY | os.O_APPEND | os.O_CREAT)
+            with os.fdopen(fd, 'a') as f:
+                f.write(json.dumps({'ts': time.time(), 'error': kind}) + '\n')
+        finally: os.close(dfd)
+    except Exception:
+        print('aiza-codex-hook: relay failed', file=sys.stderr)
+
+
+STOP_REMINDER = ('[AI座 状態確認] 前の返事には状態行がありません。'
+    'これは新しい作業の依頼や承認ではありません。'
+    '本人の中断・停止指示、承認待ち、質問への回答待ちを尊重してください。'
+    '既に頼まれた作業が残り、追加の承認なしで進められるなら実行・確認まで続けてください。'
+    '番を返す場合は実際の状況を確認し、最後に「状態: 済み — …」「状態: 要判断 — …」'
+    'または期限付きの「状態: 寝かせ 月/日 時刻 — …」を1行書いてください。'
+    'これからやると言うだけで終えず、状態行を付けるために完了を装わないでください。')
+
+
+def missing_status(payload):
+    # Do not restart interruptions, tool/permission hooks, unknown payloads,
+    # or the continuation produced by a previous Stop hook.
+    if payload.get('hook_event_name') != 'Stop' or payload.get('stop_hook_active') is not False:
+        return False
+    last = payload.get('last_assistant_message')
+    if not isinstance(last, str) or not last.strip():
+        return False
+    lines = [line.strip() for line in last.splitlines() if line.strip()]
+    for line in lines[-3:]:
+        line = re.sub(r'^[>\-\s]+', '', line.replace('**', '').replace('`', '')).strip()
+        if re.match(r'^状態\s*[:：]\s*(要判断|済み|寝かせ)\s*', line):
+            return False
+    return True
+
+
+def stop_reminder(payload):
+    if not missing_status(payload):
+        return None
+    turn = payload.get('turn_id')
+    sid = payload.get('session_id')
+    if any(not isinstance(v, str) or not re.fullmatch(r'[a-zA-Z0-9_-]{1,80}', v) for v in (turn, sid)):
+        return None
+    dfd = open_output_directory(session_dir())
+    try:
+        # A pending question/permission/send card belongs to the user. An
+        # unreadable or malformed status is also never grounds to continue.
+        try:
+            fd = open_private(dfd, 'task.json', os.O_RDONLY)
+        except FileNotFoundError:
+            task = {}
+        else:
+            with os.fdopen(fd) as f:
+                raw = f.read(16385)
+                if len(raw) > 16384: return None
+                task = json.loads(raw)
+            if not isinstance(task, dict): return None
+        if task.get('prompt') or task.get('state') in ('you', 'snooze'):
+            return None
+        fd = open_private(dfd, 'codex-stop-reminders.json', os.O_RDWR | os.O_CREAT)
+        with os.fdopen(fd, 'r+') as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            raw = f.read(32769)
+            if len(raw) > 32768: return None
+            state = json.loads(raw) if raw else []
+            if not isinstance(state, list) or any(not isinstance(x, str) for x in state): return None
+            key = sid + ':' + turn
+            if key in state: return None
+            state = (state + [key])[-128:]
+            f.seek(0); json.dump(state, f); f.truncate(); f.flush(); os.fsync(f.fileno())
+        return {'decision': 'block', 'reason': STOP_REMINDER}
+    except (OSError, ValueError, TypeError):
+        # Never resurrect a turn because the status/checkpoint could not be read.
+        return None
+    finally:
+        os.close(dfd)
+
+
+def main():
+    if len(sys.argv) == 6 and sys.argv[1] == '--follow':
+        if not re.fullmatch(r'[a-zA-Z0-9_-]{1,80}', sys.argv[3]): return
+        follow(sys.argv[2], sys.argv[3], int(sys.argv[4]), int(sys.argv[5]));return
+    if session_dir() is None: return
+    payload = json.load(sys.stdin)
+    if not isinstance(payload, dict): return
+    event = payload.get('hook_event_name')
+    if event not in ('SessionStart', 'Stop', 'PermissionRequest'): return
+    path, sid = payload.get('transcript_path'), payload.get('session_id')
+    if not isinstance(path, str) or not isinstance(sid, str): return
+    if not re.fullmatch(r'[a-zA-Z0-9_-]{1,80}', sid): return
+    parent = codex_parent()
+    if parent is None: return
+    pid, starttime = parent
+    if not sync(path, sid): return
+    if event == 'SessionStart':
+        set_active(sid, True, pid, starttime)
+        subprocess.Popen([sys.executable, __file__, '--follow', path, sid, str(pid), str(starttime)],
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, start_new_session=True, close_fds=True)
+        print(rule())
+    elif event == 'PermissionRequest':
+        import importlib.machinery
+        import importlib.util
+        loader = importlib.machinery.SourceFileLoader('aiza_codex_ask', str(Path(__file__).resolve().with_name('aiza-ask-hook')))
+        ask = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
+        loader.exec_module(ask)
+        if not ask.codex_permission(payload):
+            append_task({'hook_event_name': 'Notification', 'notification_type': 'permission_prompt',
+                         'message': 'Codex: 操作の承認を待っています'})
+    elif event == 'Stop':
+        reminder = stop_reminder(payload)
+        if reminder:
+            print(json.dumps(reminder, ensure_ascii=False))
+            return
+        last = payload.get('last_assistant_message')
+        if isinstance(last, str): append_task({'hook_event_name': 'Stop', 'last_assistant_message': last[-1500:]})
+
+if __name__ == '__main__':
+    try: main()
+    except Exception as exc:
+        log_failure(type(exc).__name__)
+        sys.exit(0)

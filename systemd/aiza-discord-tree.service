@@ -1,0 +1,10 @@
+[Unit]
+Description=Make the lab Discord's channels follow the work tree's shared roots (the deployment notes)
+After=aiza-tree-store.service network-online.target
+ConditionPathExists=/etc/aiza/discord-bot.token
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/aiza-discord-tree sync
+TimeoutStartSec=600
+Nice=10

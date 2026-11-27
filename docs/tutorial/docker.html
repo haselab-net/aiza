@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>aigw チュートリアル Docker で試す</title>
+<title>AI座 チュートリアル Docker で試す</title>
 <style>
   :root {
     --bg: #ffffff; --fg: #1d2330; --muted: #5b6575; --line: #dde2ea; --card: #f5f7fa;
@@ -70,13 +70,13 @@
 <body>
 <div class="wrap">
 
-<h1>aigw チュートリアル Docker で試す</h1>
+<h1>AI座 チュートリアル Docker で試す</h1>
 <nav class="langs" aria-label="Language"><a href="docker.html" lang="ja" class="here" aria-current="page">日本語</a><a href="en/docker.html" lang="en">English</a><a href="zh/docker.html" lang="zh-CN">简体中文</a></nav>
 <div class="editions"><a href="index.html">入口</a><a href="docker.html" class="here">Docker で試す</a><a href="basic.html">基本編</a><a href="advanced.html">発展編</a></div>
 
-<p class="lead">自分の PC(や手元のサーバー)で、aigw を Docker のコンテナ1つで動かして試す手順です。サーバーの管理者がいなくても、ブラウザからシェルや Claude Code のセッションを使うところまで、15分ほどで試せます。</p>
+<p class="lead">自分の PC(や手元のサーバー)で、AI座 を Docker のコンテナ1つで動かして試す手順です。サーバーの管理者がいなくても、ブラウザからシェルや Claude Code のセッションを使うところまで、15分ほどで試せます。</p>
 
-<p>基本編・発展編は、管理者が用意した本番のサーバー(Google でログインし、利用者ごとのコンテナで動く)向けの説明です。このデモは「1人分の aigw を手元で動かす」ための仮の構成で、使えない機能もあります(<a href="#limits">8章</a>)。</p>
+<p>基本編・発展編は、管理者が用意した本番のサーバー(Google でログインし、利用者ごとのコンテナで動く)向けの説明です。このデモは「1人分の AI座 を手元で動かす」ための仮の構成で、使えない機能もあります(<a href="#limits">8章</a>)。</p>
 
 <nav class="toc">
 <strong>目次</strong>
@@ -105,19 +105,19 @@
 
 <!-- ===================================================================== -->
 <h2 id="build">2. 取ってきて、イメージを作る</h2>
-<pre><code>git clone https://github.com/haselab-net/aigw.git
-cd aigw
-docker build -f docker/Dockerfile -t aigw-demo .</code></pre>
-<p>数分かかります(Debian・Python・tmux と、Claude Code のネイティブ版を入れます)。Claude Code が要らなければ、<code>docker build --build-arg WITH_CLAUDE=0 -f docker/Dockerfile -t aigw-demo .</code> で小さく速く作れます。</p>
+<pre><code>git clone https://github.com/haselab-net/aiza.git
+cd aiza
+docker build -f docker/Dockerfile -t aiza-demo .</code></pre>
+<p>数分かかります(Debian・Python・tmux と、Claude Code のネイティブ版を入れます)。Claude Code が要らなければ、<code>docker build --build-arg WITH_CLAUDE=0 -f docker/Dockerfile -t aiza-demo .</code> で小さく速く作れます。</p>
 
 <!-- ===================================================================== -->
 <h2 id="run">3. 起動する</h2>
-<pre><code>docker run -d --name aigw-demo -p 127.0.0.1:8878:8878 -v aigw-demo-home:/home/demo aigw-demo</code></pre>
+<pre><code>docker run -d --name aiza-demo -p 127.0.0.1:8878:8878 -v aiza-demo-home:/home/demo aiza-demo</code></pre>
 <div class="scroll"><table>
   <tr><th>指定</th><th>意味</th></tr>
-  <tr><td><code>-d --name aigw-demo</code></td><td>裏で動かし、<code>aigw-demo</code> という名前を付ける</td></tr>
+  <tr><td><code>-d --name aiza-demo</code></td><td>裏で動かし、<code>aiza-demo</code> という名前を付ける</td></tr>
   <tr><td><code>-p 127.0.0.1:8878:8878</code></td><td>この PC の中からだけ <code>8878</code> 番で開けるようにする。<strong><code>127.0.0.1:</code> を外さないでください</strong>(外すと、同じネットワークの誰でもデモに入れます)</td></tr>
-  <tr><td><code>-v aigw-demo-home:/home/demo</code></td><td>デモの利用者のホーム(作ったファイル・Claude Code のログイン)を Docker のボリュームに置く。コンテナを作り直しても残る</td></tr>
+  <tr><td><code>-v aiza-demo-home:/home/demo</code></td><td>デモの利用者のホーム(作ったファイル・Claude Code のログイン)を Docker のボリュームに置く。コンテナを作り直しても残る</td></tr>
 </table></div>
 <p><code>8878</code> 番がもう使われていたら、<code>-p 127.0.0.1:18878:8878</code> のように左側の数字を変え、以下の URL もその番号にします。</p>
 <div class="note"><strong>離れたサーバーで動かすとき</strong>: ポートは外に出さず、手元の PC から <code>ssh -L 8878:127.0.0.1:8878 &lt;サーバー&gt;</code> でつないでから、手元のブラウザで開きます。</div>
@@ -129,10 +129,10 @@ docker build -f docker/Dockerfile -t aigw-demo .</code></pre>
   <div class="side">
     <ol class="steps">
       <li>ブラウザで <code>http://localhost:8878/agents/</code> を開きます。</li>
-      <li>「<strong>Log in as the demo user</strong>」を押すと、セッションの一覧が出ます。</li>
+      <li>「<strong>Log in as the demo user</strong>」を押すと、仕事の画面が出ます。</li>
     </ol>
     <div class="warn"><strong>デモには Google のログインがありません。</strong>このページを開ける人は誰でも、ただ1人のデモの利用者(<code>demo</code>)になり、コンテナの中でシェルを使えます。信頼できない人に触らせないでください。デモにログインしたブラウザで、信頼できないページを開いたままにしないでください。</div>
-    <p>ログインできるのは <code>localhost</code>・<code>127.0.0.1</code> のアドレスで開いたときだけです。別の名前で開きたいときは、<code>docker run</code> に <code>-e AIGW_DEMO_HOSTS=名前</code> を足します。</p>
+    <p>ログインできるのは <code>localhost</code>・<code>127.0.0.1</code> のアドレスで開いたときだけです。別の名前で開きたいときは、<code>docker run</code> に <code>-e AIZA_DEMO_HOSTS=名前</code> を足します。</p>
     <p>Safari はこの形(http の localhost)ではログインの Cookie を受け取らないので、ログインしても一覧に入れません。Chrome・Edge・Firefox を使ってください。</p>
   </div>
 </div>
@@ -140,17 +140,19 @@ docker build -f docker/Dockerfile -t aigw-demo .</code></pre>
 <!-- ===================================================================== -->
 <h2 id="shell">5. シェルのセッションを使う</h2>
 <div class="shot">
-  <figure><img src="img/22-docker-list.png" alt="セッションの一覧"><figcaption>セッションの一覧(2つ作った後)</figcaption></figure>
+  <figure><img src="img/22-docker-list.png" alt="仕事の画面。上の段の ＋ 🤖 AI などのボタンの下に、シェルのセッションと Claude ログインのセッションの行"><figcaption>仕事の画面(セッションを2つ作った後)</figcaption></figure>
   <div class="side">
     <ol class="steps">
-      <li>一番上の選択肢で「<strong>Shell (sandbox内)</strong>」を選び、名前を入れて(空でもよい)「<strong>開始</strong>」。</li>
-      <li>一覧にセッションが増えます。名前をタップすると開きます。</li>
+      <li>上の段の「<strong>＋ 🤖 AI</strong>」を押すと、すぐ下にセッションを始める画面が開きます。</li>
+      <li>「何で」を「<strong>Shell</strong>」、「どこで」を「<strong>devbox</strong>」にし、名前(候補が初めから入っています)を確かめて「<strong>開始</strong>」。</li>
+      <li>チャットの画面になります。<code>←</code> で仕事に戻ると、行が1つ増えています。行を押すとまた開きます。</li>
     </ol>
-    <p>一覧の ✏️ は名前の変更、🔗 は他のセッションとつなぐ(連携。発展編)、🗄 はアーカイブ、🗑 は削除です。セッションは止めない限りコンテナの中で動き続け、ブラウザを閉じても続きから見られます。</p>
+    <p>「どこで」のうち、デモで使えるのは devbox だけです(ホストやルートはパスキーで開く仕組みが要り、デモにはありません)。</p>
+    <p>行の右の ⋯ には、名前の変更・ほかのセッションとつなぐ(発展編)・アーカイブ・削除があります。セッションは止めない限りコンテナの中で動き続け、ブラウザを閉じても続きから見られます。</p>
   </div>
 </div>
 <div class="shot">
-  <figure><img src="img/23-docker-shell.png" alt="シェルのセッション"><figcaption>コマンドを送ったところ</figcaption></figure>
+  <figure><img src="img/23-docker-shell.png" alt="シェルのセッション。送ったコマンドが右に、結果が左に並ぶ"><figcaption>コマンドを送ったところ</figcaption></figure>
   <div class="side">
     <ol class="steps">
       <li>下の入力欄にコマンドを書いて「<strong>実行</strong>」(Enter 付きで送る)。「送信」は Enter を付けずに文字だけ送ります。</li>
@@ -165,20 +167,16 @@ docker build -f docker/Dockerfile -t aigw-demo .</code></pre>
 <!-- ===================================================================== -->
 <h2 id="claude">6. Claude Code を使う</h2>
 <div class="shot">
-  <figure><img src="img/24-docker-claude.png" alt="Claude Code の最初の画面"><figcaption>初回の Claude Code(🖥️ で画面を開いたところ)</figcaption></figure>
+  <figure><img src="img/24-docker-claude.png" alt="「Claude ログイン」のチャット。上に手順の説明、その下にログイン用の URL"><figcaption>初めて Claude を始めると開く「Claude ログイン」のチャット</figcaption></figure>
   <div class="side">
     <ol class="steps">
-      <li>一覧の一番上で「<strong>Claude</strong>」を選び、「<strong>開始</strong>」。その下の 📁 で作業フォルダを選べます(<code>sandhome</code> の下)。</li>
-      <li>セッションを開き、上の 🖥️ で画面を出します。<strong>初回だけ</strong>、Claude Code の設定が出ます。
-        <ul>
-          <li>文字の色合いを選ぶ: 入力欄の上の <kbd>↑</kbd> <kbd>↓</kbd> で動かし、入力欄を空のまま「実行」で決定。</li>
-          <li>ログイン方法を選ぶと URL が出ます。その URL をブラウザで開いてログインし、表示されたコードを入力欄に貼って「実行」。</li>
-        </ul>
-      </li>
-      <li>あとはチャットに日本語で指示を書いて「実行」するだけです。Claude Code が <code>sandhome</code> の中でファイルを作り、コマンドを動かします。</li>
+      <li>「<strong>＋ 🤖 AI</strong>」で、「何で」を「<strong>Claude</strong>」、「どこで」を「<strong>devbox</strong>」(最初からこの組み合わせ)にして「<strong>開始</strong>」。灰色の <strong>&gt;_</strong> の印の行で、作業ディレクトリ(<code>sandhome</code> の下)を選べます。</li>
+      <li><strong>初回は</strong> Claude Code にまだログインしていないので、代わりに「<strong>Claude ログイン</strong>」のチャットが開きます。出てきた URL をタップしてブラウザで開き、Claude のアカウントで承認し、表示されたコードをチャットの入力欄に貼って「<strong>実行</strong>」。</li>
+      <li>ログインが済んだら、もう一度「＋ 🤖 AI」から Claude を始めます。初回だけ Claude Code の設定(文字の色合いなど)が出ることがあります。そのときは 🖥️ で画面を開き、入力欄の上の <kbd>↑</kbd> <kbd>↓</kbd> で選んで、入力欄を空のまま「実行」で決めます。</li>
+      <li>あとはチャットに指示を書いて「実行」するだけです。Claude Code が <code>sandhome</code> の中でファイルを作り、コマンドを動かします。</li>
     </ol>
-    <p>ログインの情報は <code>/home/demo</code> にあるので、<code>-v aigw-demo-home:/home/demo</code> を付けていれば、コンテナを作り直しても残ります。</p>
-    <p>「権限確認をスキップ」が入っていると、Claude Code はいちいち確認せずにコマンドを実行します。動くのはコンテナの中だけですが、外せば毎回確認を求めます。</p>
+    <p>ログインの情報は <code>/home/demo</code> にあるので、<code>-v aiza-demo-home:/home/demo</code> を付けていれば、コンテナを作り直しても残ります。</p>
+    <p>「AI の操作をいちいち確認しない」が入っていると、Claude Code はいちいち確認せずにコマンドを実行します。動くのはコンテナの中だけですが、外せば毎回確認を求めます。</p>
   </div>
 </div>
 <p>画面の見方・キー入力・チャットとターミナル画面の関係は、<a href="basic.html">基本編</a>の2・3・5・6章がそのまま当てはまります。</p>
@@ -187,20 +185,21 @@ docker build -f docker/Dockerfile -t aigw-demo .</code></pre>
 <h2 id="stop">7. 止める・消す・データの置き場所</h2>
 <div class="scroll"><table>
   <tr><th>したいこと</th><th>コマンド</th></tr>
-  <tr><td>止める / また動かす</td><td><code>docker stop aigw-demo</code> / <code>docker start aigw-demo</code></td></tr>
-  <tr><td>新しい版にする</td><td><code>git pull</code> してから 2章の <code>docker build</code>、<code>docker rm -f aigw-demo</code>、3章の <code>docker run</code></td></tr>
-  <tr><td>コンテナを消す(データは残す)</td><td><code>docker rm -f aigw-demo</code></td></tr>
-  <tr><td>データも消す</td><td>上に加えて <code>docker volume rm aigw-demo-home</code></td></tr>
-  <tr><td>コンテナの中に入る</td><td><code>docker exec -it -u demo aigw-demo bash</code></td></tr>
+  <tr><td>止める / また動かす</td><td><code>docker stop aiza-demo</code> / <code>docker start aiza-demo</code></td></tr>
+  <tr><td>新しい版にする</td><td><code>git pull</code> してから 2章の <code>docker build</code>、<code>docker rm -f aiza-demo</code>、3章の <code>docker run</code></td></tr>
+  <tr><td>コンテナを消す(データは残す)</td><td><code>docker rm -f aiza-demo</code></td></tr>
+  <tr><td>データも消す</td><td>上に加えて <code>docker volume rm aiza-demo-home</code></td></tr>
+  <tr><td>コンテナの中に入る</td><td><code>docker exec -it -u demo aiza-demo bash</code></td></tr>
 </table></div>
-<p>作ったファイルは <code>/home/demo/sandhome</code>(ボリューム <code>aigw-demo-home</code> の中)にあります。セッションの一覧と記録も <code>/home/demo</code> の下なので、ボリュームを残せば次に起動したときも続きから使えます。コンテナを作り直すとログインは切れるので、もう一度「Log in as the demo user」を押してください。</p>
+<p>作ったファイルは <code>/home/demo/sandhome</code>(ボリューム <code>aiza-demo-home</code> の中)にあります。セッションの一覧と記録も <code>/home/demo</code> の下なので、ボリュームを残せば次に起動したときも続きから使えます。コンテナを作り直すとログインは切れるので、もう一度「Log in as the demo user」を押してください。</p>
 
 <!-- ===================================================================== -->
 <h2 id="limits">8. デモでできないこと</h2>
 <div class="scroll"><table>
   <tr><th>機能</th><th>デモでは</th></tr>
   <tr><td>Google でのログイン・複数の利用者・自分でアカウントを作る</td><td>無い。利用者は <code>demo</code> の1人だけ</td></tr>
-  <tr><td>「Shell (sandbox外・ホスト)」・ルートのシェル・パスキー</td><td>使えない(パスキーで開く仕組みが入っていない)。ボタンが出ても失敗します</td></tr>
+  <tr><td>場所の「ホスト」・「ルート」・パスキー</td><td>使えない(パスキーで開く仕組みが入っていない)。選べても失敗します</td></tr>
+  <tr><td>場所の「mailbox」</td><td>設定が無いので出ない</td></tr>
   <tr><td>Codex</td><td>イメージに入っていない</td></tr>
   <tr><td>ssh でつなぐ他のマシン・Windows 機の黒板</td><td>設定が無いので出ない</td></tr>
   <tr><td>スマホへの通知(Web Push)</td><td>鍵が無いので送られない</td></tr>
@@ -217,7 +216,7 @@ docker build -f docker/Dockerfile -t aigw-demo .</code></pre>
   <li>本番の構成で動かすには、リポジトリの <code>README.md</code> の「導入時に必要な設定」。</li>
 </ul>
 
-<footer>aigw チュートリアル Docker で試す · 2026-11-14 · 画面写真はスマホ幅で、このデモ(<code>docker/</code>)を動かして撮影</footer>
+<footer>AI座 チュートリアル Docker で試す · 2026-11-27 · 画面写真はスマホ幅で、このデモ(<code>docker/</code>)を動かして撮影</footer>
 </div>
 </body>
 </html>

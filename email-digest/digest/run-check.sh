@@ -1,5 +1,5 @@
 #!/bin/sh
-# 定期の新着チェックを1回行う。ホストの systemd timer が箱の中で利用者として呼ぶ(docker exec など。aigw は経由しない)
+# 定期の新着チェックを1回行う。ホストの systemd timer が箱の中で利用者として呼ぶ(docker exec など。aiza は経由しない)
 # 読むのは claude.ai のコネクタ(この箱の ~/.claude のログイン)も使うので、必ず箱の中の claude で動かす
 # 利用者ごとのもの(アカウント・前後に動かす道具)は local/config.json(conf.mjs)、手順の追記は local/PROCEDURE.md、定形ルールは local/RULES.md
 # 拡張(private/。ext.mjs)があれば、読む前後の処理と手順書の断片が足される。設定の ext.require が欠けていれば claude を呼ばずに止まって知らせる
@@ -26,7 +26,7 @@ notify() { node --input-type=module -e "import { notifyText } from '$CODE/lib.mj
 stop() { echo "=== $(date -Is) stop: $1" >> "$LOG"; notify "定期チェックを止めた" "$1"; exit 1; }
 node "$CODE/ext.mjs" verify >> "$LOG" 2>&1 || stop "拡張が足りないか読めない(run.log。local/config.json の ext.require)"
 node "$CODE/compose.mjs" >> "$LOG" 2>&1 || stop "手順書を組み立てられない(run.log)"
-PROMPT=$(node "$CODE/compose.mjs" prompt regular) || stop "依頼文を組み立てられない(run.log)"
+node "$CODE/compose.mjs" prompt regular > /dev/null || stop "依頼文を組み立てられない(run.log)"
 # 拡張の読む前の処理
 node "$CODE/ext.mjs" cmds prepare regular | run_lines
 echo "=== $(date -Is) start" >> "$LOG"
@@ -39,10 +39,37 @@ rm -f "$DATA/.failed-sources"; cp "$DATA/cursor.json" "$DATA/.cursor-before"
 # この回の範囲(拡張の後の処理が使う。2026-11-11)
 LAST=$(python3 -c "import json;print(json.load(open('$DATA/cursor.json'))['last'])" 2>/dev/null || echo 0); START=$(date +%s)
 export LAST START
-timeout 1800 env -u AIGW_BOX_TAG claude --session-id "$SID" -p "$PROMPT" \
+# 取り込みを Claude より前に機械で(2026-11-18): メールは一覧を全ページ、拡張の読む先は拡張の fetch。<data>/in/ に置き、Claude はそれを読む。
+# 終了コードが 0 でない読む先は .failed-sources に書く(下で知らせ、last を進めない)
+IN=$DATA/in; mkdir -p "$IN"; rm -f "$IN"/*
+Q=$IN; export Q
+# DIGEST_GATE_INLINE=0: 読む道具は出す前に関門に聞かない(すぐ下の gate がまとめて確かめる。Claude が自分で動かすときは聞く)
+fetch() { DIGEST_GATE_INLINE=0 sh -c "$2" > "$IN/$1" 2>>"$LOG" 9>&-; rc=$?; [ "$rc" = 0 ] || echo "$1: rc=$rc" >> "$DATA/.failed-sources"; }
+node "$CODE/ext.mjs" cmds fetch regular > "$DATA/.fetch-cmds" 2>>"$LOG"
+{ "$(dirname "$CODE")/gmail.py" list -q "after:$LAST -in:sent -in:drafts" --all -n 100 > "$IN/q-mail.jsonl" 2>>"$LOG" 9>&- || echo "q-mail.jsonl: rc=$?" >> "$DATA/.failed-sources"; } & PIDS="$!"
+while IFS="$(printf '\t')" read -r slow out cmd; do fetch "$out" "$cmd" & PIDS="$PIDS $!"; done < "$DATA/.fetch-cmds"
+wait $PIDS; rm -f "$DATA/.fetch-cmds"
+# 関門(拡張の gate。2026-11-25): 取ったものをローカルで読み、機微なものを抜いてから突き合わせと Claude に渡す。
+# 確かめられなかったものがあれば(0 でない)、この回は Claude を呼ばず時刻も進めない(次の回に読み直す)。取ったファイルも消す
+node "$CODE/ext.mjs" cmds gate regular > "$DATA/.gate-cmds" 2>>"$LOG"
+GATED=; while read -r cmd; do sh -c "$cmd" >> "$LOG" 2>&1 9>&- < /dev/null || GATED=1; done < "$DATA/.gate-cmds"; rm -f "$DATA/.gate-cmds"
+if [ -n "$GATED" ]; then
+  rm -f "$IN"/*
+  node "$CODE/cursor.mjs" hold "$LAST" "$START" "$DATA/.cursor-before"
+  rm -f "$DATA/.failed-sources" "$DATA/.cursor-before"
+  notify "定期チェック: 新着を Claude に渡していない" "ローカルの確認が済まなかった($(date -d "@$LAST" '+%m/%d %H:%M') からの分)。次の回に読み直す。急ぐときはまとめのページの「決まりだけで進める」"
+  echo "=== $(date -Is) end: 関門で止めた(last を $LAST のまま)" >> "$LOG"
+  exit 0
+fi
+# 取ったものを既存の項目とスレッドの印で突き合わせ、返信の項目はここで進めて起こす(Claude の分類に頼らない)
+node "$CODE/match.mjs" "$IN" >> "$LOG" 2>&1; node "$CODE/autostart.mjs" --sure >> "$LOG" 2>&1
+PROMPT=$(node "$CODE/compose.mjs" prompt regular) || stop "依頼文を組み立てられない(run.log)"
+timeout 1800 env -u AIZA_BOX_TAG claude --session-id "$SID" -p "$PROMPT" \
   --permission-mode auto >> "$LOG" 2>&1
 rc=$?
-# 新しく未決になった項目に Claude セッションを起動する(aigw の箱用 POST /sessions、2026-11-07)
+# 回の後の点検: 取ったもののうち、項目にもまとめにも出ていないものの数(切り替えてしばらく。2026-11-18)
+node "$CODE/cover.mjs" "$IN" >> "$LOG" 2>&1
+# 新しく未決になった項目・返信が来た項目・待ちが成立した項目に Claude セッションを起動する(aiza の箱用 POST /sessions、2026-11-07)
 node "$CODE/autostart.mjs" >> "$LOG" 2>&1
 # Auto モードで断られた操作があればスマホに知らせる(まとめが欠けていないかの確認、2026-11-04)
 python3 "$CODE/check-denials.py" "$SID" >> "$LOG" 2>&1

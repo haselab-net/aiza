@@ -23,7 +23,7 @@ test('public: page and counts show mail only, with no private names', PENDING, a
   try {
     const p = await s.get('/email/');
     assert.equal(p.status, 200);
-    assert.match(p.text, /<h1>新着まとめ\(メール\)<\/h1>/);
+    assert.match(p.text, /<h1><span class="ttl">新着まとめ\(メール\)<\/span><a class="setup" href="\/email\/setup">設定<\/a><\/h1>/);
     assert.deepEqual(denyHits(p.text), []);
     assert.doesNotMatch(s.output(), REFERR);
   } finally { await s.stop(); b.cleanup(); }
@@ -56,7 +56,11 @@ test('public: run-check.sh reaches claude with a mail-only request and no missin
     const prompt = cl[0][cl[0].indexOf('-p') + 1];
     assert.match(prompt, /PROCEDURE\.md/);
     assert.deepEqual(denyHits(prompt), []);
-    assert.deepEqual([...new Set(b.calls().map(c => c[0]))].sort(), ['claude', 'curl', 'uuidgen']);
+    // the mail list is fetched before claude (2026-11-18), with every page
+    assert.deepEqual([...new Set(b.calls().map(c => c[0]))].sort(), ['claude', 'curl', 'gmail.py', 'uuidgen']);
+    assert.deepEqual(b.calls().find(c => c[0] === 'gmail.py').slice(1), ['list', '-q', 'after:1700000000 -in:sent -in:drafts', '--all', '-n', '100']);
+    assert.match(prompt, /in\/q-mail\.jsonl/);
+    assert.match(log, /match: 返信 0 件[\s\S]*cover: どこにも出ていないもの メール 0\/0/);   // matched before claude, checked after it
   } finally { b.cleanup(); }
 });
 

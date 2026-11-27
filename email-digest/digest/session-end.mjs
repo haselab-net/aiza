@@ -1,9 +1,9 @@
 // 「AIで対応」のセッションが自分で項目を既決にしたとき、返答を終えたところでそのセッションを止めてアーカイブする(2026-10-21 ユーザー依頼)。
 // 待ちを付けたときも同じく止めてアーカイブする(2026-10-25 ユーザー依頼。成立したら「AIで続きから」で同じ会話を再開する)。
-// ページから既決にしたときは client.js が aigw API の stop・archive を叩くが、箱の中からは aigw のログインもパスキーも無いので、こちらは
-//   アーカイブ: ~/.aigw/<自分の aigw id>/archive-on-exit に空のファイルを置く。aigw が終了を記録するときにアーカイブして印を消す(サーバー文書 the deployment notes)。
-//               meta.json は aigw が書くので触らない(最初は直接書く作りだったが、root 側が印の口を足した)
-//   止める  : Claude Code に SIGINT を送る(aigw の停止と同じく Claude が会話のログを書き終えて自分で終わる。灰色のドットになり、続きから再開できる)
+// ページから既決にしたときは client.js が aiza API の stop・archive を叩くが、箱の中からは aiza のログインもパスキーも無いので、こちらは
+//   アーカイブ: ~/.aiza/<自分の aiza id>/archive-on-exit に空のファイルを置く。aiza が終了を記録するときにアーカイブして印を消す(サーバー文書 the deployment notes)。
+//               meta.json は aiza が書くので触らない(最初は直接書く作りだったが、root 側が印の口を足した)
+//   止める  : Claude Code に SIGINT を送る(aiza の停止と同じく Claude が会話のログを書き終えて自分で終わる。灰色のドットになり、続きから再開できる)
 // 返答の途中で止めないよう、Claude Code の Stop フック(~/digest/.claude/settings.json)が返答の終わりに run を起こす。
 //   request <item id>  set-status.mjs が既決にしたとき・wait.mjs set が待ちを付けたときに呼ぶ。今のセッションがその項目の会話なら、終了の依頼を置く
 //   hook               Stop フック。依頼があれば run を切り離して起動する(フックが返ってから止めるため)
@@ -21,11 +21,11 @@ if (cmd === 'request') {
   const csid = process.env.CLAUDE_CODE_SESSION_ID, pid = Number(process.env.CLAUDE_PID);
   const it = load().items.find(x => x.id === arg);
   // 定期チェックやほかの作業フォルダの Claude、ターミナルから set-status したときは何もしない
-  // aigw の id は今のセッションのもの(灰色のドットから続きで開くと id が変わり、items.json は古い id のまま)
-  const aigw = /\/\.aigw\/([\w-]+)\/outbox$/.exec(process.env.AIGW_OUTBOX || '')?.[1];
-  if (!csid || !pid || !aigw || !it || !it.session || it.session.claude_session_id !== csid) process.exit(0);
+  // aiza の id は今のセッションのもの(灰色のドットから続きで開くと id が変わり、items.json は古い id のまま)
+  const aiza = /\/\.aiza\/([\w-]+)\/outbox$/.exec(process.env.AIZA_OUTBOX || '')?.[1];
+  if (!csid || !pid || !aiza || !it || !it.session || it.session.claude_session_id !== csid) process.exit(0);
   fs.mkdirSync(DIR, { recursive: true });
-  fs.writeFileSync(`${DIR}/${csid}.json`, JSON.stringify({ item: arg, csid, pid, aigw, at: new Date().toISOString() }));
+  fs.writeFileSync(`${DIR}/${csid}.json`, JSON.stringify({ item: arg, csid, pid, aiza, at: new Date().toISOString() }));
   console.log('このセッションは返答を終えたあと停止・アーカイブします(続きはまとめページの「AIで続きから」)');
 }
 else if (cmd === 'hook') {
@@ -43,13 +43,13 @@ else if (cmd === 'run') {
   // ps -o args= はフックが受け継いだ COLUMNS の幅で切るので、末尾の --resume <会話id> が落ちる。/proc の cmdline を読む
   let args = ''; try { args = fs.readFileSync(`/proc/${req.pid}/cmdline`, 'utf8').split('\0').join(' '); } catch {}
   if (!/claude/.test(args) || !args.includes(req.csid)) { log(`${req.item}: pid ${req.pid} が会話 ${req.csid} の claude ではない`); process.exit(0); }
-  const dir = `${HOME}/.aigw/${req.aigw}`;
-  if (!fs.existsSync(`${dir}/meta.json`)) { log(`${req.item}: ${dir} が aigw のセッションではない`); process.exit(0); }
+  const dir = `${HOME}/.aiza/${req.aiza}`;
+  if (!fs.existsSync(`${dir}/meta.json`)) { log(`${req.item}: ${dir} が aiza のセッションではない`); process.exit(0); }
   // Claude と一緒にこのプロセスも終わることがあるので、書くものは止める前に全部書く
-  it.session = { ...it.session, id: req.aigw, deleted: new Date().toISOString(), archived: true };
+  it.session = { ...it.session, id: req.aiza, deleted: new Date().toISOString(), archived: true };
   fs.writeFileSync(DB + '.tmp', JSON.stringify(d, null, 1)); fs.renameSync(DB + '.tmp', DB);
   fs.writeFileSync(`${dir}/archive-on-exit`, '');
-  log(`${req.item}: aigw ${req.aigw} に archive-on-exit を置いて pid ${req.pid} を止める`);
+  log(`${req.item}: aiza ${req.aiza} に archive-on-exit を置いて pid ${req.pid} を止める`);
   await sleep(2000);
   for (let k = 0; k < 2 && alive(req.pid); k++) { process.kill(req.pid, 'SIGINT'); for (let i = 0; i < 20 && alive(req.pid); i++) await sleep(500); }
   if (alive(req.pid)) { log(`${req.item}: SIGINT で終わらないので SIGTERM`); process.kill(req.pid, 'SIGTERM'); }

@@ -1,4 +1,4 @@
-"""aigw-passkey revoke (2026-11-04): revoking one key while another
+"""aiza-passkey revoke (2026-11-04): revoking one key while another
 root-capable one remains only closes the window; only the last one stops
 the root tmux server and every pane in it.
 
@@ -9,16 +9,16 @@ import importlib.util
 import unittest
 from pathlib import Path
 
-_path = Path(__file__).resolve().parent.parent / "bin" / "aigw-unlockd"
-_loader = importlib.machinery.SourceFileLoader("aigw_unlockd", str(_path))
-_spec = importlib.util.spec_from_loader("aigw_unlockd", _loader)
+_path = Path(__file__).resolve().parent.parent / "bin" / "aiza-unlockd"
+_loader = importlib.machinery.SourceFileLoader("aiza_unlockd", str(_path))
+_spec = importlib.util.spec_from_loader("aiza_unlockd", _loader)
 U = importlib.util.module_from_spec(_spec)
 try:
-    # Needs fido2 (aigw's venv) and a readable /etc/aigw/webauthn.json:
-    # run as root with /opt/aigw/venv/bin/python3; skipped elsewhere.
+    # Needs fido2 (aiza's venv) and a readable /etc/aiza/webauthn.json:
+    # run as root with /opt/aiza/venv/bin/python3; skipped elsewhere.
     _loader.exec_module(U)
 except (ImportError, SystemExit) as e:
-    raise unittest.SkipTest(f"aigw-unlockd not importable here: {e!r}")
+    raise unittest.SkipTest(f"aiza-unlockd not importable here: {e!r}")
 
 
 def cred(cid, tier="root", be=False):

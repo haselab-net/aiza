@@ -25,8 +25,8 @@ class TalktoCliTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.path = Path(self.tmp.name) / "talkto_out.jsonl"
-        self.env = dict(os.environ, AIGW_TALKTO=str(self.path))
-        self.env.pop("AIGW_TALKTO_ID", None)
+        self.env = dict(os.environ, AIZA_TALKTO=str(self.path))
+        self.env.pop("AIZA_TALKTO_ID", None)
         self.saved = B._relay_to_partner
 
     def tearDown(self):
@@ -90,6 +90,29 @@ class TalktoCliTest(unittest.TestCase):
                 t.join()
                 self.assertEqual(r.returncode, code, (script, r.stdout, r.stderr))
                 self.assertIn(outcome[1], r.stdout, script)
+
+    def test_list_asks_and_prints_the_members(self):
+        # `talkto --list` (2026-11-25): a {"list": true} line, nothing sent; the backend's answer printed as is
+        saved = B.link_list_from_session
+        B.link_list_from_session = lambda sid: ("list", "つながっている相手(1人):\n「X」 Claude・devbox・動いている")
+        try:
+            for script in SCRIPTS:
+                self.path.unlink(missing_ok=True)
+                self.path.with_name("talkto_out.jsonl.offset").unlink(missing_ok=True)
+                t = self.relay_once(("delivered", "relayed: must not happen"))
+                r = self.run_cli(script, "--list")
+                t.join()
+                self.assertEqual(r.returncode, 0, (script, r.stdout, r.stderr))
+                self.assertEqual(r.stdout, "つながっている相手(1人):\n「X」 Claude・devbox・動いている\n", script)
+                [line] = self.lines()
+                self.assertIs(line["list"], True, script)
+                self.assertNotIn("text", line)
+                self.assertNotIn("b64", line)
+                r = self.run_cli(script, "--list", "x")
+                self.assertEqual(r.returncode, 2, script)
+                self.assertIn("--list", self.run_cli(script, "--help").stdout, script)
+        finally:
+            B.link_list_from_session = saved
 
     def test_real_relay_without_link_says_so(self):
         saved = B._load_links

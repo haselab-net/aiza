@@ -1,4 +1,4 @@
-"""aigw-compat daily (the deployment notes, 2026-11-09): when it checks, what it
+"""aiza-compat daily (the deployment notes, 2026-11-09): when it checks, what it
 reports and remembers. The checks and the version probes are stubbed.
 
     python3 -m unittest discover -s tests -v
@@ -6,15 +6,16 @@ reports and remembers. The checks and the version probes are stubbed.
 import importlib.machinery
 import importlib.util
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-SCRIPT = Path(__file__).resolve().parent.parent / "bin" / "aigw-compat"
+SCRIPT = Path(__file__).resolve().parent.parent / "bin" / "aiza-compat"
 
 
 def load():
-    loader = importlib.machinery.SourceFileLoader("aigw_compat_under_test", str(SCRIPT))
+    loader = importlib.machinery.SourceFileLoader("aiza_compat_under_test", str(SCRIPT))
     spec = importlib.util.spec_from_loader(loader.name, loader)
     mod = importlib.util.module_from_spec(spec)
     loader.exec_module(mod)
@@ -54,7 +55,7 @@ class DailyTest(unittest.TestCase):
     def day(self):
         d = Path(self.tmp.name) / f"d{self.runs}"
         rc = self.m.daily(d)
-        return rc, (d / "aigw-compat.md").read_text()
+        return rc, (d / "aiza-compat.md").read_text()
 
     def test_first_day_checks_then_quiet(self):
         rc, md = self.day()
@@ -78,7 +79,7 @@ class DailyTest(unittest.TestCase):
         self.fail = [("tui", "b")]
         rc, md = self.day()
         self.assertEqual(rc, 1)
-        self.assertIn("aigw-compat FAIL tui: b", md)
+        self.assertIn("aiza-compat FAIL tui: b", md)
         self.assertNotIn("FAIL tui: a", md)
         st = json.loads(self.m.STATE.read_text())
         self.assertTrue(st["failing"])
@@ -104,6 +105,27 @@ class DailyTest(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("試せなかった", md)
         self.assertEqual(json.loads(self.m.STATE.read_text())["tested"]["claude"], "2.1.319")
+
+
+class HookFileTest(unittest.TestCase):
+    """The live check reads the hook's lines from $AIZA_TALKTO. Since
+    2026-11-14 (codex-audit-fixes) aiza-task-hook writes only to a file named
+    talkto_out.jsonl, as the backend names it; the check must use that name."""
+
+    def test_hook_writes_where_the_check_reads(self):
+        import os
+        import subprocess
+        m = load()
+        hook = SCRIPT.parent / "aiza-task-hook"
+        with tempfile.TemporaryDirectory() as d:
+            talkto = Path(d) / getattr(m, "TALKTO_NAME", "talkto.jsonl")
+            env = dict(os.environ, AIZA_TALKTO=str(talkto))
+            env.pop("TMUX_PANE", None)
+            payload = {"hook_event_name": "Stop", "session_id": "s1", "last_assistant_message": "OK"}
+            subprocess.run([sys.executable, str(hook), "event"], input=json.dumps(payload),
+                           text=True, env=env, check=True, timeout=30)
+            stops = [h["task"] for h in m._hook_lines(talkto) if "task" in h]
+            self.assertEqual([s.get("session_id") for s in stops], ["s1"])
 
 
 if __name__ == "__main__":

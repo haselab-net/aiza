@@ -49,7 +49,7 @@ class TextOnStdinTest(unittest.TestCase):
 class TextOnStdinLiveTest(unittest.TestCase):
     """The sh snippet hands tmux the text unchanged, trailing newline included."""
     def test_set_buffer_roundtrip(self):
-        sock = f"aigw-test-{int(time.time() * 1000)}"
+        sock = f"aiza-test-{int(time.time() * 1000)}"
         L = ["tmux", "-L", sock]
         try:
             subprocess.run(L + ["new-session", "-d", "-s", "t", "cat"], check=True)

@@ -1,0 +1,617 @@
+#!/usr/bin/env python3
+"""aiza-desk-deploy: deploy the desk bot's fixes on their own (the desk's
+stage 3, see the design notes on the desk).
+
+Run as root by aiza-desk-deploy.timer on the host that keeps the work tree.
+A report under the desk whose bot session handed back "直した版の確認" has a
+branch desk-<node>. This tool takes it only when
+
+  - the branch changes nothing but static/, bin/aiza-backend and tests/
+    (not the tools of the shared tools folder, BOX_TOOLS: root's and the
+    host's sessions run the same files; 2026-11-24), has no link, submodule
+    or change of a file's mode, removes no test, adds or removes no file
+    outside tests/, and in bin/aiza-backend touches
+    no function of authentication, sharing, unlocking, the sandbox's edge,
+    the Email box or the dispatcher (DENY_DEF / DENY_LINE); outside any
+    function only comments, or the arguments of a preset that runs in the
+    box (presets_change_ok);
+  - what is installed on this host is main's own (nobody's undeployed work
+    rides along);
+  - it merges into main, and all tests pass on the merge, run as a
+    throw-away user with no network and no home -- the change's tests and
+    main's own (a change may not weaken them to pass);
+
+then installs it here, checks the backends come back, pushes main, and does
+the same on each peer (AIZA_DESK_PEERS, ssh names).
+
+A report may instead ask for a deploy (stage 4): someone fixed it on their
+own -- on either host -- and sent the commit with 📮 ({repo, sha} in the
+report's "deploy"). The commit is fetched from that repository as the user
+of the report's session (who must be the report's sender), on this host or
+over ssh on the peer named by the session's host, into refs/req/<node> of
+the work repository, and goes through the very same rule and steps. A failure anywhere puts
+every host back and reverts main. Each outcome is written into the tree under
+the report, so the desk sees what was done there.
+
+  aiza-desk-deploy            one pass
+  aiza-desk-deploy --check <branch>   only the rule check, printed
+"""
+import fcntl
+import json
+import os
+import re
+import shutil
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+DESK_CONF = Path("/etc/aiza/desk.json")
+TREE_SOCK = "/run/aiza-tree/sock"
+STATE = Path(os.environ.get("AIZA_DESK_STATE", "/var/lib/aiza-desk-deploy"))
+WORK = STATE.parent / (STATE.name + "-work")
+REPO_URL = os.environ.get("AIZA_DESK_REPO", "")
+PEERS = os.environ.get("AIZA_DESK_PEERS", "").split()
+BACKEND = Path("/usr/local/sbin/aiza-backend")
+# Tools the boxes run as their own user from the shared tools folder (no
+# image rebuild): each only asks its session's backend, which decides. Not
+# here, so a person looks: the hooks that ask the user for a permission or
+# stand before an outward action, and the Email box's guard.
+BOX_TOOLS_DIR = Path("/opt/sandbox-shared/tools/bin")
+BOX_TOOLS = ("talkto", "aiza-tree", "aiza-session", "aiza-board", "aiza-task-hook", "aiza-codex-hook")
+STATIC = Path("/opt/aiza/static")
+READY = "直した版の確認"
+DEPLOY_WAITING = "窓口が配備を確かめる"
+SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+REPO_RE = re.compile(r"^/[A-Za-z0-9._+@/-]{1,300}$")
+USER_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
+NODE_RE = re.compile(r"^n[0-9a-f]{12}$")
+
+DENY_DEF = re.compile(
+    r"auth|share|cookie|login|unlock|passkey|sandbox|^sb_|escape|beneath|dispatch|desk|peer|gate|"
+    r"perm|owner|token|secret|sudo|root|credential|grant|mail|mbox|uid|ssh|key|sign|hmac|crypt|"
+    r"^do_[A-Z]+$|_route|handle|^main$",
+    re.IGNORECASE)
+DENY_LINE = re.compile(
+    r"on_behalf_of|SHARE_|sudo|setuid|setgid|chown|chmod|EscapesSandbox|sb_open|open_beneath|MAILBOX|"
+    r"cookie|unlock|passkey|subprocess|os\.system|DISPATCHER|DESK_|secrets\.|hmac|\.key\b|_KEY\b|"
+    # running something else (2026-11-24, the audit): not as a way around subprocess
+    r"os\.popen|os\.exec|os\.spawn|\bpty\b|ctypes|importlib|__import__|(?<![\w.])(?:eval|exec|compile)\(")
+
+
+def log(msg):
+    print(f"[aiza-desk-deploy] {msg}", flush=True)
+
+
+def run(cmd, check=True, **kw):
+    r = subprocess.run(cmd, capture_output=True, text=True, **kw)
+    if check and r.returncode != 0:
+        raise RuntimeError(f"{cmd[0]} {cmd[1] if len(cmd) > 1 else ''}: {(r.stderr or r.stdout).strip()[-400:]}")
+    return r
+
+
+def git(*args, cwd=None, check=True):
+    base = ["git", "-c", "user.name=aiza desk", "-c", "user.email=aiza-desk@localhost"]
+    return run(base + (["-C", str(cwd)] if cwd else []) + list(args), check=check).stdout
+
+
+# ---- the rule (pure functions, tested) ----
+
+def enclosing_def(lines, i):
+    """The name of the def/class a 0-based line sits in (the innermost), or
+    None at module level -- also for a line of a string that starts at the
+    left edge, which only errs on the careful side."""
+    if i >= len(lines):
+        return None
+    line = lines[i]
+    indent = len(line) - len(line.lstrip()) if line.strip() else 10**6
+    for j in range(i, -1, -1):
+        s = lines[j]
+        if not s.strip():
+            continue
+        m = re.match(r"^(\s*)(?:async\s+)?(?:def|class)\s+(\w+)", s)
+        if m and (j == i or len(m.group(1)) < indent):
+            return m.group(2)
+        if len(s) - len(s.lstrip()) == 0 and not s.startswith(("#", "@")):
+            return None
+    return None
+
+
+def hunk_lines(diff):
+    """(old line numbers removed, new line numbers added), 1-based, from a -U0 diff."""
+    old, new = [], []
+    for m in re.finditer(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", diff, re.M):
+        a, an, b, bn = int(m.group(1)), int(m.group(2) or 1), int(m.group(3)), int(m.group(4) or 1)
+        old += range(a, a + an)
+        new += range(b, b + bn)
+    return old, new
+
+
+def check_modes(raw):
+    """None when no entry of `git diff --raw` (the whole change, tests/
+    included) is a symbolic link or a submodule or changes a file's mode,
+    else why not (2026-11-24, the audit: this runs as root, and a link under
+    tests/ made the permission pass below change the file it points to)."""
+    for ln in raw.splitlines():
+        if not ln.startswith(":"):
+            continue
+        meta, _, path = ln.partition("\t")
+        old, new = meta[1:].split()[:2]
+        if {old, new} & {"120000", "160000"}:
+            return f"リンクかサブモジュールがある({path})"
+        if old != "000000" and new != "000000" and old != new:
+            return f"ファイルのモードを変えている({path})"
+    return None
+
+
+def changed_files(bare, branch):
+    """[(status, path)] of the change, renames and copies as the removal and
+    the addition they are (2026-11-24, the audit: "R100<TAB>tests/x<TAB>a/new"
+    read as one path under tests/ let a file be added anywhere). A line of any
+    other shape gives (?, line) -- refused by check_change."""
+    out = []
+    for line in git("diff", "--name-status", "--no-renames", f"main...{branch}", cwd=bare).splitlines():
+        parts = line.split("\t")
+        out.append((parts[0], parts[1]) if len(parts) == 2 and parts[0] in ("A", "M", "D") else ("?", line))
+    return out
+
+
+def check_change(files, backend_diff="", old_src="", new_src=""):
+    """None when the change may go out on its own, else why not (Japanese,
+    shown in the tree). files: [(status, path)] from git diff --name-status."""
+    if not files:
+        return "変更がない"
+    for st, path in files:
+        if st not in ("A", "M", "D"):
+            return f"変更の形が読めない({path[:80]})"
+        if path.startswith("tests/"):
+            if st == "D":
+                return f"テストを消している({path})"
+            stem = path.rsplit("/", 1)[-1].removesuffix(".py")
+            if st == "A" and stem in sys.stdlib_module_names | set(sys.builtin_module_names):
+                # discover puts tests/ first on the path: it would stand in for the library
+                return f"標準のモジュールと同じ名前のファイルをテストに足している({path})"
+            continue
+        if st[0] not in "M":
+            return f"テスト以外でファイルを足すか消している({path})"
+        if path.startswith("bin/") and path[len("bin/"):] in BOX_TOOLS:
+            # the same files run in root's and the host's sessions (talkto, the hooks): a person deploys them
+            return f"root やホストのセッションでも動く道具は人が配備する({path})"
+        static_top = path.startswith("static/") and "/" not in path[len("static/"):]
+        if path != "bin/aiza-backend" and not static_top:
+            return f"自動で入れない場所を変えている({path})"
+    if backend_diff:
+        for ln in backend_diff.splitlines():
+            if ln.startswith(("+", "-")) and not ln.startswith(("+++", "---")) and DENY_LINE.search(ln[1:]):
+                return f"人が確かめる箇所に触れている({DENY_LINE.search(ln[1:]).group(0)})"
+        old_lines, new_lines = old_src.splitlines(), new_src.splitlines()
+        removed, added = hunk_lines(backend_diff)
+        presets = None
+        for src, nums in ((old_lines, removed), (new_lines, added)):
+            for n in nums:
+                name = enclosing_def(src, n - 1)
+                if name is None:
+                    text = src[n - 1].strip() if n - 1 < len(src) else ""
+                    if text == "" or text.startswith("#"):
+                        continue
+                    if in_block(src, n - 1, "TMUX_PRESETS"):
+                        if presets is None:
+                            presets = presets_change_ok(old_src, new_src)
+                        if presets is None:
+                            continue
+                        return presets
+                    return f"関数の外を変えている(aiza-backend の {n} 行目あたり)"
+                if DENY_DEF.search(name):
+                    return f"人が確かめる箇所に触れている({name})"
+    return None
+
+
+def in_block(lines, i, name):
+    """Whether 0-based line i sits in the module-level `name = {...}` block."""
+    for j in range(min(i, len(lines) - 1), -1, -1):
+        s = lines[j]
+        if s.startswith(f"{name} = "):
+            return True
+        if s and not s[0].isspace() and not s.startswith(("#", "}", "]", ")")):
+            return False
+        if s.startswith("}") and j != i:
+            return False
+    return False
+
+
+def _presets(src):
+    import ast
+    for node in ast.parse(src).body:
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "TMUX_PRESETS" for t in node.targets) \
+                and isinstance(node.value, ast.Dict):
+            out = {}
+            for k, v in zip(node.value.keys, node.value.values):
+                if not (isinstance(k, ast.Constant) and isinstance(v, ast.Dict)):
+                    return None
+                out[k.value] = {kk.value if isinstance(kk, ast.Constant) else None: vv for kk, vv in zip(v.keys, v.values)}
+            return out
+    return None
+
+
+def presets_change_ok(old_src, new_src):
+    """None when TMUX_PRESETS changed only in the arguments of presets that
+    run in the box (same command, place, env and folder; none added or
+    removed), else why not. Where a preset runs, and as what, stays a
+    person's to check."""
+    import ast
+    try:
+        old, new = _presets(old_src), _presets(new_src)
+    except SyntaxError:
+        return "プリセット表が読めない"
+    if old is None or new is None:
+        return "プリセット表が読めない"
+    if set(old) != set(new):
+        return "プリセットを足すか消している"
+    for name in old:
+        a, b = old[name], new[name]
+        if {k: ast.dump(v) for k, v in a.items()} == {k: ast.dump(v) for k, v in b.items()}:
+            continue
+        loc = [x.get("location") for x in (a, b)]
+        if not all(isinstance(v, ast.Constant) and v.value == "container" for v in loc):
+            return f"箱の外で動くプリセットを変えている({name})"
+        if set(a) != set(b) or any(ast.dump(a[k]) != ast.dump(b[k]) for k in a if k != "command"):
+            return f"プリセットの引数以外を変えている({name})"
+        ca, cb = a.get("command"), b.get("command")
+        if not (isinstance(ca, ast.List) and isinstance(cb, ast.List) and ca.elts and cb.elts
+                and ast.dump(ca.elts[0]) == ast.dump(cb.elts[0])
+                and all(isinstance(e, ast.Constant) and isinstance(e.value, str) for e in cb.elts[1:])):
+            return f"プリセットのコマンドを変えている({name})"
+    return None
+
+
+# ---- the tree ----
+
+def tree(req):
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(30)
+    s.connect(TREE_SOCK)
+    s.sendall((json.dumps(req, ensure_ascii=False) + "\n").encode())
+    s.shutdown(socket.SHUT_WR)
+    buf = b""
+    while chunk := s.recv(65536):
+        buf += chunk
+    r = json.loads(buf)
+    if not r.get("ok"):
+        raise RuntimeError(f"tree {req.get('op')}: {r.get('error')}")
+    return r
+
+
+def ready_reports(nodes, desk):
+    """Reports whose bot session handed back a fix to check."""
+    out = []
+    for n in nodes:
+        if n.get("parent") != desk or not n.get("report") or n.get("state") != "open":
+            continue
+        kids = [k for k in nodes if k.get("parent") == n["id"]]
+        if any(READY in ((k.get("ball") or {}).get("text") or "") and k.get("state") == "open" for k in kids):
+            out.append(n)
+    return out
+
+
+def deploy_requests(nodes, desk):
+    """Reports that ask for a commit of the sender's to be deployed."""
+    return [n for n in nodes if n.get("parent") == desk and n.get("report") and n.get("state") == "open"
+            and isinstance(n.get("deploy"), dict)
+            and (n.get("ball") or {}).get("kind") == "ai" and (n.get("ball") or {}).get("text") == DEPLOY_WAITING]
+
+
+def request_source(report, here, peers):
+    """(host to ssh to or None for this host, user, repo, sha) of a deploy
+    request, or a str saying why it cannot be fetched."""
+    d = report.get("deploy") or {}
+    ref = ((report.get("links") or {}).get("ref") or "").split("/")
+    repo, sha = d.get("repo"), d.get("sha")
+    if len(ref) != 4 or not (isinstance(repo, str) and REPO_RE.match(repo) and "/../" not in repo + "/"
+                             and isinstance(sha, str) and SHA_RE.match(sha)):
+        return "依頼のコミットの書き方が違う"
+    host, user = ref[0], ref[1]
+    if not USER_RE.match(user) or user != report.get("owner"):
+        return "依頼のセッションが送った人のものでない"
+    if host == here:
+        return (None, user, repo, sha)
+    for p in peers:
+        if p.split(".")[0].lower() == host:
+            return (p, user, repo, sha)
+    return f"依頼のホスト {host} から取りに行けない"
+
+
+def fetch_request(bare, nid, src):
+    """Fetch the requested commit, as its owner, into refs/req/<nid>."""
+    host, user, repo, sha = src
+    upload = f"sudo -n -u {user} git -c uploadpack.allowAnySHA1InWant=true upload-pack"
+    if host is None:
+        upload = f"runuser -u {user} -- git -c uploadpack.allowAnySHA1InWant=true upload-pack"
+        url = repo
+    else:
+        url = f"ssh://{host}{repo}"
+    git("fetch", "-q", "--no-tags", f"--upload-pack={upload}", url, f"+{sha}:refs/req/{nid}", cwd=bare)
+    return f"refs/req/{nid}"
+
+
+def note(report, title, done, desk_people):
+    """A line under the report: what was done, or why not and whose turn it is."""
+    ball = {"kind": "done"} if done else (
+        {"kind": "person", "who": desk_people[0], "text": "窓口: 自動の配備をしなかった"} if desk_people else None)
+    tree({"op": "add", "parent": report["id"], "title": title[:200], "ball": ball})
+    if done:
+        tree({"op": "update", "id": report["id"], "state": "done"})
+
+
+# ---- install and look ----
+
+def installed_matches_main(work, paths):
+    for p in paths:
+        dst = target_of(p)
+        try:
+            if dst.read_bytes() != (work / p).read_bytes():
+                return p
+        except FileNotFoundError:
+            return p
+    return None
+
+
+def target_of(path):
+    if path == "bin/aiza-backend":
+        return BACKEND
+    if path.startswith("bin/"):
+        return BOX_TOOLS_DIR / path[len("bin/"):]
+    return STATIC / path[len("static/"):]
+
+
+def healthy_here(since):
+    time.sleep(10)
+    failed = run(["systemctl", "list-units", "aiza-backend@*", "--state=failed", "--no-legend", "--plain"]).stdout.strip()
+    if failed:
+        return "aiza-backend が止まった"
+    j = run(["journalctl", "-u", "aiza-backend@*", "--since", f"@{int(since)}", "--no-pager", "-q"], check=False).stdout
+    if "Traceback" in j:
+        return "aiza-backend が例外を出した"
+    return None
+
+
+def install_here(work, paths, backup):
+    for p in paths:
+        dst = target_of(p)
+        (backup / p).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(dst, backup / p)
+    for p in paths:
+        run(["install", "-m", "755" if p.startswith("bin/") else "644", str(work / p), str(target_of(p))])
+    if "bin/aiza-backend" in paths:
+        run(["systemctl", "restart", "aiza-backend@*"], check=False)
+
+
+def restore_here(paths, backup):
+    for p in paths:
+        run(["install", "-m", "755" if p.startswith("bin/") else "644", str(backup / p), str(target_of(p))])
+    if "bin/aiza-backend" in paths:
+        run(["systemctl", "restart", "aiza-backend@*"], check=False)
+
+
+PEER_SCRIPT = r"""set -e
+d=$1; shift; mode=$1; shift
+for p in "$@"; do
+  case $p in bin/aiza-backend) t=/usr/local/sbin/aiza-backend; m=755;;
+    """ + "|".join(f"bin/{t}" for t in BOX_TOOLS) + r""") t=/opt/sandbox-shared/tools/bin/${p#bin/}; m=755;; static/*) t=/opt/aiza/static/${p#static/}; m=644;; *) exit 3;; esac
+  if [ "$mode" = install ]; then sudo -n cp -p "$t" "$d/old.${p##*/}"; sudo -n install -m $m "$d/new/$p" "$t";
+  else sudo -n install -m $m "$d/old.${p##*/}" "$t"; fi
+done
+case " $* " in *" bin/aiza-backend "*) since=$(date +%s); sudo -n systemctl restart 'aiza-backend@*' || true
+  if [ "$mode" = install ]; then sleep 10
+    [ -z "$(systemctl list-units 'aiza-backend@*' --state=failed --no-legend --plain)" ] || { echo failed; exit 4; }
+    sudo -n journalctl -u 'aiza-backend@*' --since @$since --no-pager -q | grep -q Traceback && { echo traceback; exit 5; }
+  fi;;
+esac
+echo ok"""
+
+
+def peer(host, mode, work, paths, d):
+    if mode == "install":
+        run(["ssh", host, f"mkdir -p {d}/new/bin {d}/new/static"])
+        for p in paths:
+            run(["scp", "-q", str(work / p), f"{host}:{d}/new/{p}"])
+    r = run(["ssh", host, "bash", "-s", "--", d, mode, *paths], check=False, input=PEER_SCRIPT)
+    return None if r.returncode == 0 else f"{host} で{'入れた後に' if mode == 'install' else '戻すときに'}問題({r.stdout.strip() or r.returncode})"
+
+
+# ---- one report ----
+
+def desk_people(nodes, conf, nid):
+    """Who gets the ball when a person must look: desk.json's "people" when
+    set (the desk's root also lists the bot among its members, and a
+    deploy request has no bot node under it to tell it apart), else the
+    root's members but root and those who worked under the report."""
+    people = conf.get("people")
+    if isinstance(people, list) and people:
+        return [u for u in people if isinstance(u, str) and USER_RE.match(u)]
+    return [u for u in (next((n for n in nodes if n["id"] == conf["root"]), {}).get("members") or [])
+            if u != "root" and u not in {k.get("owner") for k in nodes if k.get("parent") == nid}]
+
+
+def take_request(report, nodes, conf, state):
+    """A deploy request: fetch the sender's commit, then the same as a bot's fix."""
+    nid, sha = report["id"], (report.get("deploy") or {}).get("sha")
+    if state.get(nid) == sha:
+        return None
+    src = request_source(report, socket.gethostname().split(".")[0].lower(), PEERS)
+    if isinstance(src, str):
+        state[nid] = sha
+        note(report, f"自動の配備をしなかった: {src}", False, desk_people(nodes, conf, nid))
+        return f"{nid}: {src}"
+    try:
+        ref = fetch_request(STATE / "repo.git", nid, src)
+    except RuntimeError as e:
+        state[nid] = sha
+        log(f"{nid}: fetch: {e}")
+        note(report, f"自動の配備をしなかった: 依頼のコミットを取りに行けない({sha[:7]})", False,
+             desk_people(nodes, conf, nid))
+        return f"{nid}: fetch failed"
+    return take(report, nodes, conf, state, branch=ref)
+
+
+def readable(work):
+    """Readable by the tests' throw-away user; never through a link
+    (check_modes refuses them in the change, and main's own are left alone too)."""
+    for d, _, fs in os.walk(work):
+        if not os.path.islink(d):
+            os.chmod(d, 0o755)
+        for f in fs:
+            fp = os.path.join(d, f)
+            if os.path.islink(fp):
+                continue
+            os.chmod(fp, 0o755 if os.access(fp, os.X_OK) else 0o644)
+
+
+def take(report, nodes, conf, state, branch=None):
+    nid = report["id"]
+    bare = STATE / "repo.git"
+    if branch is None:
+        branch = f"desk-{nid}"
+        heads = git("ls-remote", "--heads", str(bare), branch).split()
+        if not heads:
+            return None   # pushed nowhere yet
+        head = heads[0]
+    else:
+        head = git("rev-parse", "--verify", f"{branch}^{{commit}}", cwd=bare).strip()
+    if state.get(nid) == head:
+        return None   # this very version was already decided
+    state[nid] = head
+    people = desk_people(nodes, conf, nid)
+    files = changed_files(bare, branch)
+    bdiff = git("diff", "-U0", f"main...{branch}", "--", "bin/aiza-backend", cwd=bare)
+    base = git("merge-base", "main", branch, cwd=bare).strip()
+    why = check_modes(git("diff", "--raw", "--no-renames", f"main...{branch}", cwd=bare)) or check_change(files, bdiff,
+                       git("show", f"{base}:bin/aiza-backend", cwd=bare) if bdiff else "",
+                       git("show", f"{branch}:bin/aiza-backend", cwd=bare) if bdiff else "")
+    if why:
+        note(report, f"自動の配備をしなかった: {why}({head[:7]})", False, people)
+        return f"{nid}: {why}"
+    paths = sorted(p for _, p in files if not p.startswith("tests/"))
+    # Not under /tmp or /var/tmp: the tests' PrivateTmp would hide it.
+    WORK.mkdir(mode=0o711, exist_ok=True)
+    tmp = Path(tempfile.mkdtemp(prefix="run-", dir=WORK))
+    os.chmod(tmp, 0o711)
+    work = tmp / "w"
+    try:
+        git("worktree", "add", "-q", "--detach", str(work), "main", cwd=bare)
+        drift = installed_matches_main(work, paths)
+        if drift:
+            note(report, f"自動の配備をしなかった: このホストの {drift} が main と違う(まだ配備していない変更がある)({head[:7]})", False, people)
+            return f"{nid}: drift {drift}"
+        r = git("merge", "--no-ff", "-q", "-m", f"desk {nid}: merge {branch}", branch, cwd=work, check=False)
+        if "CONFLICT" in r or git("status", "--porcelain", cwd=work).strip():
+            note(report, f"自動の配備をしなかった: main と重なる変更がある({head[:7]})", False, people)
+            return f"{nid}: conflict"
+        readable(work)
+        test_cmd = ["systemd-run", "--wait", "--pipe", "--quiet", "--collect",
+                 "-p", "DynamicUser=yes", "-p", "PrivateNetwork=yes", "-p", "ProtectHome=yes",
+                 "-p", "ProtectSystem=strict", "-p", "PrivateTmp=yes", "-p", "RuntimeMaxSec=900",
+                 "-p", f"WorkingDirectory={work}", "-p", "Environment=PYTHONDONTWRITEBYTECODE=1",
+                 # a home and a shell the throw-away user lacks (tmux starts panes with the shell)
+                 "-p", "Environment=HOME=/tmp", "-p", "Environment=SHELL=/bin/sh",
+                    "python3", "-m", "unittest", "discover", "-s", "tests", "-q"]
+        t = run(test_cmd, check=False)
+        if t.returncode != 0:
+            tail = [l for l in (t.stderr or t.stdout).splitlines() if l.startswith(("FAIL:", "ERROR:"))][:3]
+            note(report, f"自動の配備をしなかった: テストが通らない({'; '.join(tail) or t.returncode})({head[:7]})", False, people)
+            return f"{nid}: tests failed"
+        # main's own tests too, on the merged tree: a change may not weaken them to pass
+        # tests/ as main has it, as a whole: nothing the change added there stays
+        # (one named like a module main's tests import would stand in for it)
+        shutil.rmtree(work / "tests")
+        git("checkout", "HEAD^1", "--", "tests", cwd=work)
+        readable(work)
+        t = run(test_cmd, check=False)
+        shutil.rmtree(work / "tests")
+        git("checkout", "HEAD", "--", "tests", cwd=work)
+        if t.returncode != 0:
+            tail = [l for l in (t.stderr or t.stdout).splitlines() if l.startswith(("FAIL:", "ERROR:"))][:3]
+            note(report, f"自動の配備をしなかった: main のテストが通らない({'; '.join(tail) or t.returncode})({head[:7]})", False, people)
+            return f"{nid}: main's tests failed"
+        merged = git("rev-parse", "HEAD", cwd=work).strip()
+        backup = tmp / "backup"
+        since = time.time()
+        install_here(work, paths, backup)
+        bad = healthy_here(since) if "bin/aiza-backend" in paths else None
+        if bad:
+            restore_here(paths, backup)
+            note(report, f"自動の配備を戻した: このホストで{bad}({head[:7]})", False, people)
+            return f"{nid}: {bad}"
+        git("push", "-q", "origin", f"{merged}:refs/heads/main", cwd=work, check=False)
+        if git("ls-remote", "origin", "refs/heads/main", cwd=work).split()[:1] != [merged]:
+            restore_here(paths, backup)
+            state.pop(nid, None)   # main moved meanwhile: try again next time
+            return f"{nid}: main moved"
+        done_peers = []
+        for host in PEERS:
+            d = f"/tmp/aiza-desk-{nid}"
+            bad = peer(host, "install", work, paths, d)
+            if bad:
+                for h in done_peers + [host]:
+                    peer(h, "restore", work, paths, f"/tmp/aiza-desk-{nid}")
+                restore_here(paths, backup)
+                git("revert", "--no-edit", "-m", "1", merged, cwd=work)
+                git("push", "-q", "origin", "HEAD:refs/heads/main", cwd=work, check=False)
+                note(report, f"自動の配備を戻した: {bad}。main も戻した({head[:7]})", False, people)
+                return f"{nid}: {bad}"
+            done_peers.append(host)
+        for host in PEERS:
+            run(["ssh", host, f"rm -rf /tmp/aiza-desk-{nid}"], check=False)
+        what = "・".join(p.split("/")[-1] for p in paths)
+        note(report, f"自動で配備した: {what}(main {merged[:7]}、{1 + len(PEERS)} 台)", True, people)
+        return f"{nid}: deployed {merged[:7]}"
+    finally:
+        git("worktree", "remove", "--force", str(work), cwd=bare, check=False)
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def main(argv):
+    conf = json.loads(DESK_CONF.read_text()) if DESK_CONF.exists() else {}
+    if not conf.get("root") or not REPO_URL:
+        return 0   # no desk here
+    STATE.mkdir(mode=0o700, exist_ok=True)
+    lock = open(STATE / "lock", "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return 0
+    bare = STATE / "repo.git"
+    if not bare.exists():
+        git("init", "-q", "--bare", str(bare))
+        git("remote", "add", "origin", REPO_URL, cwd=bare)
+    git("fetch", "-q", "--prune", "origin", "+refs/heads/main:refs/heads/main",
+        "+refs/heads/desk-*:refs/heads/desk-*", cwd=bare)
+    if argv[:1] == ["--check"]:
+        b = argv[1]
+        files = changed_files(bare, b)
+        bdiff = git("diff", "-U0", f"main...{b}", "--", "bin/aiza-backend", cwd=bare)
+        base = git("merge-base", "main", b, cwd=bare).strip()
+        print(check_change(files, bdiff, git("show", f"{base}:bin/aiza-backend", cwd=bare) if bdiff else "",
+                           git("show", f"{b}:bin/aiza-backend", cwd=bare) if bdiff else "") or "ok")
+        return 0
+    sf = STATE / "state.json"
+    state = json.loads(sf.read_text()) if sf.exists() else {}
+    nodes = tree({"op": "list"})["nodes"]
+    work = [(take, r) for r in ready_reports(nodes, conf["root"])] + \
+        [(take_request, r) for r in deploy_requests(nodes, conf["root"])]
+    for fn, report in work:
+        try:
+            r = fn(report, nodes, conf, state)
+        except Exception as e:  # noqa: BLE001 -- one report's trouble must not stop the others
+            r = f"{report['id']}: {type(e).__name__}: {e}"
+        if r:
+            log(r)
+            with open(STATE / "log.jsonl", "a") as f:
+                f.write(json.dumps({"ts": time.time(), "node": report["id"], "result": r}, ensure_ascii=False) + "\n")
+        sf.write_text(json.dumps(state))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

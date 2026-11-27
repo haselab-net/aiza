@@ -1,12 +1,12 @@
-# ext/ — aigw の拡張(外せる機能)
+# ext/ — aiza の拡張(外せる機能)
 
-aigw の本体(`bin/aigw-backend`・`bin/aigw-gateway`・`static/`)は、拡張が1つも無くても全部の機能が動く。
+aiza の本体(`bin/aiza-backend`・`bin/aiza-gateway`・`static/`)は、拡張が1つも無くても全部の機能が動く。
 特定の使い方・特定の配備のための機能は、ここの拡張として足す。拡張のフォルダを消せば、その機能だけが消える。
 
 - **本体は拡張の名前を知らない**。本体のコードに、拡張の名前や、拡張だけが使う言葉は出てこない(テスト`tests/test_ext_contract.py`の`CorePurity`)。
 - 本体は「拡張点」を用意するだけ。拡張は、起動時に本体の拡張 API に自分を登録する。
 - 拡張は、公開するものとしないものを分けられる。公開のスナップショットは、公開しない拡張のフォルダを丸ごと外す。外した形でも本体が動くことはテストで確かめる。
-- **機械や配備の違いは設定で、機能の有無は拡張で**。ssh でつなぐ機械(`/etc/aigw/ssh_machines.json`)や Email の箱(`/etc/aigw/mailbox.json`)のように、
+- **機械や配備の違いは設定で、機能の有無は拡張で**。ssh でつなぐ機械(`/etc/aiza/ssh_machines.json`)や Email の箱(`/etc/aiza/mailbox.json`)のように、
   本体の機能を「どこで・何に」使うかの違いは設定で書く。本体に無い機能を足すのが拡張。
 
 ## これまでの「サイト固有の追加」との関係
@@ -15,31 +15,31 @@ aigw の本体(`bin/aigw-backend`・`bin/aigw-gateway`・`static/`)は、拡張�
 
 | これまで | 拡張での形 |
 |---|---|
-| `aigw_site_routes.py`(`/usr/local/sbin/`、ゲートウェイとバックエンドが`import`。無ければ 404) | `ext/site/gateway.py`(ゲートウェイの経路)と`ext/site/backend.py`(バックエンドの経路) |
-| `site-extras.js`(`/opt/aigw/static/`、`app.js`の`initSiteExtras()`が1回呼び、`index.html`の2つの空の差し込み口に入れる) | `ext/site/static/site.js`。差し込み口は`aigwExt`の`slots` |
+| `aiza_site_routes.py`(`/usr/local/sbin/`、ゲートウェイとバックエンドが`import`。無ければ 404) | `ext/site/gateway.py`(ゲートウェイの経路)と`ext/site/backend.py`(バックエンドの経路) |
+| `site-extras.js`(`/opt/aiza/static/`、`app.js`の`initSiteExtras()`が1回呼び、`index.html`の2つの空の差し込み口に入れる) | `ext/site/static/site.js`。差し込み口は`aizaExt`の`slots` |
 
-移し終えた(2026-11-13)。本体はもう`aigw_site_routes`も`site-extras.js`も読まない。
+移し終えた(2026-11-13)。本体はもう`aiza_site_routes`も`site-extras.js`も読まない。
 
 ## 置き場所と読み込み
 
 ```
 ext/<name>/backend.py     バックエンドの部分(無くてもよい)。register(api) を持つ
 ext/<name>/gateway.py     ゲートウェイの部分(無くてもよい)。register(api) を持つ
-ext/<name>/static/*.js    画面の部分(無くてもよい)。aigwExt.register(...) を呼ぶ
+ext/<name>/static/*.js    画面の部分(無くてもよい)。aizaExt.register(...) を呼ぶ
 ext/<name>/static/*.css
-ext/<name>/reap-keep      aigw-reap-idle の拡張点(無くてもよい)。実行できるファイルで、ユーザー名を引数に 0 で終われば
+ext/<name>/reap-keep      aiza-reap-idle の拡張点(無くてもよい)。実行できるファイルで、ユーザー名を引数に 0 で終われば
                           そのユーザーのバックエンドを止めない
 ext/<name>/tests/         その拡張のテスト(test_<name>_*.py。本体のテストの中で tests/test_ext_suites.py が走らせる)
 ext/<name>/README.md      その拡張の説明
 ```
 
-- インストール先は`/usr/local/lib/aigw/ext/<name>/`。バックエンドとゲートウェイは、起動時に`AIGW_EXT_DIR`(既定はそのパス)の下の
+- インストール先は`/usr/local/lib/aiza/ext/<name>/`。バックエンドとゲートウェイは、起動時に`AIZA_EXT_DIR`(既定はそのパス)の下の
   `*/backend.py`・`*/gateway.py`を名前の順に読み込む。読み込みに失敗した拡張は、ログに1行書いて飛ばす(本体は止めない)。
 - 画面の部分は、バックエンドが`/config`(`GET /agents/api/config`、本人だけ)の`ext`で知らせ(`[{"name", "js": [...], "css": [...], "config": {...}}]`)、`app.js`が`/agents/ext/<name>/<file>`から読み込む。
-  ゲートウェイは`/agents/ext/`を`AIGW_EXT_DIR/<name>/static/`から静的に返す。ログインが要る。パスは`<name>/<file>`の1段だけで、
+  ゲートウェイは`/agents/ext/`を`AIZA_EXT_DIR/<name>/static/`から静的に返す。ログインが要る。パスは`<name>/<file>`の1段だけで、
   `<file>`は英数字で始まる`.js`か`.css`、解決した先がその`static/`の中のファイルであること(外へのシンボリックリンクは断る)。
   `app.js`は最初の表示の前に読み込みを待つ(長くて4秒)。
-- `aigw-reap-idle`は`AIGW_EXT_DIR`の下の`*/reap-keep`を聞く(上)。
+- `aiza-reap-idle`は`AIZA_EXT_DIR`の下の`*/reap-keep`を聞く(上)。
 
 ## バックエンドの拡張 API
 
@@ -61,28 +61,29 @@ ext/<name>/README.md      その拡張の説明
 
 | 呼び出し | 本体の拡張点 |
 |---|---|
-| `api.get(path_prefix, handler)` / `api.post(path_prefix, handler)` | ゲートウェイの経路(ログインの前後を問わない)。`handler(h, path, qs)`→処理したら true。`h`は今の要求(`_send_json`などを持つ)。これまでの`aigw_site_routes`と同じ所(ログイン・OAuth の後、本体のファイルの前)で聞く。例外は 500 |
+| `api.get(path_prefix, handler)` / `api.post(path_prefix, handler)` | ゲートウェイの経路(ログインの前後を問わない)。`handler(h, path, qs)`→処理したら true。`h`は今の要求(`_send_json`などを持つ)。これまでの`aiza_site_routes`と同じ所(ログイン・OAuth の後、本体のファイルの前)で聞く。例外は 500 |
 | `api.signup(handler)` | 登録の無い Google ログインを受け取ったとき(`maybe_start_signup`) |
 | `api.ctx` | Cookie の署名など、これまで`SITE_CTX`で渡していたもの |
 
-## 画面の拡張 API(`window.aigwExt`)
+## 画面の拡張 API(`window.aizaExt`)
 
 `static/ext.js`が持つ登録簿(DOM に触らないので node でテストできる。`tests/test_ext_frontend.py`)。`app.js`は拡張点でここを引く。
-`aigwExt.register(name, hooks)`。`hooks`が持てるもの:
+`aizaExt.register(name, hooks)`。`hooks`が持てるもの:
 
 | hook | 本体の拡張点 |
 |---|---|
 | `folders: [{id, label, draggable, hideWhenEmpty, ownArchive, archiveOpen, archiveClose, openKey}]` | 組み込みのフォルダの見せ方。`archiveOpen`/`archiveClose`は自分のアーカイブの開閉ボタンの文言(`{n}`は件数、`t()`で訳す)。`openKey`は開いているかをこの名前の localStorage にも残す |
 | `folderOf(session)` → id か null | フォルダの割り当てが無いセッションの既定のフォルダ |
-| `todo: {load() → Promise, rows(session) → [行], extraRows() → [行]}` | 「やること」の一覧への行の追加。`rows`の行は`{title}`(そのセッションの名前の代わり)か`{href, icon, tip}`(リンクのボタン)。`extraRows`の行は一覧の上に出す`{href, icon, who, msg, className}` |
+| `todo: {load() → Promise, rows(session) → [行], extraRows() → [行]}` | 「やること」の一覧への行の追加。`rows`の行は`{title}`(そのセッションの名前の代わり)か`{href, icon, tip}`(リンクのボタン)か`{note}`(2行目に足す短い文)。`extraRows`の行は一覧の上に出す`{href, icon, who, msg, className}` |
 | `links: [{match(url, el) → bool, open(url, el)}]` | 画面の中のリンクの扱い(ふつうのクリック) |
 | `back(): bool` | 戻るボタンを先に処理する(true なら本体は何もしない) |
 | `closeOverlay(then): bool` | 拡張が画面の上に出しているもの(クラス`ext-overlay`)を閉じる。true なら閉じ終わってから`then()`を呼ぶ |
 | `model3d(url, label, opts): bool` | 3D モデルの添付を開く(true なら本体は何もしない。無ければファイルをそのまま開く) |
+| `tabs: [{id, label, path, show(), hide()}]` | 仕事と設定の間に出す、拡張自身のタブ(`the deployment notes`、2026-11-25)。`path`がそのアドレス(例`/inbox`。ゲートウェイと nginx がページを返す道に入れる)、`show()`/`hide()`はタブを選んだ・離れたときに、ヘッダーの下に自分のページを出す・隠す。タブは履歴に積まない。その上でセッションを開くと`hide()`、閉じると`show()`が呼ばれる |
 | `slots: {"header-links": fn(el, app), "settings": fn(el, app)}` | `index.html`の差し込み口(これまでの`site-extras.js`の2つ) |
-| `i18n: {en: {...}, "zh-CN": {...}}`(か`{ja: 英語}`) | 訳語。`window.aigwI18n.add`を直接呼んでもよい(`tests/test_i18n.py`は`/* i18n-begin */ … /* i18n-end */`の中を読む) |
+| `i18n: {"<拡張>.<名前>": {ja, en, "zh-CN"}}` | 訳語(the deployment notes。鍵は拡張の名前で始め、3言語を並べる)。`window.aizaI18n.define`を直接呼んでもよい(`tests/test_i18n.py`は`/* i18n-begin */ … /* i18n-end */`の中を読む) |
 
-拡張が使ってよい画面の機能は`aigwExt.app`(`api`・`t`・`escapeHtml`・`sessions()`・`refreshSessions()`・`openSession(meta)`・`openSessionById(id)`・`findSession(id)`・`render()`・`plainClick(e)`)。
+拡張が使ってよい画面の機能は`aizaExt.app`(`api`・`t`・`escapeHtml`・`sessions()`・`refreshSessions()`・`openSession(meta)`・`openSessionById(id)`・`findSession(id)`・`render()`・`plainClick(e)`)。
 フックが例外を投げても、ログに書いて「答え無し」として扱う。
 
 ## テスト
@@ -103,6 +104,6 @@ ext/<name>/README.md      その拡張の説明
 1. テストを先に書く。まだ満たさないものは`expectedFailure`で印を付け、満たしたら外す
 2. 本体に、拡張の読み込み・拡張点・`static/ext.js`・`/agents/ext/`を作る
 3. 公開しない拡張を1つずつ移す(順番と中身は各拡張の README)
-4. これまでの`aigw_site_routes.py`・`site-extras.js`を`ext/site/`へ移し、本体からそれを読む部分を消す
+4. これまでの`aiza_site_routes.py`・`site-extras.js`を`ext/site/`へ移し、本体からそれを読む部分を消す
 5. `CorePurity`の印を外し、全部のテストが通ることを確かめる。外した形の木でも本体のテストを走らせる
 6. 両ホストに入れる(バックエンドとゲートウェイの再起動が要る)

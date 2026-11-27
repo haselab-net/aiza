@@ -7,8 +7,8 @@
 #   WITH_CLAUDE=0 docker/test.sh  # without Claude Code in the image (faster)
 set -eu
 cd "$(dirname "$0")/.."
-img=aigw-demo:test
-name=aigw-demo-test-$$
+img=aiza-demo:test
+name=aiza-demo-test-$$
 with_claude=${WITH_CLAUDE:-1}
 fail() { echo "FAIL: $*" >&2; docker logs "$name" 2>&1 | tail -20 >&2; exit 1; }
 cleanup() { docker rm -f "$name" >/dev/null 2>&1 || true; }
@@ -27,7 +27,7 @@ page=$(curl -fs -m 5 "$base/")
 echo "$page" | grep -q 'demo-login' || fail "logged-out page has no demo login"
 
 cookie=$(curl -s -m 5 -D - -o /dev/null "$base/demo-login" | tr -d '\r' \
-         | sed -n 's/^[Ss]et-[Cc]ookie: \(aigw_session=[^;]*\).*/\1/p')
+         | sed -n 's/^[Ss]et-[Cc]ookie: \(aiza_session=[^;]*\).*/\1/p')
 [ -n "$cookie" ] || fail "demo-login gave no session cookie"
 api() { curl -fs -m 30 -H "Cookie: $cookie" -H 'Content-Type: application/json' "$@"; }
 json() { python3 -c "import json,sys; print(json.load(sys.stdin)$1)"; }

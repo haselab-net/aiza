@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>aigw Tutorial: Advanced</title>
+<title>AI-za Tutorial: Advanced</title>
 <style>
   :root {
     --bg: #ffffff; --fg: #1d2330; --muted: #5b6575; --line: #dde2ea; --card: #f5f7fa;
@@ -70,23 +70,22 @@
 <body>
 <div class="wrap">
 
-<h1>aigw Tutorial: Advanced</h1>
+<h1>AI-za Tutorial: Advanced</h1>
 <nav class="langs" aria-label="Language"><a href="../advanced.html" lang="ja">日本語</a><a href="../en/advanced.html" lang="en" class="here" aria-current="page">English</a><a href="../zh/advanced.html" lang="zh-CN">简体中文</a></nav>
 <div class="editions"><a href="index.html">Start</a><a href="docker.html">Try with Docker</a><a href="basic.html">Basics</a><a href="advanced.html" class="here">Advanced</a></div>
-<div class="note">The screenshots of the chat, terminal, settings and sharing screens show aigw in Japanese. aigw itself can be switched to English in Settings → Language.</div>
 
-<p class="lead">This continues from <a href="basic.html">Basics</a>. It covers keeping things organized as your sessions multiply (folders, patrol, notifications), linking with other sessions, going outside the sandbox (Email, host, root), and using other machines.</p>
+<p class="lead">This continues from <a href="basic.html">Basics</a>. It covers keeping things organized as your sessions multiply (folders, work trees, patrol, By turn), linking with other sessions, going outside the devbox (mailbox, host, root), and using other machines.</p>
 
 <nav class="toc">
 <strong>Contents</strong>
 <ol>
-  <li><a href="#folders">Organizing with folders</a></li>
+  <li><a href="#folders">Organizing with folders and work trees</a></li>
   <li><a href="#patrol">Waiting for you, and patrol</a></li>
-  <li><a href="#notifications">The notification list</a></li>
+  <li><a href="#tree">Work trees and “By turn”</a></li>
   <li><a href="#links">Linking sessions together</a></li>
-  <li><a href="#where">Sandbox, host, root and Email: the differences</a></li>
+  <li><a href="#where">devbox, mailbox, host and root: the differences</a></li>
   <li><a href="#settings">The Settings screen and logging in to Claude</a></li>
-  <li><a href="#passkey">Email and registering a passkey (key)</a></li>
+  <li><a href="#passkey">mailbox and registering a passkey (key)</a></li>
   <li><a href="#root">How to become root</a></li>
   <li><a href="#machines">Other machines and the Windows machines board</a></li>
   <li><a href="#faq">Troubleshooting</a></li>
@@ -94,45 +93,48 @@
 </nav>
 
 <!-- ===================================================================== -->
-<h2 id="folders">1. Organizing with folders</h2>
+<h2 id="folders">1. Organizing with folders and work trees</h2>
 
-<p>Sessions can be grouped into folders. You can also make folders inside folders, with no limit on depth.</p>
+<p>In the 🌳 Tree of Work, you can group sessions into <strong>folders</strong>, and also place them under items of a <strong>work tree</strong> (a job written out as branches of things to do, <a href="#tree">Chapter 3</a>). You can also make folders inside folders, with no limit on depth.</p>
 
 <div class="shot">
-  <figure><img src="img/11-folders.png" alt="The list has a folder “Research”, inside it a folder “Robot”, and inside that two sessions. The Robot folder has the being-shared mark"><figcaption>“Robot” inside “Research”, opened. 👥 marks a folder shared as a whole</figcaption></figure>
+  <figure><img src="img/11-folders.png" alt="The Arrange screen after pressing ↕. The folder “Research”, inside it the work tree “Conference prep” with its items, sessions under the items, and a ⠿ at the left of every row"><figcaption>After pressing ↕. Drag a row by the ⠿ at its left to move it</figcaption></figure>
   <div class="side">
     <ul>
-      <li><strong>Create</strong>: “＋ New folder” above the list. To create one inside a folder, use that folder row’s <strong>＋</strong> → “New folder inside this one”.</li>
-      <li><strong>Put in / move</strong>: grab the ⠿ at the left of a row and drop it on a folder row to put it inside. Drop it between rows to reorder it there. You can also put a whole folder into another folder.</li>
-      <li><strong>Open / close</strong>: tap the folder row. The number on the row is how many sessions are inside, and “Waiting for you” is how many of them are waiting for your reply.</li>
+      <li><strong>Select / open</strong>: <strong>press a folder row once to select it</strong> (the frame lights up blue), and <strong>press the selected row again to open or close it</strong>. Pressing the ▶/▼ at the bottom right of 📁 opens or closes it right away without selecting. The number on the row is how many sessions are inside. An open folder is framed together with its contents.</li>
+      <li><strong>Create</strong>: press “＋ 📁” in the row of tools at the top and a name field opens right below the row. Write a name and press “Make” (or <kbd>Enter</kbd>). If a folder is selected, the new one is made inside it.</li>
+      <li><strong>Put in / move</strong>: press <strong>↕</strong> in the row of tools and a ⠿ appears at the left of every row. Grab the ⠿ and drop it on a folder row to put it inside. Drop it between rows to reorder it there. You can also put a whole folder, or a whole work tree, into another folder. Press ↕ again when you are done.</li>
+      <li><strong>A session under an item of a work tree</strong>: drop a session’s ⠿ on an item of a tree and it goes under that item (the item and the session are tied together). When the item is done, the session goes back into its folder.</li>
       <li><strong>Stop or resume all at once</strong>: tap the ● on a folder row to stop every session running inside it. Tap the grey ● afterwards to resume together the ones stopped that time.</li>
-      <li><strong>Archive</strong>: 🗄 archives the whole folder. Only empty folders can be deleted (🗑).</li>
+      <li><strong>A folder’s ⋯</strong>: ✏️ Rename, Set working directory, 🧑‍🤝‍🧑 Share the folder…, 🗄 Archive (the whole folder), 🗑 delete (only empty folders).</li>
+      <li>The ⋯ on a session’s row holds Rename, 🔗 link, 🗄 archive and 🗑 delete.</li>
     </ul>
   </div>
 </div>
 
-<h3>Working folders</h3>
+<h3>Working directories</h3>
 <div class="shot">
-  <figure><img src="img/12-folder-menu.png" alt="The menu that appears when pressing a folder’s ✏️: Rename, Set working folder, Share the folder"><figcaption>The menu under a folder’s ✏️</figcaption></figure>
+  <figure><img src="img/12-folder-menu.png" alt="The menu that appears when pressing the ⋯ of the folder “Research”: Rename, Set working directory, Share the folder…, Archive"><figcaption>The menu under a folder’s ⋯</figcaption></figure>
   <div class="side">
-    <p>A folder can have one <strong>working folder</strong> (a place on the server). Write it like <code>robot</code> via ✏️ → “Set working folder”.</p>
+    <p>A folder can have one <strong>working directory</strong> (a place on the server). Write it like <code>robot</code> via ⋯ → “Set working directory”.</p>
     <ul>
-      <li>The place is written relatively: for a sandbox session it is <code>~/sandhome/robot</code>; for a host shell, the place of the same name under your home; for a root shell, the place of the same name under <code>/root</code>.</li>
-      <li>Press that folder’s <strong>＋</strong> → “New session in this folder” and the creation box above the list shows “📁 Robot · working folder ~/robot”. Press <strong>Start</strong> and the session starts in that place and goes into that folder. If the place does not exist, it is created.</li>
-      <li>Wherever you create it from, a new session started inside a working folder automatically goes into that folder.</li>
-      <li>A folder with no working folder of its own uses its parent folder’s.</li>
+      <li>The place is written relatively: for a devbox session it is <code>~/sandhome/robot</code>; for a host session, the place of the same name under your home; for a root session, the place of the same name under <code>/root</code>.</li>
+      <li>Select that folder and press <strong>＋ 🤖 AI</strong> in the row of tools, and the Start a session screen opens with that folder filled in as where to put it. Press <strong>Start</strong> and the session starts in the working directory’s place and goes into that folder. If the place does not exist, it is created.</li>
+      <li>Wherever you create it from, a new session started inside a working directory automatically goes into that folder.</li>
+      <li>A folder with no working directory of its own uses its parent folder’s.</li>
     </ul>
   </div>
 </div>
 
 <h3>Sharing a whole folder</h3>
-<p>✏️ → “Share the folder…” shares every session in it (including folders under it and anything added later). Choosing who and “Read-only / Co-work” works the same as sharing one session at a time (<a href="basic.html#share">Basics</a>). Root shells become read-only, and Email is not shared by folder. A folder being shared gets 👥.</p>
+<p>⋯ → “🧑‍🤝‍🧑 Share the folder…” shares every session in it (including folders under it and anything added later). Choosing who and “Read-only / Co-work” works the same as sharing one session at a time (<a href="basic.html#share">Basics</a>). Root sessions become read-only, and mailbox sessions are reached only by sharing with a <strong>named user</strong> (a folder shared with Everyone does not include them). In a co-work folder, the mailbox's Claude and Codex are co-work and the mailbox shell is read-only. A folder being shared gets 🧑‍🤝‍🧑.</p>
 
 <h3>Folders in the archive</h3>
 <div class="shot">
-  <figure><img src="img/16-archive.png" alt="The archive opened. Inside the archive there are also the folders “Research” and “Robot”, with archived sessions in them"><figcaption>The archive is laid out in the same folder structure</figcaption></figure>
+  <figure><img src="img/16-archive.png" alt="“Open the archive” at the very bottom, opened. Archived folders and sessions, and under Finished trees the finished tree “Last conference” in Research, with its finished branch"><figcaption>“🗄 Open the archive” at the very bottom. Finished work trees go in here too</figcaption></figure>
   <div class="side">
-    <p>Sessions archived inside a folder are listed under the same folder in “🗄 Open the archive” too. Restore one with 📤 and it goes back to its original folder. A folder archived as a whole can be restored all at once with the 📤 on that folder’s row.</p>
+    <p>Sessions archived inside a folder are listed under the same folder in “🗄 Open the archive” too. Restore one with 📤 and it goes back to its original folder. A folder archived as a whole (🗄 in its ⋯) can be restored all at once with the 📤 on that folder’s row.</p>
+    <p>A work tree whose items are all done also moves into the archive. With ↕ you can move it into a folder in the archive, too.</p>
   </div>
 </div>
 
@@ -142,140 +144,174 @@
 <p>A session where Claude is waiting for your reply (its work is done, it is asking you to approve a plan, and so on) gets a yellow “Waiting for you” next to its name in the list.</p>
 
 <div class="shot">
-  <figure><img src="img/13-patrol.png" alt="The patrol bar at the top of the chat screen. The folder location, Prev and Next buttons, 1/5, a filter selector, and archive and trash buttons"><figcaption>The patrol bar, opened by tapping the chat’s name</figcaption></figure>
+  <figure><img src="img/02-chat.png" alt="The patrol bar below the chat screen’s header. The folder location, Prev and Next buttons, 7/7, a filter selector, and rename, archive and trash buttons"><figcaption>The patrol bar below the chat’s header</figcaption></figure>
   <div class="side">
     <ul>
-      <li>On the chat screen, <strong>tap the name</strong> to open the patrol bar (tap again to close it).</li>
+      <li>The patrol bar is open from the start, right below the chat’s header. <strong>Tap the name</strong> to close it, and tap again to open it (this browser remembers your choice).</li>
       <li><strong>‹ Prev / Next ›</strong> move to the previous or next session without going back to the list. The order is the list order (including inside folders).</li>
       <li>The selector lets you choose “All / Running / Waiting for you”. With “Waiting for you” you can go through just the ones waiting for your reply, one after another.</li>
-      <li>🗄 archives the current session and 🗑 deletes its conversation log, then you move straight on to the next one.</li>
+      <li>✏️ renames the current session, 🗄 archives it and 🗑 deletes its conversation log, then you move straight on to the next one.</li>
       <li>The small text above the bar shows which folder of the list the session is in.</li>
     </ul>
   </div>
 </div>
 
 <!-- ===================================================================== -->
-<h2 id="notifications">3. The notification list</h2>
+<h2 id="tree">3. Work trees and “By turn”</h2>
 
+<p>A <strong>work tree</strong> is one job (for example “Conference prep”) written out as branches (“Rehearse the talk”, “Prepare for Q&amp;A”, …). Each branch records whose turn it is now (🙋 a person, 🤖 an AI, 💤 waiting, ✓ done) and can be tied to sessions. AI-za’s Claude adds branches and marks them done by itself from inside a session.</p>
+<ul>
+  <li><strong>How it looks</strong>: a tree’s root row has 🌳 (at its bottom right, ▶ closed, ▼ open, ▽ finished branches shown too; a 🔒 at the bottom left means a tree not shared with anyone). A branch with branches under it is framed together with them.</li>
+  <li><strong>Select / open</strong>: as with folders, <strong>press a branch row once to select it</strong>, and <strong>press the selected row again to open or close it</strong>. When selected, the whole frame of that branch lights up.</li>
+  <li><strong>Make a tree</strong>: press “＋ 🌳” and write a name in the field that opens right below the row of tools. If a folder is selected, the tree is put in that folder. If not, it is listed under “Trees in no folder”, so move it into a folder with ↕ (or choose “📁 Folder to put it in…” in the ⋯ of its root).</li>
+  <li><strong>Add a branch</strong>: select a branch (or the root) and press “＋ 🌳”. You can add it by title or link it to a GitHub Issue.</li>
+  <li><strong>Start a session on a branch</strong>: select the branch and press “＋ 🤖 AI”. If the branch has no session yet, the session you start becomes its lead (see “Lead and helpers” below). If it already has one, a branch is made under it and the new session becomes its lead. If you select a branch someone else holds with a session, the button becomes 🤛 Take it on (take it over with a new session of your own).</li>
+  <li><strong>A branch’s ⋯</strong>: ✓ Mark done (↺ Reopen), 🧑‍🤝‍🧑 share (who can see it, who can edit), ⛓ see what holds it up, 💬 references, 📁 Folder to put it in… (root only), ✏️ Rename, and more. Things to create (branches, sessions) are made with the ＋ buttons in the row of tools, not from ⋯.</li>
+  <li>A mark like “🙋 you” beside a branch shows whose turn it is now. <strong>A red “stuck N days”</strong> means the turn has not moved for 3 days or more. “Show” at the top can narrow things down to “🙋 Your turn” or “⏳ Stuck 3 days”.</li>
+  <li>Finished branches are folded into “✓ N finished branches”.</li>
+</ul>
+
+<h3 id="team">🧭 Lead and 🤝 helpers</h3>
 <div class="shot">
-  <figure><img src="img/14-notifications.png" alt="The notification list. Date and time, session name and text are listed, each with an archive button"><figcaption>The notification list, opened with 🔔. A red ● marks ones you haven’t seen yet</figcaption></figure>
+  <figure><img src="img/19-team.png" alt="The row of the tree “Tidy the data” shows “🧭 Tidy the data · 🤝 Make the tables, Draw the plots”, and inside its frame the lead and helper sessions are listed under headings"><figcaption>The lead of the branch “Tidy the data”, and two helpers assisting it</figcaption></figure>
   <div class="side">
+    <p>This is how several people (or sessions) share one branch.</p>
     <ul>
-      <li>🔔 at the top of the screen opens the list of notifications (push) received so far. The red number is how many you haven’t seen yet.</li>
-      <li>Each shows the date and time, the session name and the text. Press one to open that session.</li>
-      <li>Anything shown in the list counts as seen. Archive one with 🗄, or all at once with “Archive all”.</li>
-      <li><strong>Finished ones move to the archive automatically</strong>: when, after the notification, you sent something to that session, or the session ended, was archived or was deleted. The reason is shown in the archive section.</li>
+      <li><strong>🧭 Lead</strong>: the session tied to the branch. Only the lead writes the branch’s turn (🙋, 🤖, 💤, ✓).</li>
+      <li><strong>🤝 Helper</strong>: a session that helps the lead. Helpers write nothing to the tree. If the lead moves to another branch, its helpers move with it.</li>
+      <li>A branch with a lead shows “🧭 lead · 🤝 helpers” names on its row, and inside the branch’s frame the lead and helper session rows are listed under headings.</li>
+      <li><strong>Making a helper</strong>: press ↕ and drop the ⠿ of the session you want to help onto a branch with a lead (or onto the lead session’s row). A confirmation appears. For now this works only between your own sessions.</li>
+      <li><strong>Stopping / removing</strong>: “🤝 Stop helping” or “🧭 Take the lead off” in the branch’s ⋯. Dropping a session outside the tree’s frame with ↕ also removes it. A removed session goes back to its folder.</li>
+      <li>Even when the branch is closed, the lead session’s row is shown (helpers only as a count). Open it to see the helper rows too.</li>
+      <li>If there is a point where a part can be called “done” on its own, split it into a branch; if you are building one thing together, don’t split it, use a lead and helpers.</li>
+    </ul>
+  </div>
+</div>
+
+<h3>🙋 By turn</h3>
+<div class="shot">
+  <figure><img src="img/18-ball.png" alt="The By turn view. Your turn, AI working, Waiting (snoozed), Your turn (items of the tree), and Someone else’s turn"><figcaption>🙋 By turn. Everything sorted by whose turn it is</figcaption></figure>
+  <div class="side">
+    <p>Sessions and branches of work trees, sorted by <strong>whose turn it is</strong>. From the top: “Your turn”, “AI working”, “Waiting (snoozed)”, then “Your turn” for branches of trees. Things that are someone else’s turn, or nobody’s turn yet, are folded away.</p>
+    <ul>
+      <li>✓ marks one done; 💤 snoozes it after you choose how long. ⏰ wakes a snoozed one early.</li>
+      <li>Press a branch’s 🌳 to jump to that branch in the 🌳 Tree.</li>
+      <li>The number next to “Work” in the tabs is how many are your turn. When a notification arrives on your phone, look here.</li>
     </ul>
   </div>
 </div>
 
 <!-- ===================================================================== -->
 <h2 id="links">4. Linking sessions together</h2>
-<p>🔗 in the list links two sessions (for example, a sandbox Claude and a host Claude). Once linked, a message reaches the other side’s input box only when one Claude runs <code>talkto "…"</code>. It does not forward everything automatically. Claude can look up how to use it with <code>talkto --help</code>.</p>
+<p>🔗 in a session row’s ⋯ (or the chat’s ⋯) links two sessions (for example, a devbox Claude and a host Claude). Once linked, a message reaches the other side’s input box only when one Claude runs <code>talkto "…"</code>. It does not forward everything automatically. Claude can look up how to use it with <code>talkto --help</code>.</p>
 
 <!-- ===================================================================== -->
-<h2 id="where">5. Sandbox, host, root and Email: the differences</h2>
+<h2 id="where">5. devbox, mailbox, host and root: the differences</h2>
 
-<p>The kinds in the creation box differ in “where they run”. For everyday use you only need the <strong>sandbox</strong> (Claude, Codex, Shell (inside sandbox)).</p>
+<p>On the Start a session screen you choose what to run (Claude, Codex, Shell) and where to run it (devbox, mailbox, host, root, other machines) separately. Any combination can be started (for example, Claude on the host, Codex in the mailbox, Shell in the mailbox). For everyday use you only need the <strong>devbox</strong>; “Claude” × “devbox” is selected from the start. mailbox appears only on servers set up for it, and root only for people with a root-tier passkey.</p>
 
-<div class="diagram" role="img" aria-label="The sandbox and the Email box are separate containers on the server; host and root are outside the containers, and going outside needs a passkey">
+<div class="diagram" role="img" aria-label="The devbox and the mailbox are separate containers on the server; host and root are outside the containers, and going outside needs a passkey">
 <svg viewBox="0 0 760 330" xmlns="http://www.w3.org/2000/svg" font-size="13">
-  <text x="24" y="28" font-size="15" font-weight="600">Going outside the container (host, root, Email) needs a passkey</text>
+  <text x="24" y="28" font-size="15" font-weight="600">Going outside the devbox (mailbox, host, root) needs a passkey</text>
   <rect class="box" x="24" y="48" width="712" height="262" rx="10"/>
   <text x="40" y="72" font-weight="600">Server</text>
   <rect class="acc" x="48" y="92" width="300" height="96" rx="8"/>
-  <text x="64" y="118" font-weight="600">Sandbox (your own container)</text>
-  <text x="64" y="140" class="q" font-size="12">Claude / Codex / Shell (inside sandbox)</text>
+  <text x="64" y="118" font-weight="600">devbox (your own container)</text>
+  <text x="64" y="140" class="q" font-size="12">Claude / Codex / Shell</text>
   <text x="64" y="158" class="q" font-size="12">Sees only ~/sandhome</text>
   <text x="64" y="176" class="q" font-size="12">No passkey needed. Everyday use</text>
   <rect class="wrn" x="412" y="92" width="300" height="96" rx="8"/>
-  <text x="428" y="118" font-weight="600">Email box (another container)</text>
-  <text x="428" y="140" class="q" font-size="12">Email (only on servers set up for it)</text>
-  <text x="428" y="158" class="q" font-size="12">Sees only ~/mailbox. Hidden from sandbox</text>
+  <text x="428" y="118" font-weight="600">mailbox (another container)</text>
+  <text x="428" y="140" class="q" font-size="12">Claude / Codex / Shell. Only if set up</text>
+  <text x="428" y="158" class="q" font-size="12">Sees ~/mailbox and ~/sandhome. Hidden from devbox</text>
   <text x="428" y="176" class="q" font-size="12">🔑 Unlock with a host-tier passkey</text>
   <rect class="wrn" x="48" y="208" width="300" height="84" rx="8"/>
   <text x="64" y="234" font-weight="600">Host (outside container, as you)</text>
-  <text x="64" y="256" class="q" font-size="12">Shell (outside sandbox, host). Real home</text>
+  <text x="64" y="256" class="q" font-size="12">Claude / Codex / Shell. Real home</text>
   <text x="64" y="274" class="q" font-size="12">🔑 Unlock with a host-tier passkey</text>
   <rect class="wrn" x="412" y="208" width="300" height="84" rx="8"/>
   <text x="428" y="234" font-weight="600">Root (server admin rights)</text>
-  <text x="428" y="256" class="q" font-size="12">Shell (root, outside sandbox). If allowed</text>
+  <text x="428" y="256" class="q" font-size="12">Claude / Codex / Shell. If allowed</text>
   <text x="428" y="274" class="q" font-size="12">🔓 Unlock with a root-tier passkey</text>
 </svg>
 </div>
 
 <div class="scroll"><table>
-  <tr><th>Kind (as shown in the creation box)</th><th>Runs in</th><th>Can see</th><th>Passkey</th><th>Use it for</th></tr>
-  <tr><td><strong>Claude</strong> / Codex / Shell (inside sandbox)</td><td>Sandbox: your own private container</td><td>Only <code>~/sandhome</code></td><td>Not needed</td><td>All everyday development</td></tr>
-  <tr><td><strong>Email</strong></td><td>Email box: a container separate from the sandbox (only on servers set up for it)</td><td>Only <code>~/mailbox</code></td><td>🔑 host tier</td><td>Email, personal information and other things you don’t want in the development sandbox</td></tr>
-  <tr><td>Shell (outside sandbox, host)</td><td>The server itself, with your permissions</td><td>Your real home (<code>~/</code>) and more</td><td>🔑 host tier</td><td>Working with files outside the container</td></tr>
-  <tr><td>Shell (root, outside sandbox)</td><td>The server itself, as root</td><td>Everything</td><td>🔓 root tier</td><td>Server administration. Shown only to permitted people</td></tr>
+  <tr><th>Choice on the Start a session screen (what × where)</th><th>Runs in</th><th>Can see</th><th>Passkey</th><th>Use it for</th></tr>
+  <tr><td><strong>Claude</strong> / Codex / Shell × <strong>devbox</strong></td><td>devbox: your own private container</td><td>Only <code>~/sandhome</code></td><td>Not needed</td><td>All everyday development</td></tr>
+  <tr><td>Claude / Codex / Shell × <strong>mailbox</strong></td><td>mailbox: a container separate from the devbox (only on servers set up for it)</td><td><code>~/mailbox</code> and <code>~/sandhome</code> (read-write)</td><td>🔑 host tier</td><td>Email, personal information and other things you don’t want in the devbox you develop in</td></tr>
+  <tr><td>Claude / Codex / Shell × host</td><td>The server itself, with your permissions</td><td>Your real home (<code>~/</code>) and more</td><td>🔑 host tier</td><td>Working with files outside the container</td></tr>
+  <tr><td>Claude / Codex / Shell × root</td><td>The server itself, as root</td><td>Everything</td><td>🔓 root tier</td><td>Server administration. Shown only to permitted people</td></tr>
 </table></div>
 
 <ul>
-  <li><strong>Why the sandbox is for everyday use</strong>: inside the container, whatever Claude runs cannot reach beyond your <code>~/sandhome</code>. That is why it is safe to skip permission prompts.</li>
-  <li><strong>Why the Email box is separate</strong>: in the sandbox, other people’s packages pulled in by <code>npm install</code> also run. If you put information like email there, they could read it too. The Email box is a separate container invisible from the sandbox, and its conversation records also stay on the <code>~/mailbox</code> side.</li>
-  <li>If you pick another machine connected over ssh in the machine selector, you can use Claude and shells on that machine too. It does not share files with the sandbox (<a href="#machines">Chapter 9</a>).</li>
-  <li>In the list, the icon before the name tells you the kind: 🛠️ sandbox, 📫 Email, 🏠 host, 🔒 root, 💻 another machine.</li>
+  <li><strong>Why the devbox is for everyday use</strong>: inside the container, whatever Claude runs cannot reach beyond your <code>~/sandhome</code>. That is why it is safe to skip permission prompts.</li>
+  <li><strong>Why the mailbox is separate</strong>: in the devbox, other people’s packages pulled in by <code>npm install</code> also run. If you put information like email there, they could read it too. The mailbox is a separate container invisible from the devbox, and its conversation records also stay on the <code>~/mailbox</code> side. The other way round, the mailbox can read and write <code>~/sandhome</code>, so files can be handed over to the devbox (anything from your mail you put in <code>~/sandhome</code> becomes readable from the devbox, so think before putting it there).</li>
+  <li>If you pick another machine connected over ssh under where to run it, you can use Claude and shells on that machine too. It does not share files with the devbox (<a href="#machines">Chapter 9</a>).</li>
+  <li>In the list, the icon before the name tells you where it runs: 🛠️ devbox, 📫 mailbox, 🏠 host, 🔒 root, 💻 another machine.</li>
 </ul>
 
 <!-- ===================================================================== -->
 <h2 id="settings">6. The Settings screen and logging in to Claude</h2>
 
-<p>Before using Claude for the first time, log in to Claude <strong>once for each place you use it</strong>. The sandbox, host, root and other machines each have separate login information. Only the Email box has no row on the Settings screen; you log in <a href="#passkey">inside the box</a>.</p>
+<p>Before using Claude for the first time, log in to Claude <strong>once for each place you use it</strong>. The steps for the devbox are in <a href="basic.html#login">“Logging in to Claude” in Basics</a>. This chapter covers the other places and the other cards in Settings.</p>
 
 <div class="shot">
-  <figure><img src="../img/07-settings.png" alt="The Settings screen. Under the Accounts heading are rows for inside sandbox, outside sandbox (host) and root, each with Log in and Log out buttons"><figcaption>The Settings screen. Each row shows the account logged in. Next to the heading is the display language selector</figcaption></figure>
+  <figure><img src="img/07-settings.png" alt="The Settings tab. Display (Language) and AI logins, with rows for each place (devbox, host, Root, other hosts) under Claude and Codex"><figcaption>The Settings tab. Each row shows the account logged in, or “Not logged in”</figcaption></figure>
   <div class="side">
     <h3>How to open it</h3>
-    <p>Choose <strong>Settings</strong> in the machine selector on the top screen (the <code>server</code> field). To go back, choose <code>server</code> (this server) again in the same field.</p>
-    <h3>How to log in</h3>
-    <ol class="steps">
-      <li>Press <strong>Log in</strong> on the <strong>inside sandbox</strong> row under “Accounts” (or on the row for the host or another machine if you use those). A chat screen for logging in opens.</li>
-      <li>A URL appears in the chat; tap it to open it in the browser and approve with your Claude account.</li>
-      <li>Copy the code shown, paste it into the chat’s input box and press <strong>Run</strong>. <strong>The pasted code is not shown on screen</strong>, and that is normal.</li>
-      <li>A single line saying success or failure appears, and the login session disappears automatically. Once the row on the Settings screen shows your email address, you are done.</li>
-    </ol>
+    <p>Press <strong>Settings</strong> in the tabs at the top of the screen.</p>
+    <h3>Logging in for each place</h3>
     <ul>
-      <li>Where a row says “Not logged in” (in yellow), Claude does not work in that place.</li>
-      <li>The <strong>Codex</strong> columns use the same procedure (with a ChatGPT account).</li>
-      <li>⟳ next to the heading refreshes the status.</li>
-      <li>The selector next to the heading changes the <strong>Language</strong> (日本語, English, 简体中文). Your choice is saved, and other devices get the same once you log in there. You can also choose it at the bottom of the login screen.</li>
-      <li><strong>👥 Everyone's logins</strong> at the very bottom shows, for everyone on this server, which Claude and ChatGPT accounts they are logged in to and where (view only). Root logins are shown only to people who have root unlocked.</li>
-      <li><strong>Kill Chrome</strong> just above it is a button that stops your own test browser (headful Chrome). Feel free to press it when things get slow. It starts again automatically next time it is used.</li>
+      <li>The <strong>AI logins</strong> card has a row for each place under the <strong>Claude</strong> and <strong>Codex</strong> headings. Every row has <strong>Log in</strong> and <strong>Log out</strong>, and the steps are the same as for the devbox (open the URL, approve, and paste the code into the chat).</li>
+      <li><strong>devbox</strong>: the Claude used by everyday sessions (🛠️). Do this one first.</li>
+      <li><strong>host</strong>: the Claude used by host sessions (🏠). A separate login from the devbox.</li>
+      <li><strong>root</strong>: the Claude used by root sessions (🔒). The row appears only for people allowed root (<a href="#root">Chapter 8</a>).</li>
+      <li><strong>Other hosts</strong>: the Claude on each other machine connected over ssh (💻). Rows appear only for machines that can be reached. If several people share an account on that machine, logging in or out affects everyone who uses that machine.</li>
+      <li>The <strong>mailbox</strong> Claude has no row in Settings. You log in <a href="#passkey">inside the mailbox</a>.</li>
+      <li>For the <strong>Codex</strong> rows, you <strong>enter the code</strong> shown in the AI-za chat on the page the URL opens (the reverse of Claude). It uses a ChatGPT account.</li>
+      <li>Where a row says “Not logged in” (in yellow), the AI does not work in that place. ⟳ refreshes all the rows.</li>
+      <li><strong>🧑‍🤝‍🧑 Everyone's logins</strong> at the bottom of the card shows, for everyone on this server, which Claude and ChatGPT accounts they are logged in to and where (view only). Root logins are shown only to people who have root unlocked.</li>
+    </ul>
+    <h3>The other cards</h3>
+    <ul>
+      <li><strong>Display</strong>: the display language (日本語, English, 简体中文). Your choice is saved, and other devices get the same once you log in there. You can also choose it at the bottom of the login screen.</li>
+      <li><strong>Read-aloud and voice</strong>: the voice and speed for reading replies aloud and for voice mode. “Settings” in the microphone’s menu also brings you here.</li>
+      <li><strong>Notifications</strong>: whether to notify this device. This is set per device.</li>
+      <li><strong>Server-specific cards</strong>: some servers add a card of their own settings.</li>
+      <li><strong>Account</strong>: log out.</li>
     </ul>
   </div>
 </div>
 
 <!-- ===================================================================== -->
-<h2 id="passkey">7. Email and registering a passkey (key)</h2>
+<h2 id="passkey">7. mailbox and registering a passkey (key)</h2>
 
-<p>When going outside the container, as with Email, host and root, you unlock with a <strong>passkey</strong> (a key protected by your phone’s fingerprint or face recognition, or your PC’s PIN). This is so that even if your aigw login is stolen, nobody can get outside without the device in your hands.</p>
+<p>When going outside the devbox, as with mailbox, host and root, you unlock with a <strong>passkey</strong> (a key protected by your phone’s fingerprint or face recognition, or your PC’s PIN). This is so that even if your AI-za login is stolen, nobody can get outside without the device in your hands.</p>
 
 <h3>Registering a passkey (the first time)</h3>
 <ol class="steps">
   <li>Log in to the server by SSH from a PC (<a href="basic.html#account">Basics, Chapter 1</a>). On servers that accept SSH only from the internal network, get onto the internal network first.<pre><code>ssh &lt;username&gt;@&lt;server&gt;
-aigw-passkey register</code></pre></li>
-  <li>A URL is shown. <strong>Within 5 minutes</strong>, open it in the browser of the device where you want the passkey (such as the phone you normally use aigw on). This URL can be opened from outside too (only SSH needs the internal network).</li>
+aiza-passkey register</code></pre></li>
+  <li>A URL is shown. <strong>Within 5 minutes</strong>, open it in the browser of the device where you want the passkey (such as the phone you normally use AI-za on). This URL can be opened from outside too (only SSH needs the internal network).</li>
   <li>On the “Passkey registration” page, press <strong>Register a passkey</strong> and confirm with fingerprint, face recognition or PIN.</li>
   <li>When the completion message appears, you are done. To add more devices, repeat the same steps on each device.</li>
 </ol>
-<div class="note">Passkeys are per server. If you also use another server, register there too. See the registered ones with <code>aigw-passkey list</code> and the current status with <code>aigw-passkey status</code>.</div>
+<div class="note">Passkeys are per server. If you also use another server, register there too. See the registered ones with <code>aiza-passkey list</code> and the current status with <code>aiza-passkey status</code>.</div>
 
-<h3>Using Email</h3>
-<div class="shot">
-  <figure><img src="../img/08-email-bar.png" alt="Email chosen in the creation box. The folder is Email and the resume field is New"><figcaption>Email chosen in the creation box</figcaption></figure>
-  <div class="side">
+<h3>Using the mailbox</h3>
+<div>
+  <div>
     <ol class="steps">
-      <li>Choose <strong>Email</strong> in the creation box (it exists only on servers set up for it). The folder starts at your <code>~/mailbox</code>, and as with Claude you can pick a folder below it or create one with <code>＋</code>.</li>
+      <li>On the Start a session screen (<a href="basic.html#coding">Basics</a>), choose <strong>Claude</strong> for what to run and <strong>mailbox</strong> for where (mailbox exists only on servers set up for it). The working directory starts at your <code>~/mailbox</code>, and as with Claude you can pick a directory below it or create one with <code>＋</code>.</li>
       <li>Press <strong>Start</strong> and your device’s passkey confirmation appears. Confirm with your fingerprint or similar, and 🔑 appears at the top right, you are unlocked, and the session starts.</li>
-      <li><strong>Only for your first Email session</strong>, the Claude inside the box asks you to log in. Open the screen panel with 🖥️, choose the login method (your Claude account) with <kbd>↑</kbd> <kbd>↓</kbd> <kbd>⏎</kbd> in the key row, open the URL that appears and approve, then paste the code shown into the input box and press <strong>Run</strong>. If you are then asked whether it is OK to skip permission prompts, choose the option that agrees. This does not appear from the second time on.</li>
-      <li>From then on, use it just like the sandbox Claude. <code>~/mailbox</code> starts empty, so prepare the tools you want (scripts to read mail, etc.) yourself or by asking Claude.</li>
+      <li><strong>Only for your first Claude session in the mailbox</strong>, the Claude inside the mailbox asks you to log in. Open the screen panel with 🖥️, choose the login method (your Claude account) with <kbd>↑</kbd> <kbd>↓</kbd> <kbd>⏎</kbd> in the key row, open the URL that appears and approve, then paste the code shown into the input box and press <strong>Run</strong>. If you are then asked whether it is OK to skip permission prompts, choose the option that agrees. This does not appear from the second time on.</li>
+      <li>From then on, use it just like the devbox Claude. <code>~/mailbox</code> starts empty, so prepare the tools you want (scripts to read mail, etc.) yourself or by asking Claude.</li>
     </ol>
     <ul>
       <li>Unlocking lasts until you lock it or <strong>2 hours</strong> pass.</li>
-      <li>Tap the 🔑 at the top right to lock immediately. If you open an Email session while locked, a “🔒 … Unlock” banner appears; tap it to unlock.</li>
-      <li>The Email box cannot be seen by the sandbox Claude. Conversely, do not give instructions that carry Email content out into the sandbox.</li>
+      <li>Tap the 🔑 at the top right to lock immediately. If you open a mailbox session while locked, a “🔒 … Unlock” banner appears; tap it to unlock.</li>
+      <li>The mailbox cannot be seen by the devbox Claude. Conversely, do not give instructions that carry mailbox content out into the devbox.</li>
     </ul>
   </div>
 </div>
@@ -285,14 +321,14 @@ aigw-passkey register</code></pre></li>
 
 <p>Root (administrator rights on the server) is available <strong>only to people the administrator has permitted</strong>. There are two routes, and both require action by you yourself.</p>
 
-<h3>Using aigw’s “Shell (root, outside sandbox)”</h3>
+<h3>Using the “root” place in AI-za</h3>
 <ol class="steps">
-  <li>Ask the administrator. The administrator runs the following on the server and gives you the URL it shows.<pre><code>sudo aigw-passkey register &lt;username&gt; --tier root</code></pre></li>
-  <li><strong>Within 5 minutes</strong>, open the URL you received in your own device’s browser and press <strong>Register a passkey</strong>. This is your root-tier passkey (it can also unlock host and Email).</li>
-  <li>Reload aigw and <strong>Shell (root, outside sandbox)</strong> appears in the creation box. Choose it, press <strong>Start</strong> and confirm with your passkey; the top right turns to 🔓 and a root shell opens.</li>
-  <li>To use Claude in the root shell, log in to Claude on the <strong>root</strong> row of the Settings screen (<a href="#settings">Chapter 6</a>).</li>
+  <li>Ask the administrator. The administrator runs the following on the server and gives you the URL it shows.<pre><code>sudo aiza-passkey register &lt;username&gt; --tier root</code></pre></li>
+  <li><strong>Within 5 minutes</strong>, open the URL you received in your own device’s browser and press <strong>Register a passkey</strong>. This is your root-tier passkey (it can also unlock host and mailbox).</li>
+  <li>Reload AI-za and <strong>root</strong> appears under where to run it on the Start a session screen. Choose “Shell” and “root”, press <strong>Start</strong> and confirm with your passkey; the top right turns to 🔓 and a root shell opens.</li>
+  <li>To use Claude as root (choose “Claude” and “root”), log in to Claude on the <strong>root</strong> row under “Claude” in “AI logins” in Settings (<a href="#settings">Chapter 6</a>).</li>
 </ol>
-<div class="warn"><strong>Locking does not stop work inside the root shell.</strong> When the window closes it just becomes invisible from aigw; next time you unlock you can return to the same screen.</div>
+<div class="warn"><strong>Locking does not stop work inside the root shell.</strong> When the window closes it just becomes invisible from AI-za; next time you unlock you can return to the same screen.</div>
 
 <h3>Using <code>sudo</code> over SSH</h3>
 <p>People allowed to use <code>sudo</code> on the server can log in by SSH and use <code>sudo</code>. The administrator decides who is allowed.</p>
@@ -300,23 +336,23 @@ aigw-passkey register</code></pre></li>
 <!-- ===================================================================== -->
 <h2 id="machines">9. Other machines and the Windows machines board</h2>
 
-<p>If there are other machines connected to the server over ssh (such as Windows machines with GPUs), they are listed in the machine selector (the <code>server</code> field). Choose one and the list and creation box become that machine’s, and you can run Claude and shells on that machine. Machines that can’t be reached (powered off, etc.) don’t appear.</p>
+<p>If there are other machines connected to the server over ssh (such as Windows machines with GPUs), they are listed under where to run it on the Start a session screen. Choose one and you can run Claude and shells on that machine. Machines that can’t be reached (powered off, etc.) don’t appear.</p>
 <ul>
-  <li>On Windows machines, you can choose the working drive and folder (<code>C:</code>, <code>D:</code> …) in the creation box. You can also choose to continue an earlier conversation.</li>
+  <li>On Windows machines, you can choose the working drive and directory (<code>C:</code>, <code>D:</code> …) on the Start a session screen. You can also choose to continue an earlier conversation.</li>
   <li>The 🐚/🪟 toggle chooses between no screen (🐚) and the logged-on desktop (🪟, for running apps with a screen).</li>
-  <li>Sessions on other machines are marked 💻 in the list.</li>
+  <li>Sessions on other machines are marked 💻 on their row, with 🖥 and the machine name on the second line.</li>
 </ul>
 
 <h3>The Windows machines board</h3>
 <div class="shot">
-  <figure><img src="img/15-board.png" alt="The Windows machines board. For each machine, who is using it and which session, what they are doing and the status (In use, No activity for 30+ min, Ended)"><figcaption>The board, opened with 📋 (names are mock data)</figcaption></figure>
+  <figure><img src="img/15-board.png" alt="The Windows machines board. For each machine, who is using it and which session, the status (In use, Unreachable) and “＋ Use”"><figcaption>The board, opened with 🖥 Machines at the very bottom (names are mock data)</figcaption></figure>
   <div class="side">
-    <p>Windows machines are shared by several people, so there is a board showing “which one is being used by whose session”. Open it with 📋 at the top of the screen. <strong>People and Claude only need to look at the board before using a machine; there is no need to write on it.</strong></p>
+    <p>Windows machines are shared by several people, so there is a board showing “which one is being used by whose session”. Open it with <strong>🖥 Machines</strong> at the very bottom of the 🌳 Tree in Work. <strong>People and Claude only need to look at the board before using a machine; there is no need to write on it.</strong></p>
     <ul>
-      <li><strong>auto</strong>: aigw sessions running on that Windows machine are listed automatically.</li>
-      <li><strong>SSH, auto</strong>: if you connect to a Windows machine with <code>ssh</code>, <code>scp</code>, <code>sftp</code> or <code>rsync</code> from inside a sandbox or host session, that is listed automatically too. When the connection ends it becomes “Ended (SSH closed)”.</li>
+      <li><strong>auto</strong>: AI-za sessions running on that Windows machine are listed automatically.</li>
+      <li><strong>SSH, auto</strong>: if you connect to a Windows machine with <code>ssh</code>, <code>scp</code>, <code>sftp</code> or <code>rsync</code> from inside a devbox or host session, that is listed automatically too. When the connection ends it becomes “Ended (SSH closed)”.</li>
       <li>Checked every 3 minutes: sessions that stopped or fell over show “Ended”, and ones with no chat activity for 30 minutes or more show “No activity for 30+ min”.</li>
-      <li>Only if you want to leave a note about what you are doing, you can add one with ✏️ or write an entry by hand with “＋ Use” (a hand-written entry stays until you “Remove” it yourself). From inside a session, <code>aigw-board</code> shows the board.</li>
+      <li>Only if you want to leave a note about what you are doing, you can add one with ✏️ or write an entry by hand with “＋ Use” (a hand-written entry stays until you “Remove” it yourself). From inside a session, <code>aiza-board</code> shows the board.</li>
       <li>Look at the board before using a machine, and if someone is using it, talk to them.</li>
     </ul>
   </div>
@@ -326,16 +362,16 @@ aigw-passkey register</code></pre></li>
 <h2 id="faq">10. Troubleshooting</h2>
 <div class="scroll"><table>
   <tr><th>Symptom</th><th>What to do</th></tr>
-  <tr><td>Can’t find a session</td><td>It may be inside a folder. Tap a folder row to open it. Sometimes a folder accidentally gets dropped on another folder and ends up inside it. Look in the archive too (<a href="#folders">Chapter 1</a>)</td></tr>
-  <tr><td>Email or the host shell asks to “unlock” and won’t proceed</td><td>Check that you registered a passkey, and on that device (<a href="#passkey">Chapter 7</a>). If a locked banner is shown, tap it</td></tr>
-  <tr><td>The name shows as 🔒</td><td>Email, host and root sessions hide their names until unlocked. Unlock from the banner above the list</td></tr>
-  <tr><td>Claude doesn’t reply, or asks you to log in</td><td>On the Settings screen, check whether that location’s row says “Not logged in”, and log in (<a href="#settings">Chapter 6</a>)</td></tr>
-  <tr><td>Another machine doesn’t appear in the machine selector</td><td>That machine can’t be reached (power, network). Ask your administrator</td></tr>
-  <tr><td>Want to know whether someone is using a Windows machine</td><td>Look at the 📋 board (<a href="#machines">Chapter 9</a>)</td></tr>
-  <tr><td>Too many notifications</td><td>“Archive all” in the 🔔 list. Finished ones move there automatically (<a href="#notifications">Chapter 3</a>)</td></tr>
+  <tr><td>Can’t find a session</td><td>It may be inside a folder or under a branch of a work tree. Tap a folder row to open it. Stopped sessions appear when you tick “Stopped sessions too”. Also check that “Show” is set to “All”. Look in the archive too (<a href="#folders">Chapter 1</a>)</td></tr>
+  <tr><td>A mailbox or host session asks to “unlock” and won’t proceed</td><td>Check that you registered a passkey, and on that device (<a href="#passkey">Chapter 7</a>). If a locked banner is shown, tap it</td></tr>
+  <tr><td>The name shows as 🔒</td><td>mailbox, host and root sessions hide their names until unlocked. Unlock from the banner above the list</td></tr>
+  <tr><td>Claude doesn’t reply, or asks you to log in</td><td>On the Settings screen, check whether that location’s row says “Not logged in” (in yellow), and log in (<a href="#settings">Chapter 6</a>)</td></tr>
+  <tr><td>Another machine doesn’t appear under where to run it</td><td>That machine can’t be reached (power, network). Ask your administrator</td></tr>
+  <tr><td>Want to know whether someone is using a Windows machine</td><td>Look at the board under 🖥 Machines at the very bottom (<a href="#machines">Chapter 9</a>)</td></tr>
+  <tr><td>Too many notifications</td><td>In 🙋 By turn, mark finished ones done with ✓ and snooze ones that can wait with 💤 (<a href="#tree">Chapter 3</a>). If you don’t want them on this device, turn off “Notifications” in Settings</td></tr>
   <tr><td>Not sure about basic operations</td><td><a href="basic.html#faq">“Troubleshooting” in Basics</a></td></tr>
 </table></div>
-<footer>aigw Tutorial · Advanced · 2026-11-06 · Screenshots taken at phone width. Usernames, machine names and the like have been replaced, or the screenshots were taken of the same screens with mock data</footer>
+<footer>AI-za Tutorial · Advanced · 2026-11-27 · Screenshots taken at phone width. Usernames, machine names and the like have been replaced, or the screenshots were taken of the same screens with mock data</footer>
 </div>
 </body>
 </html>

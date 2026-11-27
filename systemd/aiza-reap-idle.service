@@ -1,0 +1,6 @@
+[Unit]
+Description=Stop idle per-user aiza backend instances (aiza-backend@*)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/aiza-reap-idle

@@ -1,4 +1,4 @@
-"""The page's extension registry, static/ext.js (window.aigwExt, ext/README.md):
+"""The page's extension registry, static/ext.js (window.aizaExt, ext/README.md):
 what app.js asks it at its extension points. No DOM: runs in node.
 
     python3 -m unittest discover -s tests -v
@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parent.parent
 RUN = r"""
 global.window = {};
 require(process.argv[1]);
-const x = window.aigwExt;
+const x = window.aizaExt;
 const out = {};
 out.empty = { folders: x.folders(), folderOf: x.folderOf({ group: "g" }), back: x.back(),
               link: x.linkHandler("https://h/e/"), todoRows: x.todoRows({ id: "s" }) };

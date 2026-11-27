@@ -11,7 +11,8 @@ from test_shared_search import B
 class NotifyApiTest(unittest.TestCase):
     def setUp(self):
         self.saved = {n: getattr(B, n) for n in ("container_ip", "box_ip", "MAILBOX", "NOTIFY_RATE")}
-        B.container_ip = lambda: "172.17.0.5"
+        self.started = []
+        B.container_ip = lambda start=True: self.started.append(start) or "172.17.0.5"
         B.box_ip = lambda name: {"mail": "172.17.0.9"}[name]
         B.MAILBOX = {"container_name": "mail"}
         B._notify_peers.clear()
@@ -28,6 +29,23 @@ class NotifyApiTest(unittest.TestCase):
         self.assertEqual(B.notify_peer_kind("172.17.0.9"), "mail")
         self.assertIsNone(B.notify_peer_kind("172.17.0.7"))
 
+    def test_an_old_address_is_looked_up_again(self):
+        # the leak review's C1 (2026-11-25): our devbox stopped, its address went to another user's box
+        self.assertEqual(B.notify_peer_kind("172.17.0.5"), "devbox")
+        asked = []
+        B.container_ip = lambda start=True: asked.append(start) or "10.89.0.20"   # ours now has another address
+        self.assertEqual(B.notify_peer_kind("172.17.0.5"), "devbox")      # still fresh: no new lookup
+        self.assertEqual(asked, [])
+        for e in B._notify_peers.values():
+            e["ts"] -= B.NOTIFY_PEER_REFRESH_SEC + 1
+        self.assertIsNone(B.notify_peer_kind("172.17.0.5"))              # stale: looked up, no longer ours
+        self.assertEqual(asked, [False])                                  # looked up without starting the devbox
+        self.assertEqual(B.notify_peer_kind("10.89.0.20"), "devbox")
+
+    def test_a_stopped_devbox_is_not_started_by_a_lookup(self):
+        self.assertIsNone(B.notify_peer_kind("172.17.0.7"))
+        self.assertEqual(self.started, [False])
+
     def test_no_mailbox_configured(self):
         B.MAILBOX = None
         self.assertIsNone(B.notify_peer_kind("172.17.0.9"))
@@ -36,7 +54,7 @@ class NotifyApiTest(unittest.TestCase):
     def test_payload(self):
         p = B.notify_payload({"title": "待ち", "message": "成立しました", "url": "/email/"})
         self.assertEqual((p["title"], p["message"], p["url"], p["session_id"]), ("待ち", "成立しました", "/email/", None))
-        self.assertEqual(B.notify_payload({"message": "x"})["title"], "aigw")
+        self.assertEqual(B.notify_payload({"message": "x"})["title"], "AI座")
         for bad in ({"message": ""}, {"message": "x", "url": "//evil.example/"}, {"message": "x", "url": "https://evil.example/"},
                     {"message": "x", "url": "/\\\\evil"}, {"message": "x" * 301}, {"message": "x", "title": "t" * 61},
                     {"message": 1}, []):
