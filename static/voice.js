@@ -221,7 +221,7 @@
     r.onerror = (e) => {
       if (e.error === "not-allowed" || e.error === "service-not-allowed") {
         voiceStop();
-        alert(t("voice.allow_microphone"));
+        ui.toast(t("voice.allow_microphone"), { error: true });
       }
     };
     // Chrome ends a continuous recognition now and then: start it again.
@@ -247,7 +247,7 @@
     return full;
   }
   function voiceStart() {
-    if (!SpeechRec) return alert(t("voice.use_chrome_or_edge_voice"));
+    if (!SpeechRec) return ui.toast(t("voice.use_chrome_or_edge_voice"), { error: true });
     voiceOn = true;
     voiceBtns.forEach((b) => b.classList.add("on"));
     voiceBarEl.hidden = false;

@@ -17,13 +17,13 @@
     if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
     // The whole site (the tabs' /work, /inbox, /settings; the gateway sends
     // Service-Worker-Allowed: /), the deployment notes.
-    const reg = await navigator.serviceWorker.register("/agents/sw.js", { scope: "/" });
+    const reg = await navigator.serviceWorker.register(window.aizaBase + "/agents/sw.js", { scope: window.aizaBase + "/" });
     // The one registered for /agents/ before: gone, with its push
     // subscription (the server drops a subscription the push service answers
     // 410 for), so a notification does not come twice.
     try {
       for (const r of await navigator.serviceWorker.getRegistrations()) {
-        if (new URL(r.scope).pathname === "/agents/") await r.unregister();
+        if (new URL(r.scope).pathname === window.aizaBase + "/agents/") await r.unregister();
       }
     } catch (e) { /* not this browser's: nothing to remove */ }
     const perm = await Notification.requestPermission();
@@ -57,7 +57,7 @@
       st.textContent = t("app.notify_unavailable");
       return;
     }
-    const reg = await navigator.serviceWorker.getRegistration("/work").catch(() => null);
+    const reg = await navigator.serviceWorker.getRegistration(window.aizaBase + "/work").catch(() => null);
     const sub = reg && await reg.pushManager.getSubscription().catch(() => null);
     notifyOnEl.disabled = Notification.permission === "denied";
     notifyOnEl.checked = Notification.permission === "granted" && !!sub;
@@ -68,7 +68,7 @@
     try {
       if (notifyOnEl.checked) await setupPush();
       else {
-        const reg = await navigator.serviceWorker.getRegistration("/work");
+        const reg = await navigator.serviceWorker.getRegistration(window.aizaBase + "/work");
         const sub = reg && await reg.pushManager.getSubscription();
         if (sub) await sub.unsubscribe();
         try { localStorage.setItem("aiza-notify-off", "1"); } catch (e) {}
@@ -138,7 +138,7 @@
   };
   function loadExtFile(name, file, kind) {
     return new Promise((resolve) => {
-      const url = `/agents/ext/${encodeURIComponent(name)}/${encodeURIComponent(file)}`;
+      const url = `${window.aizaBase}/agents/ext/${encodeURIComponent(name)}/${encodeURIComponent(file)}`;
       const el = kind === "css" ? document.createElement("link") : document.createElement("script");
       if (kind === "css") { el.rel = "stylesheet"; el.href = url; } else { el.src = url; el.async = false; }
       el.onload = () => resolve(true);
@@ -183,7 +183,7 @@
       return;
     }
     if (!me) {
-      location.href = "/agents/";
+      location.href = window.aizaBase + "/agents/";
       return;
     }
     setLoginReady();
@@ -270,18 +270,18 @@
     try {
       info = await api(`/issue?ref=${encodeURIComponent(ref)}`);
     } catch (e) {
-      alert(t("app.could_not_read_issue_err", { err: e.message }));
+      ui.toast(t("app.could_not_read_issue_err", { err: e.message }), { error: true });
       return;
     }
     if (info.sessions.length) {
-      if (!confirm(t("app.session_issue_already_running_open"))) return;
+      if (!(await ui.confirm(t("app.session_issue_already_running_open")))) return;
       const meta = (await refreshSessions()).find((s) => s.id === info.sessions[0]);
       if (meta) chatNow.open(meta);
       return;
     }
     const repo = info.ref.split("/")[1].split("#")[0];
     if (!info.cloned) {
-      alert(t("app.sandhome_repo_does_not_exist", { repo }));
+      ui.toast(t("app.sandhome_repo_does_not_exist", { repo }), { error: true });
       return;
     }
     const lines = [
@@ -301,34 +301,149 @@
     });
   }
 
-  // The desk (the deployment notes). From the other host, the report comes here
-  // (a simple fix to it is deployed by the desk's own tool once the tests pass)
-  // as #desk&t=<text>&ref=<host/user/kind/session> and is sent from this page.
-  // A deploy request (the desk's stage 4): one fixed it oneself and gives the
-  // commit; the desk's tool fetches it as this user and deploys it under the
-  // same rule as the bot's fixes (#desk&…&c=<{repo, sha}> from the other host).
-  async function deskReport({ session, ref, pos, text, commit } = {}) {
+  // The desk (the deployment notes): a popup with two ways in (2026-11-27, the
+  // user: 報告とデプロイ依頼は分けて…ポップアップに2つの口…コミットは番号で
+  // なくブランチ・プルリクを選ぶ) -- 📮 a report, 🚀 a deploy request naming
+  // a branch or an open pull request of the session's repository, which the
+  // backend resolves as this user (GET /desk/choices, POST /desk/report
+  // {kind, pick}). From the other host the report comes here as
+  // #desk&t=<text>&ref=<host/user/kind/session>[&pos][&c=<{repo, sha}>&l=<what>]
+  // (that host resolved the commit) and is sent from this popup.
+  // Nothing written is dropped without a word: closing keeps a draft (this
+  // browser), a refused send keeps the popup open with why.
+  const DESK_DRAFTS = "aiza-desk-drafts";
+  function deskDrafts() {
+    try { return JSON.parse(localStorage.getItem(DESK_DRAFTS) || "{}") || {}; } catch (e) { return {}; }
+  }
+  function deskDraftSet(key, v) {
+    const d = deskDrafts();
+    if (v && v.text && v.text.trim()) d[key] = v; else delete d[key];
+    try { localStorage.setItem(DESK_DRAFTS, JSON.stringify(d)); } catch (e) { /* storage blocked: the popup keeps it while open */ }
+  }
+  let deskEl = null;
+  function deskBuild() {
+    if (deskEl) return deskEl;
+    deskEl = document.createElement("div");
+    deskEl.id = "desk-modal";
+    deskEl.className = "aiza-pop";
+    deskEl.hidden = true;
+    deskEl.innerHTML = `<div class="box" role="dialog" aria-modal="true">
+      <div class="desk-head"><span>📮 ${escapeHtml(t("app.desk_title"))}</span><button type="button" class="close" aria-label="close">✕</button></div>
+      <div class="desk-tabs"><button type="button" data-kind="report">📮 ${escapeHtml(t("app.desk_report_tab"))}</button><button type="button" data-kind="deploy">🚀 ${escapeHtml(t("app.desk_deploy_tab"))}</button></div>
+      <p class="desk-hint"></p>
+      <textarea class="desk-text" rows="5"></textarea>
+      <div class="desk-deploy"><label class="desk-pick-label"></label><select class="desk-pick"></select><p class="desk-pick-note"></p></div>
+      <p class="desk-err" hidden></p>
+      <div class="desk-actions"><span class="desk-keep">${escapeHtml(t("app.desk_closing_keeps_draft"))}</span><button type="button" class="desk-send">${escapeHtml(t("app.desk_send"))}</button></div>
+    </div>`;
+    document.body.appendChild(deskEl);
+    return deskEl;
+  }
+
+  function deskReport({ session, ref, pos, text, commit, label } = {}) {
+    const el = deskBuild();
+    const $ = (q) => el.querySelector(q);
     let c = null;
     try { c = commit ? JSON.parse(commit) : null; } catch (e) { c = null; }
-    const ask = t("app.send_desk_write_what_happened")
-      + (c && c.sha ? "\n\n" + t("app.deploy_request_commit_sha_in", { repo: c.repo || "", sha: String(c.sha).slice(0, 10) }) : "");
-    const v = prompt(ask, text || "");
-    if (!v || !v.trim()) return;
-    const body = { text: v.trim() };
-    if (session) {
-      body.session = session;
-      const cm = prompt(t("app.ask_deploy_give_sha_commit"), "");
-      if (cm === null) return;
-      if (cm.trim()) body.commit = cm.trim();
-    } else if (ref) { body.ref = ref; if (pos) body.pos = pos; if (c) body.commit = commit; }
-    const r = await api("/desk/report", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }).catch((e) => ({ error: e.message }));
-    if (r.error) { alert(t("app.could_not_send_desk_err", { err: r.error })); return; }
-    if (r.desk_url) { location.href = r.desk_url; return; }
-    alert(t("app.sent_desk_follow_under_ai"));
+    const key = session ? `s:${session}` : `r:${ref || ""}`;
+    const draft = deskDrafts()[key];
+    let kind = draft && draft.kind ? draft.kind : c ? "deploy" : "report";
+    let choices = null;   // GET /desk/choices, once, for a session
+    const textEl2 = $(".desk-text"), pickEl = $(".desk-pick"), errEl = $(".desk-err");
+    textEl2.value = draft ? draft.text : (text || "");
+    errEl.hidden = true;
+    const keep = () => deskDraftSet(key, { text: textEl2.value, kind });
+    function close() { keep(); el.hidden = true; el.onclick = null; }
+    function showKind() {
+      for (const b of el.querySelectorAll(".desk-tabs button")) b.classList.toggle("on", b.dataset.kind === kind);
+      $(".desk-hint").textContent = t(kind === "deploy" ? "app.desk_deploy_hint" : "app.desk_report_hint");
+      textEl2.placeholder = t(kind === "deploy" ? "app.desk_deploy_placeholder" : "app.desk_report_placeholder");
+      $(".desk-deploy").hidden = kind !== "deploy";
+      if (kind === "deploy") fillPick();
+    }
+    function fillPick() {
+      const note = $(".desk-pick-note"), lab = $(".desk-pick-label");
+      pickEl.replaceChildren();
+      if (c) {   // from the other host: that host resolved it
+        lab.textContent = t("app.desk_commit_from_other_host");
+        const o = document.createElement("option");
+        o.value = "c";
+        o.textContent = `${label ? label + " — " : ""}${c.repo || ""} ${String(c.sha || "").slice(0, 10)}`;
+        pickEl.appendChild(o);
+        pickEl.disabled = true;
+        note.textContent = "";
+        return;
+      }
+      pickEl.disabled = false;
+      lab.textContent = t("app.desk_pick_what");
+      if (!session) { note.textContent = t("app.desk_deploy_needs_session"); return; }
+      if (!choices) {
+        note.textContent = t("app.desk_reading_branches");
+        api(`/desk/choices?session=${encodeURIComponent(session)}`).then((r) => { choices = r; if (kind === "deploy" && !el.hidden) fillPick(); })
+          .catch((e) => { choices = { branches: [], pulls: [], note: e.message }; if (kind === "deploy" && !el.hidden) fillPick(); });
+        return;
+      }
+      const ph = document.createElement("option");
+      ph.value = ""; ph.textContent = t("app.desk_choose");
+      pickEl.appendChild(ph);
+      const group = (name, rows, mk) => {
+        if (!rows.length) return;
+        const g = document.createElement("optgroup");
+        g.label = name;
+        for (const r of rows) { const o = document.createElement("option"); [o.value, o.textContent] = mk(r); g.appendChild(o); }
+        pickEl.appendChild(g);
+      };
+      group(t("app.desk_pulls"), choices.pulls || [], (p) => [`pull:${p.number}`, `#${p.number} ${p.title} (${p.branch})`]);
+      group(t("app.desk_branches"), choices.branches || [], (b) => [`branch:${b.name}`,
+        `${b.name}${b.current ? " ★" : ""} — ${b.subject} (${b.sha.slice(0, 7)})`]);
+      note.textContent = [choices.note, choices.pulls_note].filter(Boolean).join(" ") || (choices.repo ? choices.repo : "");
+    }
+    async function send() {
+      const v = textEl2.value.trim();
+      errEl.hidden = true;
+      if (!v) { errEl.textContent = t("app.desk_write_something"); errEl.hidden = false; return; }
+      const body = { text: v, kind };
+      let what = "";
+      if (session) {
+        body.session = session;
+        if (kind === "deploy") {
+          const p = pickEl.value;
+          if (!p) { errEl.textContent = t("app.desk_choose_first"); errEl.hidden = false; return; }
+          body.pick = p.startsWith("pull:") ? { pull: Number(p.slice(5)) } : { branch: p.slice(7) };
+          what = pickEl.selectedOptions[0] ? pickEl.selectedOptions[0].textContent : "";
+          body.label = p.startsWith("pull:") ? `#${p.slice(5)}` : p.slice(7);
+        }
+      } else if (ref) {
+        body.ref = ref;
+        if (pos) body.pos = pos;
+        if (kind === "deploy") {
+          if (!c) { errEl.textContent = t("app.desk_deploy_needs_session"); errEl.hidden = false; return; }
+          body.commit = commit;
+        }
+      } else if (kind === "deploy") {
+        errEl.textContent = t("app.desk_deploy_needs_session"); errEl.hidden = false; return;
+      }
+      const btn = $(".desk-send");
+      btn.disabled = true;
+      const r = await api("/desk/report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }).catch((e) => ({ error: e.message }));
+      btn.disabled = false;
+      if (r.error) { errEl.textContent = t("app.could_not_send_desk_err", { err: r.error }); errEl.hidden = false; return; }
+      deskDraftSet(key, null);
+      el.hidden = true; el.onclick = null;
+      if (r.desk_url) { location.href = r.desk_url; return; }
+      ui.toast(kind === "deploy" ? t("app.desk_deploy_sent", { what }) : t("app.sent_desk_follow_under_ai"));
+    }
+    for (const b of el.querySelectorAll(".desk-tabs button")) b.onclick = () => { kind = b.dataset.kind; errEl.hidden = true; keep(); showKind(); };
+    $(".close").onclick = close;
+    $(".desk-send").onclick = send;
+    el.onclick = (e) => { if (e.target === el) close(); };
+    el.hidden = false;
+    showKind();
+    textEl2.focus();
   }
 
   async function applyHash() {
@@ -336,8 +451,8 @@
     if (hashId === "desk" || hashId.startsWith("desk&")) {
       setHash(""); // one-shot
       const q = new URLSearchParams(hashId.slice(5));
-      await deskReport({ ref: q.get("ref") || undefined, pos: q.get("pos") || undefined, text: q.get("t") || "",
-                         commit: q.get("c") || undefined });
+      deskReport({ ref: q.get("ref") || undefined, pos: q.get("pos") || undefined, text: q.get("t") || "",
+                   commit: q.get("c") || undefined, label: q.get("l") || undefined });
       return;
     }
     if (hashId.startsWith("issue=")) {
@@ -384,7 +499,7 @@
       // shared, or on the other host): say so rather than show the list as
       // if that was where the link led.
       setHash("");
-      alert(t("common.cannot_see_session_no_longer"));
+      ui.toast(t("common.cannot_see_session_no_longer"), { error: true });
     }
   }
 

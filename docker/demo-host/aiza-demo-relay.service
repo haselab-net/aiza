@@ -1,0 +1,45 @@
+[Unit]
+Description=aiza public demo: the only way out of the demo VM (Claude API with the real key, GitHub CONNECT)
+After=network-online.target sys-subsystem-net-devices-br-demo.device
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/sbin/aiza-demo-relay
+DynamicUser=yes
+StateDirectory=aiza-demo-relay
+LoadCredential=anthropic.key:/etc/aiza-demo/anthropic.key
+LoadCredential=relay.secret:/etc/aiza-demo/relay.secret
+LoadCredential=relay.json:/etc/aiza-demo/relay.json
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+# No capabilities, only IP and unix sockets, no devices, kernel or namespaces
+# (the public demo's audit L4, 2026-11-28). Where it may connect is the API's
+# and GitHub's names, checked in the code (their addresses change).
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+UMask=0077
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

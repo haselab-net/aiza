@@ -1,0 +1,51 @@
+#!/usr/bin/python3
+"""sandbox — the demo room's way into the caller's box (bind-mounted into the
+room's container by aiza-demo-vmctl; docker/demo-host/README.md).
+  sandbox [--stdin] exec [--stdin] [-it|-i|-t] -- <cmd> [args...]
+Runs <cmd> as the caller in the caller's own box, HOME=$HOME/sandhome.
+The other uses of the real `sandbox` (ip, ...) are refused."""
+import array, json, os, socket, sys
+
+SOCK = "/run/aiza-boxd/boxd.sock"
+
+
+def main(a):
+    stdin = tty = False
+    if a[:1] == ["--stdin"]:
+        stdin, a = True, a[1:]
+    if a[:1] != ["exec"]:
+        sys.exit("sandbox: only `sandbox exec` works in the demo")
+    a = a[1:]
+    while a and a[0] != "--":
+        f = a.pop(0)
+        if f == "--stdin" or f == "-i":
+            stdin = True
+        elif f == "-t":
+            tty = True
+        elif f == "-it" or f == "-ti":
+            stdin = tty = True
+        else:
+            a.insert(0, f)
+            break
+    if a[:1] == ["--"]:
+        a = a[1:]
+    if not a:
+        sys.exit("usage: sandbox exec [--stdin] [-it] -- <cmd>")
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.connect(SOCK)
+    msg = json.dumps({"argv": a, "tty": tty, "stdin": stdin}).encode() + b"\n"
+    s.sendmsg([msg], [(socket.SOL_SOCKET, socket.SCM_RIGHTS, array.array("i", [0, 1, 2]))])
+    buf = b""
+    while b"\n" not in buf:
+        x = s.recv(4096)
+        if not x:
+            sys.exit(125)
+        buf += x
+    r = json.loads(buf.split(b"\n", 1)[0])
+    if r.get("error"):
+        print("sandbox:", r["error"], file=sys.stderr)
+    sys.exit(r.get("exit", 125))
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

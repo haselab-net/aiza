@@ -1,0 +1,121 @@
+#!/usr/bin/python3
+"""aiza-demo-vmctl — rooms and boxes in the demo VM (docker/demo-host/README.md). Run by
+the demo host's door over ssh (forced command, as root via sudo):
+  start <room> <port> <seats>     stdin: {"key": <room key hex>, "seat_keys": {"demo1": ..., ...}}
+  stop <room>                     the room's container, boxes, box daemon and data
+  kick <room> <user>              that person's box and files
+  setup                           (at boot) the docker networks and the firewall
+"""
+import json, os, re, shutil, subprocess, sys
+
+DATA = "/var/lib/aiza-demo/rooms"
+ROOM_IMAGE = os.environ.get("ROOM_IMAGE", "aiza-room")
+SHIM = "/usr/local/lib/aiza-demo/sandbox"
+ROOM_RE, USER_RE = re.compile(r"^[a-f0-9]{12}$"), re.compile(r"^demo[1-8]$")
+
+
+def sh(*a, check=True):
+    return subprocess.run(a, check=check, capture_output=True, text=True)
+
+
+def setup():
+    for net, br in (("demo-rooms", "br-rooms"), ("demo-boxes", "br-boxes")):
+        if sh("docker", "network", "inspect", net, check=False).returncode:
+            sh("docker", "network", "create", "-o", f"com.docker.network.bridge.name={br}",
+               "-o", "com.docker.network.bridge.enable_icc=false", net)
+    rules = [
+        # boxes: only the relay on the demo host; rooms: nothing out (answers to the door only)
+        ("DOCKER-USER", "-i br-boxes -d 10.77.0.1 -p tcp --dport 3128 -j ACCEPT"),
+        ("DOCKER-USER", "-i br-boxes -j DROP"),
+        ("DOCKER-USER", "-i br-rooms -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT"),
+        ("DOCKER-USER", "-i br-rooms -j DROP"),
+        ("INPUT", "-i br-boxes -j DROP"),
+        ("INPUT", "-i br-rooms -j DROP"),
+    ]
+    for chain, r in reversed(rules):
+        if sh("iptables", "-C", chain, *r.split(), check=False).returncode:
+            sh("iptables", "-I", chain, "1", *r.split())
+
+
+MAX_ROOMS = 4      # the same limit as the door's: a second line if the door's key is misused
+
+
+def start(room, port, seats):
+    running = [d for d in os.listdir(DATA) if d != room] if os.path.isdir(DATA) else []
+    if len(running) >= MAX_ROOMS:
+        sys.exit(f"aiza-demo-vmctl: already {len(running)} rooms")
+    req = json.load(sys.stdin)
+    key, seat_keys = req["key"], req["seat_keys"]
+    assert re.fullmatch(r"[0-9a-f]{64}", key) and 20101 <= port <= 20199 and 1 <= seats <= 8
+    d = f"{DATA}/{room}"
+    os.makedirs(f"{d}/state", exist_ok=True)
+    for n in range(1, seats + 1):
+        h = f"{d}/home/demo{n}/sandhome"
+        os.makedirs(h, exist_ok=True)
+        for p in (f"{d}/home/demo{n}", h):
+            os.chown(p, 1000 + n, 1000 + n)
+            os.chmod(p, 0o750)
+    fd = os.open(f"{d}/demo_room_key", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.write(fd, (key + "\n").encode())
+    os.close(fd)
+    fd = os.open(f"{d}/seat-keys.json", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.write(fd, json.dumps({u: k for u, k in seat_keys.items() if USER_RE.match(u)}).encode())
+    os.close(fd)
+    sh("systemctl", "start", f"aiza-demo-boxd@{room}:{seats}.service")
+    sh("docker", "rm", "-f", f"room-{room}", check=False)
+    sh("docker", "run", "-d", "--name", f"room-{room}", "--network", "demo-rooms",
+       "-p", f"10.77.0.2:{port}:8878", "--restart", "unless-stopped",
+       "--memory", "2g", "--cpus", "2", "--pids-limit", "2048",
+       "--security-opt", "no-new-privileges", "--cap-drop", "ALL",
+       "--cap-add", "SETUID", "--cap-add", "SETGID", "--cap-add", "CHOWN", "--cap-add", "DAC_OVERRIDE",
+       "--cap-add", "FOWNER", "--cap-add", "KILL",
+       "-e", f"AIZA_DEMO_ROOM={room}", "-e", f"AIZA_DEMO_SEATS={seats}",
+       "-v", f"{d}/home:/home", "-v", f"{d}/state:/var/lib/aiza",
+       "-v", f"{d}/demo_room_key:/etc/aiza/demo_room_key.host:ro",
+       "-v", f"/run/aiza-demo/{room}:/run/aiza-boxd",
+       "-v", f"{SHIM}:/usr/local/bin/sandbox:ro",
+       "--label", f"aiza-demo-room={room}", ROOM_IMAGE)
+    print(f"room-{room} on 10.77.0.2:{port}")
+
+
+def boxes(room):
+    r = sh("docker", "ps", "-aq", "--filter", f"label=aiza-demo-room={room}")
+    return r.stdout.split()
+
+
+def stop(room):
+    ids = boxes(room)
+    if ids:
+        sh("docker", "rm", "-f", *ids, check=False)
+    sh("systemctl", "stop", f"aiza-demo-boxd@{room}:*.service", check=False)
+    shutil.rmtree(f"{DATA}/{room}", ignore_errors=True)
+    shutil.rmtree(f"/run/aiza-demo/{room}", ignore_errors=True)
+    print("stopped", room)
+
+
+def kick(room, user):
+    n = int(user[4:])
+    sh("docker", "rm", "-f", f"box-{room}-{n}", check=False)
+    h = f"{DATA}/{room}/home/{user}/sandhome"
+    if os.path.isdir(h):
+        shutil.rmtree(h, ignore_errors=True)
+        os.makedirs(h)
+        os.chown(h, 1000 + n, 1000 + n)
+        os.chmod(h, 0o750)
+    print("kicked", room, user)
+
+
+def main(a):
+    if a == ["setup"]:
+        return setup()
+    if len(a) == 4 and a[0] == "start" and ROOM_RE.match(a[1]) and a[2].isdigit() and a[3].isdigit():
+        return start(a[1], int(a[2]), int(a[3]))
+    if len(a) == 2 and a[0] == "stop" and ROOM_RE.match(a[1]):
+        return stop(a[1])
+    if len(a) == 3 and a[0] == "kick" and ROOM_RE.match(a[1]) and USER_RE.match(a[2]):
+        return kick(a[1], a[2])
+    sys.exit("usage: aiza-demo-vmctl start <room> <port> <seats> | stop <room> | kick <room> <user> | setup")
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

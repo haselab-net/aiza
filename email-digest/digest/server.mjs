@@ -115,9 +115,9 @@ const HELD_WHY = { 決まり: 'mail.held_why_rule' };
 const heldRow = (i, s) => { const p = PREP[i.id] || {}, title = p.title || p.subject || p.conv || i.id, link = heldLink(i), why = HELD_WHY[i.heldWhy] || 'mail.held_why_llm';
   return `
 <div class="it held ${i.source}" data-id="${esc(i.id)}" data-time="${esc(i.time || '')}"><div class="hd">${srcBadge(i.source)} <span class="tm">${esc((i.time || '').replace('T', ' ').slice(0, 16))}</span> <b>${esc(p.from || '')}</b> <span class="hb">${L('mail.held_x', { x: L(why) })}</span>${p.due ? ` <span class="due">${esc(p.due)}</span>` : ''}</div>
-<div class="tt">${link ? `<a href="${esc(link)}"${mobileAttr(i)} target="_blank">${esc(title)}</a>` : esc(title)}</div>${p.conv && p.title ? `<div class="hd">${esc(p.conv)}</div>` : ''}
+<div class="tt">${link ? `<a href="${esc(link)}"${mobileAttr(i)}${i.heldKept ? '' : ` onclick="heldOpened('${esc(i.id)}')"`} target="_blank">${esc(title)}</a>` : esc(title)}</div>${p.conv && p.title ? `<div class="hd">${esc(p.conv)}</div>` : ''}
 ${p.summary ? `<div class="sm">${esc(p.summary)}</div>` : ''}${p.action ? `<div class="ac">${L('mail.action_x', { x: esc(p.action) })}</div>` : ''}${p.newer ? `<div class="nt">${L('mail.held_newer_x', { x: esc(md(p.newer)) })}</div>` : ''}<div class="nt">${L(i.heldKept ? 'mail.kept_from_claude' : 'mail.held_note')}</div>
-<div class="bt"><button class="cl" onclick="heldAct('${esc(i.id)}','release',this)">${L('mail.give_to_claude')}</button>${i.heldKept ? '' : `<button onclick="heldAct('${esc(i.id)}','keep',this)">${L('mail.keep_from_claude')}</button>`}${ST.filter(x => x !== s).map(x => `<button onclick="st('${esc(i.id)}','${x}',this)">${L('mail.move_to_s', { s: Lv(x) })}</button>`).join('')}</div></div>`; };
+<div class="bt"><button class="cl" onclick="heldAct('${esc(i.id)}','release',this)">${L('mail.give_to_claude')}</button>${ST.filter(x => x !== s).map(x => `<button onclick="st('${esc(i.id)}','${x}',this)">${L('mail.move_to_s', { s: Lv(x) })}</button>`).join('')}</div></div>`; };
 // 関門がこの回の新着を Claude に渡さなかった(DATA/gate.json の withheld)。「決まりだけで進める」を出す
 const gateState = () => { try { return JSON.parse(fs.readFileSync(`${DATA}/gate.json`, 'utf8')); } catch { return {}; } };
 function gateBanner() {
@@ -129,7 +129,7 @@ const row = (i, s) => i.held ? heldRow(i, s) : `
 <div class="it ${i.source}"${i.id === 'misc:noaction' ? ' data-last="1"' : ''} data-id="${esc(i.id)}" data-time="${esc(i.time || '')}"><div class="hd">${srcBadge(i.source)} <span class="tm">${esc((i.time || '').replace('T', ' ').slice(0, 16))}</span> <b>${esc(i.from)}</b>${i.replied && i.status === '未読' ? ` <span class="rp" title="${L('mail.someone_else_replied_goes_away')}">${L('mail.reply')}</span>` : ''}${dueBadge(i)}</div>
 <div class="tt">${i.link ? `<a href="${esc(i.link)}"${mobileAttr(i)} target="_blank">${esc(i.title)}</a>` : esc(i.title)}</div>
 <div class="sm">${linkify(i.summary, i.refInfo)}</div>${i.action ? `<div class="ac">${L('mail.action_x', { x: esc(i.action) })}</div>` : ''}${i.note ? `<div class="nt">${L('mail.note_x', { x: esc(i.note) })}</div>` : ''}${prepLine(i)}${refList(i)}${waitBox(i)}${i.doneAsk && i.status === '既決' ? `<div class="wt">${L('mail.claude_decides_after_current_work')}</div>` : ''}
-<div class="bt"><button class="say" title="${L('mail.read_item_out_long_press')}" onclick="sayOne(this)">🔊</button><button class="cl" onclick="claude('${esc(i.id)}',this)">${L(i.session ? (i.session.deleted ? 'mail.continue_ai' : 'mail.open_ai') : 'mail.handle_ai')}</button>${waiting(i) ? `<button onclick="unwait('${esc(i.id)}',this)">${L('mail.stop_waiting')}</button>` : ''}${ST.filter(x => x !== s).map(x => `<button onclick="st('${esc(i.id)}','${x}',this)">${L('mail.move_to_s', { s: Lv(x) })}</button>`).join('')}</div></div>`;
+<div class="bt"><button class="cl" onclick="claude('${esc(i.id)}',this)">${L(i.session ? (i.session.deleted ? 'mail.continue_ai' : 'mail.open_ai') : 'mail.handle_ai')}</button>${waiting(i) ? `<button onclick="unwait('${esc(i.id)}',this)">${L('mail.stop_waiting')}</button>` : ''}${ST.filter(x => x !== s).map(x => `<button onclick="st('${esc(i.id)}','${x}',this)">${L('mail.move_to_s', { s: Lv(x) })}</button>`).join('')}</div></div>`;
 // まとめ項目の元のメッセージ(refs)を開閉できる一覧で出す(2026-11-05 ユーザー依頼)。
 // 差出人・件名は refInfo(add.mjs と ref-info.py が付ける)。無いものは URL だけ。新しい順
 function refList(i) {
@@ -175,7 +175,7 @@ button{background:#1f2933;color:#e6e6e6;border:1px solid #3a4654;border-radius:6
 .bt button{margin:6px 6px 0 0;font-size:.85em}.bt .cl{font-weight:600;background:#1f3a5c;border-color:#2f5a8c}.nt{font-size:.88em;color:#8fc8ff;margin-top:3px}.pp{font-size:.88em;color:#b6e3a8;margin-top:3px}.pp.old{opacity:.5}.none{color:#7d8894}.run{font-size:.8em;color:#9aa5b1;white-space:pre-wrap}
 .refs{font-size:.88em;margin-top:4px}.refs summary{color:#9aa5b1}.refs summary::before{content:'▶ '}.refs[open] summary::before{content:'▼ '}.refs ul{margin:4px 0;padding-left:1.2em;list-style:none}.refs li{margin:2px 0;padding-left:0}.refs .tm{color:#9aa5b1}
 .wt{font-size:.88em;color:#c9b6ff;margin-top:3px;padding:3px 6px;border-left:3px solid #6b5bb3}.wt.fired{color:#fff;background:#3a2f6b;border-color:#b39cff}
-.it.saying{border-color:#7cb7ff;box-shadow:0 0 0 2px #7cb7ff66}#sp,.bt .say{-webkit-touch-callout:none;user-select:none;-webkit-user-select:none;touch-action:manipulation}
+.it.saying{border-color:#7cb7ff;box-shadow:0 0 0 2px #7cb7ff66}#sp{-webkit-touch-callout:none;user-select:none;-webkit-user-select:none;touch-action:manipulation}
 .saypop{position:fixed;z-index:9;display:flex;flex-direction:column;gap:8px;padding:10px;background:#1f2933;border:1px solid #3a4654;border-radius:8px;box-shadow:0 4px 14px #0008;font-size:.9em;max-width:calc(100vw - 16px)}
 .saypop label{display:flex;align-items:center;gap:8px}.saypop select{flex:1;min-width:0;max-width:16em;background:#131a22;color:#e6e6e6;border:1px solid #3a4654;border-radius:6px;padding:3px}.saypop button{align-self:flex-end}.saypop .sl{font-weight:bold;opacity:.8}.saypop [hidden]{display:none}.saypop .sn{opacity:.8;font-size:.9em}.saypop .sn:empty{display:none}#spbar{position:sticky;top:0;z-index:1;background:#0b0f14;padding:4px 0}
 .it.held{border-color:#8c6d1f}.hb{display:inline-block;margin-left:6px;padding:0 6px;border-radius:4px;background:#5c4a12;color:#ffe9a8}.it.busy{opacity:.45;pointer-events:none}.it .mv{font-size:.85em;color:#ffb366;margin-top:4px}
@@ -223,16 +223,18 @@ async function quick(){document.getElementById('qc').disabled=true;document.getE
 qpoll(null);
 // 状態の変更はページを読み直さず、その場で項目を移す。既決のセッションの停止(aiza が Claude の終了を最大10秒待つ)は裏で進め、下に経過を出す(2026-10-22 ユーザー指摘)
 function toast(t,ms){const e=document.getElementById('toast');e.textContent=t;e.style.display=t?'block':'none';clearTimeout(e._t);if(ms)e._t=setTimeout(()=>e.style.display='none',ms)}
-async function unwait(id,btn){if(!confirm(L('mail.stop_waiting_2')))return;const r=await fetch(QB+'wait-clear',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id})});if(!r.ok)return alert(L('mail.failed_x',{x:r.status}));location.reload()}
-async function heldAct(id,act,btn){if(act==='release'&&!confirm(L('mail.give_to_claude_confirm')))return;btn.disabled=true;const r=await fetch(QB+'held',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id,act})}).catch(e=>({ok:false,status:e.message}));if(!r.ok){btn.disabled=false;return alert(L('mail.failed_x',{x:r.status}))}location.reload()}
-async function gateBypass(btn){if(!confirm(L('mail.go_on_rules_only_confirm')))return;btn.disabled=true;await fetch(QB+'gate-bypass',{method:'POST'});setTimeout(()=>qpoll('start'),1500)}
+async function unwait(id,btn){if(!await popConfirm(L('mail.stop_waiting_2')))return;const r=await fetch(QB+'wait-clear',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id})});if(!r.ok)return popToast(L('mail.failed_x',{x:r.status}),true);location.reload()}
+async function heldAct(id,act,btn){if(act==='release'&&!await popConfirm(L('mail.give_to_claude_confirm'),{danger:true}))return;btn.disabled=true;const r=await fetch(QB+'held',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id,act})}).catch(e=>({ok:false,status:e.message}));if(!r.ok){btn.disabled=false;return popToast(L('mail.failed_x',{x:r.status}),true)}location.reload()}
+// 保留の項目の元を開いたら、AI に渡さないと決めたことにする(2026-11-27 利用者「開いても渡さないと選んだと判断して」)。開くのは止めない
+function heldOpened(id){const el=document.querySelector('.it[data-id="'+CSS.escape(id)+'"]');if(el)el.querySelectorAll('.tt a[onclick]').forEach(a=>a.removeAttribute('onclick'));fetch(QB+'held',{method:'POST',keepalive:true,headers:{'content-type':'application/json'},body:JSON.stringify({id,act:'keep'})}).then(r=>{if(r.ok&&el)el.querySelectorAll('.nt').forEach(n=>{if(n.textContent===L('mail.held_note'))n.textContent=L('mail.kept_from_claude')})}).catch(()=>{})}
+async function gateBypass(btn){if(!await popConfirm(L('mail.go_on_rules_only_confirm'),{danger:true}))return;btn.disabled=true;await fetch(QB+'gate-bypass',{method:'POST'});setTimeout(()=>qpoll('start'),1500)}
 function bump(s,k){const n=document.querySelector('#g-'+s+' .n');if(n)n.textContent=Math.max(0,+n.textContent+k)}
 async function st(id,s,btn){
  const el=btn&&btn.closest('.it'),from=ITEMS[id]&&ITEMS[id].status;
  if(el){el.classList.add('busy');el.insertAdjacentHTML('beforeend','<div class="mv">'+L('mail.moving_s',{s:Lv(s)})+'</div>')}
  const live=s==='既決'?await liveSession(ITEMS[id]).catch(()=>null):null;
  const r=await fetch(QB+'status',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id,status:s,ask:!!live})}).catch(e=>({ok:false,status:e.message}));
- if(!r.ok){if(el){el.classList.remove('busy');el.querySelector('.mv').remove()}return alert(L('mail.failed_x',{x:r.status}))}
+ if(!r.ok){if(el){el.classList.remove('busy');el.querySelector('.mv').remove()}return popToast(L('mail.failed_x',{x:r.status}),true)}
  ITEMS[id].status=s;if(live)ITEMS[id].doneAsk=1;else delete ITEMS[id].doneAsk;
  if(live){toast(L('mail.asking_claude_decide_once_work'));
   askDone(id,live.id).then(()=>toast(L('mail.done_if_claude_decides_still'),5000)).catch(async e=>{toast(L('mail.could_not_reach_claude_so',{x:e.message}),8000);
@@ -288,6 +290,9 @@ http.createServer((req, res) => {
       try { const { id, status, ask } = JSON.parse(b); if (!ST.includes(status)) throw 0;
         const d = load(); const it = d.items.find(x => x.id === id); if (!it) throw 0;
         it.status = status; it.changed = new Date().toISOString(); it.byUser = true; delete it.replied;
+        // 保留の項目を欄へ移したら、AI に渡さないと決めたことにする(gate.py keep と同じ heldKept、JST。2026-11-27 利用者:
+        // 「渡さないボタン不要です。渡す以外を押したらその時点で、渡さないという判断をしたと扱ってください」)
+        if (it.held && !it.heldKept) it.heldKept = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 16);
         // ask: 生きている Claude セッションのある項目を既決にした。Claude が作業を終えて既決にしてよいか決めるまで、元の片付けとセッションの停止を待つ(2026-11-07 ユーザー依頼)
         if (status === '既決' && ask) it.doneAsk = new Date().toISOString(); else delete it.doneAsk;
         save(d); res.writeHead(200); res.end('ok');
@@ -296,7 +301,7 @@ http.createServer((req, res) => {
       } catch { res.writeHead(400); res.end('bad'); } });
     return;
   }
-  // 保留の項目の「Claudeに渡す」(release)・「渡さない」(keep)。拡張の held のコマンドを $ID に項目の id で動かし、終わるのを待つ
+  // 保留の項目の「AIに渡す」(release)と、元を開いたときの「渡さないと決めた」(keep。欄へ移したときは /status が heldKept を付ける)。拡張の held のコマンドを $ID に項目の id で動かし、終わるのを待つ
   if (req.method === 'POST' && path === '/held') {
     let b = ''; req.on('data', c => b += c); req.on('end', () => {
       let id, act; try { ({ id, act } = JSON.parse(b)); } catch {}

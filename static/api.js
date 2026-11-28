@@ -29,7 +29,7 @@
   // e.unlockTier, so ensureUnlocked() knows which tier to ask
   // aiza-unlockd's begin-assertion for instead of guessing.
   function api(path, opts) {
-    return fetch(`/agents/api${path}`, opts).then(async (r) => {
+    return fetch(`${window.aizaBase}/agents/api${path}`, opts).then(async (r) => {
       if (!r.ok) {
         const body = await r.json().catch(() => null);
         const err = new Error(body && body.error ? body.error : `${r.status}`);
@@ -42,6 +42,10 @@
           err.unlockTier = body.tier;
         }
         if (body && body.running_session) err.runningSession = body.running_session;
+        // POST /messages: stopped (nothing written or sent; the page resumes
+        // it and sends again), or just resumed but not up to take it in time.
+        if (body && body.stopped) err.stopped = true;
+        if (body && body.not_ready) err.notReadyWait = body.wait;
         throw err;
       }
       return r.json();
@@ -251,10 +255,10 @@
   // countdown: the label is now a single glyph, and it is also the tap
   // target for locking, so it needs to stay comfortably tappable on a
   // phone rather than shrinking to the size of the text it replaced.
-  unlockBadgeEl.style.cssText =
-    "margin-left: 8px; padding: 1px 8px; border-radius: 999px; border: 1px solid #b45309; " +
-    "background: #fffbeb; color: #92400e; font-size: 0.95rem; line-height: 1.4; " +
-    "white-space: nowrap; cursor: pointer;";
+  unlockBadgeEl.className = "unlock-badge";   // style.css
+  // align-self: #top-header stretches its children to the tabs' height
+  // (align-items: stretch, 2026-11-25), which made this badge as tall as the
+  // header (2026-11-27, the user: 鍵のアイコンが縦に大き過ぎる).
   topHeaderEl.appendChild(unlockBadgeEl);
 
   let unlockExpiresAt = null; // epoch seconds while unlocked, else null
@@ -354,7 +358,7 @@
       // ensureUnlocked() already calls updateUnlockBadge() -> updateUnlockNotice()
       // on success, so the banner hides itself; nothing further to do here.
     } catch (e) {
-      alert(e.message);
+      ui.toast(e.message, { error: true });
     } finally {
       unlockNoticeBtnEl.disabled = false;
     }
@@ -422,7 +426,7 @@
   }
 
   unlockBadgeEl.addEventListener("click", async () => {
-    if (!confirm(t("api.lock_root_host_now"))) return;
+    if (!(await ui.confirm(t("api.lock_root_host_now")))) return;
     await api("/unlock/lock", { method: "POST" }).catch(() => {});
     await pollUnlockStatus();
   });
@@ -452,7 +456,7 @@
   }
 
   function sessionApiUrl(sessionId, suffix, owner) {
-    return `/agents/api${sessionPath(sessionId, suffix, owner)}`;
+    return `${window.aizaBase}/agents/api${sessionPath(sessionId, suffix, owner)}`;
   }
 
   function fmtTime(ts) {

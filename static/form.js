@@ -186,6 +186,11 @@
   // applyHash() runs first): the <select>/presets are then brought in line
   // by syncMachineSelect() once it has.
   function selectMachine(m) {
+    // From the URL (#machine=…, anyone can send a link): only a machine
+    // name, and once the capabilities are in, only one of this backend's
+    // (2026-11-28); anything else is this host.
+    if (m !== "local" && (!MACHINE_NAME_RE.test(m)
+        || (knownMachines && !knownMachines.has(m)))) m = "local";
     if (m !== currentMachine) {
       setMachine(m);
       currentSshCwd = "";
@@ -196,6 +201,9 @@
   }
 
   let boardMachines = new Set();
+  // The ssh and Windows machines this backend has (null until the capabilities are in).
+  let knownMachines = null;
+  const MACHINE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
   // Exactly the Windows machine being looked at (if any) has an entry in
   // the machine menu, just above 「📋 黒板」.
   function syncBoardMachineOption(m) {
@@ -284,9 +292,13 @@
       presetEl.innerHTML = localPresetOptionsHtml;
       if (placeEl.value.startsWith("ssh:")) placeEl.value = "dev";
     } else {
-      presetEl.innerHTML =
-        `<option value="claude-tui-${currentMachine}">Claude</option>` +
-        `<option value="shell-${currentMachine}">Shell</option>`;
+      presetEl.textContent = "";
+      for (const [value, label] of [[`claude-tui-${currentMachine}`, "Claude"], [`shell-${currentMachine}`, "Shell"]]) {
+        const o = document.createElement("option");
+        o.value = value;
+        o.textContent = label;
+        presetEl.appendChild(o);
+      }
       if ([...placeEl.options].some((o) => o.value === `ssh:${currentMachine}`)) placeEl.value = `ssh:${currentMachine}`;
     }
     presetFromKindPlace();
@@ -340,8 +352,39 @@
   // reachable -- create_session/start_claude_login re-check reachability
   // themselves regardless.
   async function applyCapabilities() {
-    const caps = await api("/capabilities").catch(() => ({}));
+    let caps = await api("/capabilities").catch(() => ({}));
     document.getElementById("login-list-row").hidden = !caps.login_list;
+    if (caps.demo) {
+      // A public demo's room (the deployment notes): only the AI the demo offers,
+      // in one's own box (the backend refuses the rest as well). The rest
+      // of this function runs as on a deployment, with nothing else in caps.
+      const only = (caps.presets || []).filter((p) => typeof p === "string");
+      KIND_PLACE.agent = { dev: "agent" };   // the demo's AI: no folder to pick
+      const opts = () => only.map((p) => { const o = document.createElement("option"); o.value = p; o.textContent = t("form.demo_ai"); return o; });
+      kindEl.replaceChildren(...opts());
+      presetEl.replaceChildren(...opts());
+      for (const o of [...placeEl.options]) if (o.value !== "dev") o.remove();
+      const logins = document.getElementById("auth-rows");
+      if (logins && logins.closest(".set-card")) logins.closest(".set-card").hidden = true;
+      // Nothing else to offer, whatever the answer said.
+      caps = { ...caps, root_shell: false, unlock: null, login_list: false, mailbox: null,
+               ssh_machines: [], ssh_machines_drives: [], ssh_desktop: {}, board: false };
+      // The room's owner: the door's own page (invite, send someone out).
+      fetch(window.aizaBase + "/agents/demo/room").then((r) => (r.ok ? r.json() : null)).then((room) => {
+        if (!room || !room.door || document.getElementById("demo-room-card")) return;
+        const card = document.createElement("section");
+        card.className = "set-card";
+        card.id = "demo-room-card";
+        const h = document.createElement("h3");
+        h.textContent = t("form.demo_room");
+        const a = document.createElement("a");
+        a.href = room.door;
+        a.textContent = t("form.demo_room_invite");
+        card.append(h, a);
+        const section = document.getElementById("claude-auth-section");
+        if (section) section.prepend(card);
+      }).catch(() => {});
+    }
     // root_shell alone is "the root tmux socket exists right now", which
     // since the passkey unlock landed means "a window is open right now".
     // Keying the menu off only that made the root-shell option invisible
@@ -440,6 +483,7 @@
     // menu (2026-11-09, the user): only the one being looked at is listed,
     // so the menu shows it and picking this host goes back.
     boardMachines = new Set(caps.board !== false ? (caps.ssh_machines_drives || []) : []);
+    knownMachines = new Set([...(caps.ssh_machines || []), ...boardMachines]);
     for (const machine of caps.ssh_machines || []) {
       MACHINE_LABELS[machine] = machine;
       addSshAuthRow(machine);
@@ -599,7 +643,7 @@
   // (POST /workdirs, the deployment notes). Both trees -- the user asked for it
   // on Email, and the two pickers are meant to behave the same.
   document.getElementById("cwd-new").addEventListener("click", async () => {
-    const name = (prompt(t("form.name_new_folder")) || "").trim();
+    const name = ((await ui.ask(t("form.name_new_folder"), "")) || "").trim();
     if (!name) return;
     const scope = cwdScope;
     const parent = currentCwd;
@@ -609,7 +653,7 @@
       body: JSON.stringify({ scope, dir: parent, name }),
     });
     const r = await (scope === "mail" ? withUnlockRetry(post) : post()).catch((e) => ({ error: e.message }));
-    if (r.error) return alert(t("form.could_not_create_folder_err", { err: r.error }));
+    if (r.error) return ui.toast(t("form.could_not_create_folder_err", { err: r.error }), { error: true });
     if (scope === cwdScope) navigateTo(r.dir);
   });
 
@@ -690,7 +734,7 @@
   // move as #claude-opts' own, created on that machine over ssh.
   sshCwdNewBtn.addEventListener("click", async () => {
     if (!currentSshCwd) return;
-    const name = (prompt(t("form.name_new_folder")) || "").trim();
+    const name = ((await ui.ask(t("form.name_new_folder"), "")) || "").trim();
     if (!name) return;
     const machine = currentMachine;
     const parent = currentSshCwd;
@@ -699,7 +743,7 @@
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ scope: "ssh", machine, dir: parent, name }),
     }).catch((e) => ({ error: e.message }));
-    if (r.error) return alert(t("form.could_not_create_folder_err", { err: r.error }));
+    if (r.error) return ui.toast(t("form.could_not_create_folder_err", { err: r.error }), { error: true });
     if (machine === currentMachine && parent === currentSshCwd) navigateSshTo(r.dir);
   });
 
@@ -802,7 +846,7 @@
     const preset = presetEl.value;
     const scope = presetForm(preset).scope;
     if (!scope) return;
-    const name = (prompt(t("form.name_new_folder")) || "").trim();
+    const name = ((await ui.ask(t("form.name_new_folder"), "")) || "").trim();
     if (!name) return;
     const parent = shellCwdByPreset[preset];
     const post = () => api("/workdirs", {
@@ -811,7 +855,7 @@
       body: JSON.stringify({ scope, dir: parent, name }),
     });
     const r = await (scope === "sandhome" ? post() : withUnlockRetry(post)).catch((e) => ({ error: e.message }));
-    if (r.error) return alert(t("form.could_not_create_folder_err", { err: r.error }));
+    if (r.error) return ui.toast(t("form.could_not_create_folder_err", { err: r.error }), { error: true });
     if (presetEl.value === preset && shellCwdByPreset[preset] === parent) navigateShellCwdTo(r.dir);
   });
 

@@ -1,5 +1,5 @@
 #!/bin/sh
-# discord-dm -- コンテナ(Devbox・MailBox)から、研究室の Discord のボット「aiza」で研究室の人に DM を送る(the deployment notes)。
+# /opt/aiza-dm/discord-dm -- コンテナ(Devbox。Email の箱には無い。2026-11-27 から)から、研究室の Discord のボット「aiza」で研究室の人に DM を送る(the deployment notes)。
 #   discord-dm <宛先>… -m "本文"     宛先は aiza の名前・Discord 名・名簿の名前(5人まで)
 #   echo "本文" | discord-dm <宛先>…  本文は標準入力からでもよい
 #   discord-dm --list                 送れる人(名簿に Discord ID がある人)
@@ -7,10 +7,11 @@
 #                                     研究室のサーバーのチャンネルに書く。宛先を付けると先頭でその人たちをメンションする
 # DM は「@宛先 〈宛先の名前〉さんへ — 〈あなたの名前〉さんより(aiza)」で始まる。本文の「@<名前>」はその人へのメンションになる。
 # 送り手はあなたの aiza のアカウント(なりすませない)。1人 1 時間に 20 通まで。名簿は `labthe deployment notes。
+# Email の箱から Discord へは aiza-out discord(本人の許可のカード、the deployment notes)。
 # 本文を標準入力で受けるので、スクリプトは -c で渡す(heredoc だと標準入力がふさがる)
 PY=$(cat <<'PY'
 import json, socket, sys
-SOCK = "/opt/aiza-ssh/discord-dm.sock"
+SOCK = "/opt/aiza-dm/discord-dm.sock"
 a = sys.argv[1:]
 def usage():
     sys.stderr.write("usage: discord-dm <to>... [-m TEXT]  |  discord-dm -c CHANNEL [<to>...] [-m TEXT]  |  discord-dm --list\n"); sys.exit(2)
@@ -40,7 +41,7 @@ s.settimeout(120)
 try:
     s.connect(SOCK)
 except OSError as e:
-    sys.stderr.write(f"discord-dm: not available here ({e.strerror}); it runs only on the host that has the lab roster\n"); sys.exit(1)
+    sys.stderr.write(f"discord-dm: not available here ({e.strerror}); it runs only on the host that has the lab roster, and not in the Email box (aiza-out discord there)\n"); sys.exit(1)
 s.sendall((json.dumps(req, ensure_ascii=False) + "\n").encode())
 buf = b""
 while not buf.endswith(b"\n"):

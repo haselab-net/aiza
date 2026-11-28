@@ -122,6 +122,21 @@ class SandboxPathsTest(unittest.TestCase):
             B.save_inbox_attachment(SID, {"tmux_location": "container"}, "a.txt", b"x")
         self.assertEqual(sorted(p.name for p in self.host.iterdir()), ["bashrc", "secret.json"])
 
+    def test_a_host_or_root_sessions_attach_goes_in_its_own_folder(self):
+        # Its folder is outside the sandbox (~/.aiza-state/sessions): the
+        # attach failed there with a TypeError, 502 (2026-11-27).
+        hsid = "bbbbbbbbbb02"
+        (self.host / "sessions" / hsid).mkdir(parents=True)
+        saved = B.session_roots
+        B.session_roots = lambda: [self.sandhome / ".aiza", self.host / "sessions"]
+        try:
+            path = B.save_inbox_attachment(hsid, {"tmux_location": "root"}, "a.txt", b"x")
+        finally:
+            B.session_roots = saved
+        self.assertEqual(Path(path).parent, self.host / "sessions" / hsid / "inbox")
+        self.assertEqual(Path(path).read_bytes(), b"x")
+        self.assertEqual((Path(path).parent.stat().st_mode & 0o777), 0o700)
+
     def test_viewer_key_link_out_is_replaced_not_followed(self):
         key_path = self.sandhome / B.VIEWER_KEY_NAME
         key_path.parent.mkdir(parents=True, exist_ok=True)

@@ -59,6 +59,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from http.cookies import SimpleCookie
 from pathlib import Path
+import urllib.parse
 from urllib.parse import urlparse, parse_qs, urlencode
 
 STATIC_DIR = Path("/opt/aiza/static")
@@ -1449,11 +1450,159 @@ def tts_synthesize(user, body):
     return 200, mp3
 
 
+# ---- a demo room's seats (the deployment notes, 2026-11-27) ---------------
+# The public demo runs one gateway per room, behind the demo's own door,
+# which owns the login: it knows which seat (/r/<seat>/) is whose, and sends
+# every request on with X-Demo-Room / -Seat / -User / -Role / -Exp / -Sig,
+# Sig = HMAC-SHA256(the room's key, Room\nSeat\nUser\nRole\nExp\nMethod\nTarget)
+# in hex (Target: the request target as received, /r/<seat>/... with its
+# query). With the room's key in place every request must carry a good
+# signature; the seat's prefix is taken off before routing, the user is
+# X-Demo-User (no login of this gateway's own), and what is sent back
+# (redirects, the pages' own addresses) gets the prefix again. Without the
+# key file this is all off -- a deployment is unchanged.
+DEMO_ROOM_KEY_FILE = Path("/etc/aiza/demo_room_key")
+DEMO_KICK_DIR = "/run/aiza-room/kick"   # the gateway leaves a note; the room's entrypoint acts
+DEMO_SEAT_RE = re.compile(r"^/r/([a-z0-9]{24})(/[^?#]*)?(\?.*)?$")
+DEMO_USER_RE = re.compile(r"^demo([1-9][0-9]?)$")
+_demo_key = None
+
+
+def demo_room_key():
+    """The room's key (bytes), or None when this is not a demo room."""
+    global _demo_key
+    if _demo_key is None:
+        try:
+            raw = DEMO_ROOM_KEY_FILE.read_text().strip()
+            _demo_key = bytes.fromhex(raw) if re.fullmatch(r"[0-9a-f]{64}", raw) else b""
+        except OSError:
+            _demo_key = b""
+    return _demo_key or None
+
+
+def demo_check(method, target, headers, now=None):
+    """The door's word for this request ({room, seat, user, role, base,
+    path}), or None. A wrong, stale or missing signature, another room, a
+    seat that is not the target's, or a user beyond the room's seats: None."""
+    key = demo_room_key()
+    if key is None:
+        return None
+    names = ("Room", "Seat", "User", "Role", "Exp", "Sig")
+    get_all = getattr(headers, "get_all", None)
+    if get_all and any(len(get_all(f"X-Demo-{k}") or []) > 1 for k in names):
+        return None   # one of each, or nothing (a header said twice is not the door's)
+    f = {k: (headers.get(f"X-Demo-{k}") or "") for k in names}
+    if not f["Room"] or f["Room"] != os.environ.get("AIZA_DEMO_ROOM", ""):
+        return None
+    try:
+        exp = int(f["Exp"])
+    except ValueError:
+        return None
+    now = time.time() if now is None else now
+    if not now <= exp <= now + 120:
+        return None
+    msg = "\n".join([f["Room"], f["Seat"], f["User"], f["Role"], f["Exp"], method, target]).encode()
+    if not hmac.compare_digest(hmac.new(key, msg, hashlib.sha256).hexdigest(), f["Sig"]):
+        return None
+    m = DEMO_USER_RE.match(f["User"])
+    try:
+        seats = int(os.environ.get("AIZA_DEMO_SEATS", "0"))
+    except ValueError:
+        seats = 0
+    if not m or int(m.group(1)) > seats:
+        return None
+    if f["Role"] == "door":   # the door itself (a kick), not a person's seat
+        return {"room": f["Room"], "seat": None, "user": f["User"], "role": "door", "base": "", "path": target} \
+            if f["Seat"] == "-" and target.startswith("/_room/") else None
+    t = DEMO_SEAT_RE.match(target)
+    if f["Role"] not in ("owner", "guest") or not t or t.group(1) != f["Seat"]:
+        return None
+    return {"room": f["Room"], "seat": f["Seat"], "user": f["User"], "role": f["Role"],
+            "base": f"/r/{f['Seat']}", "path": (t.group(2) or "/") + (t.group(3) or "")}
+
+
+_DEMO_ROOT_LINK_RE = re.compile(rb'((?:src|href|action)=")/(?!/)')
+
+
+# ---- what a page may load, and what a session made (the deployment notes C) ---
+# The same policy everywhere: enforced in a demo room (where every room and
+# seat shares one address, so a script slipped into a page would be every
+# visitor's), report-only on a deployment until it has been watched there.
+# Scripts only from this site, or inline ones by their hash (worked out from
+# the page as it is served); no plugins, no <base>, no framing.
+PAGE_CSP = ("default-src 'self'; script-src 'self'{hashes}; style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; font-src 'self'; "
+            "worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; "
+            "frame-ancestors 'self'; form-action 'self'")
+_INLINE_SCRIPT_RE = re.compile(rb"<script>(.*?)</script>", re.S)
+
+
+def page_csp(html: bytes) -> str:
+    hashes = "".join(f" 'sha256-{base64.b64encode(bytes.fromhex(hashlib.sha256(m.group(1)).hexdigest())).decode()}'"
+                     for m in _INLINE_SCRIPT_RE.finditer(html))
+    return PAGE_CSP.format(hashes=hashes)
+
+
+# In a demo room, a file a session made opens in the page only when it is
+# one of these (shown by <img>, <audio>, <video>); anything else -- a script,
+# a style sheet, wasm, a page -- is bytes to download: a script made in a
+# session must never load as this site's own (the room's CSP allows the
+# site's scripts). The API's own answers (JSON, the event streams) pass.
+DEMO_INLINE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "image/bmp",
+                     "audio/mpeg", "audio/ogg", "audio/wav", "audio/webm", "audio/mp4", "audio/flac",
+                     "video/mp4", "video/webm", "video/ogg"}
+DEMO_API_TYPES = {"application/json", "text/event-stream"}
+
+
+def demo_attachment(disposition, path):
+    """attachment, keeping the file's name (RFC 6266 filename*): the backend's
+    own, else the last part of the address without control characters,
+    quotes or path, percent-encoded."""
+    m = re.search(r"filename\*=UTF-8''([A-Za-z0-9!#$&+.^_`|~%-]{1,255})", disposition or "", re.I)
+    if m:
+        return f"attachment; filename*=UTF-8''{m.group(1)}"
+    name = urllib.parse.unquote(urlparse(path or "").path.rsplit("/", 1)[-1])
+    name = re.sub(r'[\x00-\x1f\x7f"\\/]', "", name)[:200]   # no control characters, quotes or path
+    return f"attachment; filename*=UTF-8''{urllib.parse.quote(name, safe='')}" if name else "attachment"
+
+
+# A file a session made (HTML, SVG, XML: an AI's or a person's) is never a
+# page of this site: it opens sandboxed (an origin of its own, no cookies,
+# no storage, nothing of aiza's to reach), and in a demo room it only
+# downloads.
+ACTIVE_CONTENT_RE = re.compile(r"^\s*(text/html|application/xhtml\+xml|image/svg\+xml|text/xml|application/xml)\b", re.I)
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def log_message(self, fmt, *args):
         log(fmt % args)
+
+    # Every response, whatever route wrote it (a page, JSON, the backend's
+    # answer passed through, a stream): no type sniffing, no Referer to other
+    # sites or to the page's own (2026-11-28, the public demo's audit L1; the
+    # same here and in a room). A route that sets one itself keeps its own.
+    ALWAYS_HEADERS = (("X-Content-Type-Options", "nosniff"), ("Referrer-Policy", "no-referrer"))
+
+    def send_response(self, code, message=None):
+        self._sent_header_names = set()
+        super().send_response(code, message)
+
+    def send_header(self, keyword, value):
+        names = getattr(self, "_sent_header_names", None)
+        if names is not None:
+            names.add(keyword.lower())
+        super().send_header(keyword, value)
+
+    def end_headers(self):
+        names = getattr(self, "_sent_header_names", None)
+        if names is not None:
+            for k, v in self.ALWAYS_HEADERS:
+                if k.lower() not in names:
+                    super().send_header(k, v)
+            self._sent_header_names = None
+        super().end_headers()
 
     def _cookies(self):
         c = SimpleCookie()
@@ -1477,6 +1626,9 @@ class Handler(BaseHTTPRequestHandler):
         Both are reset to None at the top of do_GET/do_POST so a rotation
         from one keep-alive request on this connection can never leak onto
         a later, unrelated request on the same connection."""
+        demo = getattr(self, "_demo", None)
+        if demo is not None:   # a demo room's seat: the door said who (demo_check)
+            return demo["user"] if demo["role"] in ("owner", "guest") else None
         cookies = self._cookies()
         name = SESSION_COOKIE if SESSION_COOKIE in cookies else LEGACY_SESSION_COOKIE
         if name not in cookies:
@@ -1489,6 +1641,48 @@ class Handler(BaseHTTPRequestHandler):
         if current_jti is not None:
             self._pending_session_jti = current_jti
         return username
+
+    def _demo_gate(self, method):
+        """In a demo room (the deployment notes): only what the door signed gets
+        in, with the seat's prefix taken off the path. False when answered."""
+        self._demo = None
+        if demo_room_key() is None:
+            return True
+        demo = demo_check(method, self.path, self.headers)
+        if demo is None:
+            self._send_json(403, {"error": "forbidden"})
+            return False
+        self._demo = demo
+        self.path = demo["path"]
+        return True
+
+    def _demo_door_post(self):
+        """The door itself (Role door, Seat "-"): POST /_room/kick {"user"} --
+        that person was sent out of the room. Their backend and everything
+        they run in this room's container stop (the room's entrypoint, root,
+        acts on the note left here); their box is the door's to remove."""
+        if urlparse(self.path).path != "/_room/kick":
+            return self._send_json(404, {"error": "not found"})
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+            body = json.loads(self.rfile.read(n) if n else b"{}")
+        except (ValueError, OSError):
+            return self._send_json(400, {"error": "bad request"})
+        user = body.get("user") if isinstance(body, dict) else None
+        if user != self._demo["user"]:   # the person named is the one signed for
+            return self._send_json(400, {"error": "bad request"})
+        try:
+            fd = os.open(os.path.join(DEMO_KICK_DIR, user), os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o640)
+            os.close(fd)
+        except OSError as e:
+            log(f"demo kick {user}: {e}")
+            return self._send_json(503, {"error": "could not stop"})
+        log(f"demo: {user} sent out of the room")
+        return self._send_json(200, {"ok": True})
+
+    def _demo_base(self):
+        demo = getattr(self, "_demo", None)
+        return demo["base"] if demo else ""
 
     def _send_extra_headers(self, extra_headers):
         # A header key can map to a single value or a list -- Set-Cookie in
@@ -1526,6 +1720,8 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _send_redirect(self, location, extra_headers=None):
+        if self._demo_base() and location.startswith("/") and not location.startswith("//"):
+            location = self._demo_base() + location
         self.send_response(302)
         self.send_header("Location", location)
         # No body: say so, or an HTTP/1.1 client that is not a browser (curl,
@@ -1543,7 +1739,8 @@ class Handler(BaseHTTPRequestHandler):
         # cookie. no-cache = always ask, so a deploy still shows at once;
         # unchanged, the answer is an empty 304 instead of the whole file.
         st = path.stat()
-        etag = '"%s"' % hashlib.sha256(f"{path}:{st.st_size}:{st.st_mtime_ns}".encode()).hexdigest()[:20]
+        base = self._demo_base()
+        etag = '"%s"' % hashlib.sha256(f"{path}:{st.st_size}:{st.st_mtime_ns}:{base}".encode()).hexdigest()[:20]
         inm = self.headers.get("If-None-Match") or ""
         # nginx turns the ETag into a weak one (W/"...") when it gzips the
         # answer, and the browser asks back with that form.
@@ -1557,11 +1754,22 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         data = path.read_bytes()
+        if base and content_type.startswith("text/html"):
+            # The page's own root-relative addresses, under the seat
+            data = _DEMO_ROOT_LINK_RE.sub(rb"\1" + base.encode() + b"/", data)
+        elif base and content_type.startswith("application/manifest+json"):
+            data = re.sub(rb'("(?:start_url|scope|src)":\s*")/', b'\\1' + base.encode() + b"/", data)
+        csp = page_csp(data) if content_type.startswith("text/html") else None
+        if base and "Service-Worker-Allowed" in (extra_headers or {}):
+            extra_headers = dict(extra_headers, **{"Service-Worker-Allowed": base + "/"})
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("ETag", etag)
         self.send_header("Cache-Control", "no-cache")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        if csp:
+            self.send_header("Content-Security-Policy" if base else "Content-Security-Policy-Report-Only", csp)
         for k, v in (extra_headers or {}).items():   # sw.js's Service-Worker-Allowed
             self.send_header(k, v)
         # Unlike _send_json/_send_html this takes only plain extra headers
@@ -1579,6 +1787,16 @@ class Handler(BaseHTTPRequestHandler):
     # ---- routing -----------------------------------------------------
 
     def do_GET(self):
+        if not self._demo_gate("GET"):
+            return
+        if getattr(self, "_demo", None) and self._demo["role"] == "door":
+            return self._send_json(404, {"error": "not found"})
+        if getattr(self, "_demo", None) and urlparse(self.path).path == f"{BASE_PATH}/demo/room":
+            # Who this seat is in the room; the owner gets the door's own page
+            # (invite, send someone out), which the door serves (the deployment notes D).
+            d = self._demo
+            return self._send_json(200, {"room": d["room"], "user": d["user"], "role": d["role"],
+                                         "door": f"{d['base']}/_door/" if d["role"] == "owner" else None})
         # See _current_username()'s docstring: these must be cleared at the
         # start of every request, not just when a cookie happens to be
         # rotated, since HTTP/1.1 keep-alive means the same Handler
@@ -1653,6 +1871,10 @@ class Handler(BaseHTTPRequestHandler):
         # unauthenticated like app.js.
         if path == f"{BASE_PATH}/i18n.js":
             return self._send_file(STATIC_DIR / "i18n.js", "application/javascript")
+        # The page's styles (the deployment notes), out of index.html's
+        # <style> since 2026-11-27. Unauthenticated like app.js.
+        if path == f"{BASE_PATH}/style.css":
+            return self._send_file(STATIC_DIR / "style.css", "text/css; charset=utf-8")
         # The extensions' registry (ext/README.md), loaded by index.html
         # before app.js. Unauthenticated like app.js: no session data in it.
         if path == f"{BASE_PATH}/ext.js":
@@ -1749,6 +1971,10 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json(404, {"error": "not found"})
 
     def do_POST(self):
+        if not self._demo_gate("POST"):
+            return
+        if getattr(self, "_demo", None) and self._demo["role"] == "door":
+            return self._demo_door_post()
         self._pending_session_cookie_header = None  # see do_GET's own comment
         self._pending_session_jti = None
         self._pending_unlock_key = None
@@ -2141,7 +2367,18 @@ class Handler(BaseHTTPRequestHandler):
         pending = getattr(self, "_pending_session_cookie_header", None)
         if pending is not None:
             self.send_header("Set-Cookie", pending)
+        active = bool(ACTIVE_CONTENT_RE.match(content_type))   # what a session made (ACTIVE_CONTENT_RE)
+        if self._demo_base():
+            kind = content_type.split(";")[0].strip().lower()
+            if kind not in DEMO_INLINE_TYPES and kind not in DEMO_API_TYPES:
+                content_type, content_disposition = "application/octet-stream", demo_attachment(
+                    content_disposition, backend_path)
         self.send_header("Content-Type", content_type)
+        self.send_header("X-Content-Type-Options", "nosniff")
+        if active:
+            self.send_header("Content-Security-Policy", "sandbox" if self._demo_base() else "sandbox allow-scripts")
+            if self._demo_base():
+                content_disposition = "attachment"
         # Relayed for aiza-backend's /sessions/<id>/download -- without it,
         # the browser has no way to know this response should download as a
         # file rather than navigate to it (measured: silently dropped here

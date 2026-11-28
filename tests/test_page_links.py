@@ -28,6 +28,16 @@ BANNER = "out.banner = document.getElementById('link-armed-banner').classList.co
 CLAIMED = dict(BOARD, entries=BOARD["entries"] + [{"machine": "winbox", "user": "u", "state": "using", "source": "claim",
                                                    "what": "印刷", "since": T0, "key": "k2"}])
 
+# Injection (2026-11-28): the blackboard file is written by everyone with a
+# shell on the host, and #machine= by whoever sends a link -- text, never markup.
+EVIL = '<img src=x onerror="window.__pwned=1"><svg onload="window.__pwned=2">'
+EVIL_BOARD = dict(BOARD, entries=[
+    {"machine": "winbox", "user": "u", "state": "using", "source": EVIL, "what": EVIL, "since": T0, "key": "k3"},
+    {"machine": "winbox", "user": "v", "state": "ended", "ended_why": EVIL, "source": "claim", "since": T0,
+     "ended_at": T0, "key": "k4"}])
+PWNED = ("out.pwned = window.__pwned || null;"
+         " out.tags = document.querySelectorAll('img[src=\"x\"], svg[onload]').length")
+
 # name: (faults, [(js, wait ms)])
 CASES = {
     "arm, the bar, cancel": (OK, [
@@ -62,6 +72,17 @@ CASES = {
         ("window.prompt = () => null; " + tap(S2), 600),
         (tap(GATED), 800),
     ]),
+    # While the bar is up, a tap on a session's row links it rather than opening it
+    # (2026-11-27, the user: リンク先を選ぶとき、セッションをタップしたら開いてしまいました)
+    "armed: a row's tap links": (OK, [
+        ("chatNow.open = (s) => { out.opened = s.id; }; window.prompt = () => '15'; " + tap(S2), 600),
+        (f"row('{GATED}').click()", 800),
+        (BANNER, 100),
+    ]),
+    "armed: the armed one's row still opens": (OK, [
+        ("chatNow.open = (s) => { out.opened = s.id; }; " + tap(S2), 600),
+        (f"row('{S2}').click()", 600),
+    ]),
     "join a link": (OK, [
         (tap(S2), 600),
         ("window.confirm = (m) => { out.asked = m; return true; }; " + tap(S0), 800),
@@ -85,6 +106,14 @@ CASES = {
          " out.buttons = [...mine.querySelectorAll('button')].map((b) => b.textContent); mine.querySelector('button').click()", 800),
         ("const mine = [...document.querySelectorAll('#board-modal .entry')].find((e) => e.textContent.includes('印刷'));"
          " [...mine.querySelectorAll('button')].find((b) => b.textContent === '解除').click()", 800),
+    ]),
+    "injection: the blackboard's values stay text": ({"GET /board": [{"every": True, "body": EVIL_BOARD}]}, [
+        ("document.getElementById('machine-btn').click()", 800),
+        (PWNED + "; out.text = document.getElementById('board-modal').textContent.includes('onerror')", 100),
+    ]),
+    "injection: #machine= is a machine's name or this host": ({}, [
+        ("location.hash = 'machine=' + encodeURIComponent(" + json.dumps(EVIL) + ")", 1500),
+        (PWNED + "; out.presets = [...document.getElementById('preset').options].map((o) => o.value)", 100),
     ]),
     "the blackboard: a write refused": ({"POST /board": [{"status": 500, "body": {"error": "x"}}]}, [
         ("document.getElementById('machine-btn').click()", 800),
@@ -150,7 +179,7 @@ class PageLinksTest(unittest.TestCase):
 
     def test_two_not_linked_are_linked_for_the_minutes_given(self):
         out = self.got("two not linked: the minutes asked")
-        self.assertEqual(out["asked"], "240")    # neither is root: 4 hours suggested
+        self.assertEqual(out["asked"], "180")    # 3 hours, wherever they run
         self.assertEqual(self.posted(out, LINK), [{"a": S2, "b": GATED, "duration_minutes": 15}])
         self.assertFalse(out["banner"])
 
@@ -159,8 +188,10 @@ class PageLinksTest(unittest.TestCase):
         self.assertEqual(self.posted(out, LINK), [{"a": S2, "b": GATED, "forever": True}])
 
     def test_blank_leaves_the_time_to_the_server(self):
+        # The minutes are picked now (the deployment notes), the usual 3 hours
+        # already chosen: left as it is, that is what goes.
         out = self.got("blank: the server's default")
-        self.assertEqual(self.posted(out, LINK), [{"a": S2, "b": GATED}])
+        self.assertEqual(self.posted(out, LINK), [{"a": S2, "b": GATED, "duration_minutes": 180}])
 
     def test_not_a_number_is_said_and_nothing_sent(self):
         out = self.got("not a number: said, nothing sent")
@@ -171,6 +202,17 @@ class PageLinksTest(unittest.TestCase):
         out = self.got("the minutes cancelled")
         self.assertEqual(self.posted(out, LINK), [])
         self.assertEqual(out["alerts"], [])
+
+    def test_while_armed_a_rows_tap_links_and_does_not_open(self):
+        out = self.got("armed: a row's tap links")
+        self.assertEqual(self.posted(out, LINK), [{"a": S2, "b": GATED, "duration_minutes": 15}])
+        self.assertNotIn("opened", out)
+        self.assertFalse(out["banner"])
+
+    def test_while_armed_the_armed_ones_row_still_opens(self):
+        out = self.got("armed: the armed one's row still opens")
+        self.assertEqual(out["opened"], S2)
+        self.assertEqual(self.posted(out, LINK), [])
 
     def test_joining_a_link(self):
         out = self.got("join a link")
@@ -201,6 +243,18 @@ class PageLinksTest(unittest.TestCase):
             {"op": "note", "key": "k2", "what": "印刷"},
             {"op": "release", "key": "k2"},
         ])
+
+    def test_the_blackboards_values_are_never_markup(self):
+        out = self.got("injection: the blackboard's values stay text")
+        self.assertIsNone(out["pwned"])
+        self.assertEqual(out["tags"], 0)
+        self.assertTrue(out["text"])           # shown, as text
+
+    def test_a_machine_in_the_link_is_never_markup(self):
+        out = self.got("injection: #machine= is a machine's name or this host")
+        self.assertIsNone(out["pwned"])
+        self.assertEqual(out["tags"], 0)
+        self.assertFalse(any("onerror" in p for p in out["presets"]))   # this host's kinds instead
 
     def test_a_refused_blackboard_write_is_said(self):
         out = self.got("the blackboard: a write refused")

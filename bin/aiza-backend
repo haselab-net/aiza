@@ -52,6 +52,7 @@ outbox/ to have them shown as attachments, without this process ever needing
 to `docker exec` just to read them back out.
 """
 import base64
+import contextlib
 import hashlib
 import hmac
 import secrets
@@ -1043,7 +1044,7 @@ CLAUDE_TUI_PRESETS = {"claude-tui", *(f"claude-tui-{m}" for m in SSH_MACHINES)}
 # create_session (the deployment notes).
 SSH_SHELL_PRESETS = {f"shell-{m}" for m in SSH_MACHINES}
 
-PRESETS = {"claude": None, **TMUX_PRESETS}
+PRESETS = {"claude": None, "agent": None, **TMUX_PRESETS}
 
 # Kind x place (2026-11-14, the user: セッション開始の選択を Claude・Codex・Shell
 # と Email・Dev・ホスト・ルートに分け、全部の組み合わせで起動できるように). The
@@ -1073,7 +1074,12 @@ CODEX_MAILBOX_LAUNCHER = "/opt/sandbox-shared/tools/bin/codex-mailbox"
 CODEX_MAILBOX_READY = Path(os.environ.get("AIZA_CODEX_MAILBOX_READY", "/etc/aiza/codex-mailbox.ready"))
 if MAILBOX and CODEX_MAILBOX_READY.is_file() and os.path.isfile(CODEX_MAILBOX_LAUNCHER):
     LAUNCH_PRESETS["codex-mail"] = ("mail-shell", "codex")
-HEADLESS_PRESETS = {"claude"}
+HEADLESS_PRESETS = {"claude", "agent"}
+# "agent" (2026-11-27, the public demo, the deployment notes): the Claude Agent SDK
+# in the room's box, one turn per message like "claude" (_headless_program).
+# It is offered only in a demo room (DEMO_PRESETS).
+AGENT_TURN = "/opt/aiza-agent/agent-turn.py"
+AGENT_PYTHON = "/opt/aiza-agent/venv/bin/python3"   # the venv with claude-agent-sdk (docker/box/README.md)
 
 # Presets that take a working directory (~/sandhome-relative, see
 # resolve_workdir) and an optional conversation to resume (resolve_resume_id).
@@ -1417,6 +1423,16 @@ def require_unlock_if_outside_sandbox(location):
         # a browser could reach: a browser's request never carries the
         # header, and reading/sending from a browser still needs its window.
         # A new session (not a resume) still needs the window.
+        return
+    if location in ("host", "root") and getattr(_REQ, "talkto_relay", False):
+        # A talkto from a linked member typed into this one's pane, and the
+        # notices back to its sender (2026-11-28, the deployment notes, the
+        # user: 「ルート同士だけでなく鍵に関係なく届くようにしてください。開発の
+        # 箱、メールの箱を含めてです。」): set only by _talkto_relaying(), around
+        # the relay's own send_message calls. The link (made from the page,
+        # which still needs the window) and the sender (the session whose own
+        # talkto_out.jsonl the line was in) are checked as before; what the
+        # page itself does (open, send, answer a card) still needs the window.
         return
     if (location == "host" and getattr(_REQ, "talkto_wake", False)
             and not getattr(_REQ, "creating_new", False)):
@@ -3738,6 +3754,8 @@ def adopt_session(tmux_name, location, label, cols=None, rows=None):
     was the concrete complaint that prompted adding this at all (2026-08-15:
     "後から Attachする場合などに横に広すぎる場合がある"; `rows` followed the
     same reasoning 2026-08-31, the deployment notes)."""
+    if DEMO_ROOM:
+        raise ValueError("not in the demo")
     if location not in ("container", "host") and not (
         location.startswith("ssh:") and location.split(":", 1)[1] in SSH_MACHINES
     ):
@@ -5518,12 +5536,26 @@ def _trust_dialog_cursor_move(screen, yes=TRUST_DIALOG_MARKER):
     return "Down" if yes_idx > cursor_idx else "Up"
 
 
+# A public demo's room (the deployment notes): the room's id, given when the
+# room is started; empty on a deployment. In a room only the AI the demo
+# offers can be started -- no shell, no Claude Code / Codex terminal, no
+# login panes, nothing on the host, root or ssh machines (the user: Shell は
+# 始められない). Everything a visitor or their AI makes stays in their box.
+DEMO_ROOM = os.environ.get("AIZA_DEMO_ROOM", "")
+DEMO_PRESETS = {"agent"}
+
+
 def create_session(preset, label, cwd=None, resume=None, skip_permissions=True, cols=None, rows=None,
                    replace_session=None, group=None, issue=None, auto=False, desk=None):
     launch = None
     codex_resume = None
     if preset in LAUNCH_PRESETS:
         preset, launch = LAUNCH_PRESETS[preset]
+    if DEMO_ROOM and preset not in DEMO_PRESETS:
+        raise ValueError("not in the demo")
+    if not DEMO_ROOM and preset in DEMO_PRESETS:
+        # The demo's AI runs only in a demo room's boxes (its runner lives there).
+        raise ValueError("only in the demo")
     if preset not in PRESETS:
         raise ValueError(f"unknown preset: {preset}")
     if launch not in (None, "claude") and (preset in MAIL_TREE_PRESETS or preset in MAIL_PRESETS) \
@@ -6383,7 +6415,9 @@ def _kill_claude_container_process(session_id):
     except OSError:
         return
     if pid.isdigit():
-        r = sandbox_exec(["sh", "-c", f"kill -9 {pid}"])
+        # agent-turn.py leads its own process group (the Agent SDK's claude
+        # is its child): the group first, then the one process.
+        r = sandbox_exec(["sh", "-c", f"kill -9 -- -{pid} 2>/dev/null; kill -9 {pid}"])
         if r.returncode != 0:
             log(f"failed to kill claude pid {pid} for {session_id}: {r.stderr.strip()}")
 
@@ -6398,18 +6432,56 @@ def _kill_after_timeout(proc, session_id, timeout):
 
 # No `--remote-control` here either (no preset passes it since 2026-11-07;
 # with `-p` it had no effect anyway).
+# What a turn's API refusal means, said in words in the chat (the CLI's
+# result carries api_error_status). The public demo's relay
+# (the deployment notes) answers with these too; the API itself the same way.
+AGENT_API_ERRORS = {
+    429: "使える量の上限に達しました。時間をおいてもう一度どうぞ。",
+    401: "API の鍵が正しくありません。",
+    403: "その API・宛先は使えません。",
+    413: "送る中身が大きすぎました。短くしてもう一度どうぞ。",
+    502: "Claude の API に届きませんでした。少し待ってもう一度どうぞ。",
+}
+
+
+def _agent_error_text(status, text):
+    text = text or ""
+    if "credit balance is too low" in text:
+        return "API の無料枠(残高)を使い切りました。"
+    if status in AGENT_API_ERRORS:
+        # With what the API itself said (its reset time, the demo relay's
+        # which budget): 2026-11-28, a lab 429 read as the demo's words.
+        return AGENT_API_ERRORS[status] + (f"({text[:300]})" if text else "")
+    return f"AI が答えられませんでした: {text[:500]}" if text else "AI が答えられませんでした。"
+
+
+def _headless_program(meta):
+    """The program one turn runs, after `cd`, with the prompt on its stdin
+    and stream-json lines on its stdout. The one place the two headless
+    presets differ: "claude" is Claude Code's own `-p`; "agent" (the public
+    demo, the deployment notes) is agent-turn.py, the Claude Agent SDK in the
+    room's box, which writes the same lines (docker/box/agent-turn.py)."""
+    resume = meta.get("claude_session_id")
+    if meta.get("preset") == "agent":
+        cmd = f"{shquote(AGENT_PYTHON)} {shquote(AGENT_TURN)} --cwd \"$PWD\""
+    else:
+        cmd = "claude --dangerously-skip-permissions -p --output-format stream-json --verbose"
+    return cmd + (f" --resume {shquote(resume)}" if resume else "")
+
+
 def _run_claude_headless_turn(session_id, text):
-    """Runs one turn of a headless Claude Code conversation: `claude
-    --dangerously-skip-permissions -p "<text>" --output-format stream-json
-    [--resume <prior-session-id>]`, via `sandbox exec` (never raw docker).
-    No TUI, no tmux pane -- just a subprocess we read JSON lines from, which
-    is what makes this fit an append-only chat log at all (see the PRESETS
-    comment for why the interactive TUI can't). Runs in its own thread so
-    POST /messages returns immediately; the eventual result is appended as a
-    normal agent_output event and triggers a push notification directly
-    (no need to round-trip through the notify HTTP listener -- we already
-    know synchronously, in this same process, the exact moment the turn
-    finishes)."""
+    """Runs one turn of a headless conversation ("claude", and the demo's
+    "agent": _headless_program) via `sandbox --stdin exec` (never raw
+    docker), the prompt on its stdin (no length or quoting limit; until
+    2026-11-27 an argument of `claude -p`). No TUI, no tmux pane -- just a
+    subprocess we read stream-json lines from, which is what makes this fit
+    an append-only chat log at all (see the PRESETS comment for why the
+    interactive TUI can't). Runs in its own thread so POST /messages returns
+    immediately; each tool used shows as a tool line as it happens, the
+    result is appended as a normal agent_output event and triggers a push
+    notification directly (no need to round-trip through the notify HTTP
+    listener -- we already know synchronously, in this same process, the
+    exact moment the turn finishes). An API refusal is said in words."""
     sdir = session_dir(session_id)
     meta = load_meta(session_id)
     if meta is None:
@@ -6441,19 +6513,13 @@ def _run_claude_headless_turn(session_id, text):
     inner += (
         f"echo $$ > {shquote(str(pid_file))}; "
         f"exec env AIZA_OUTBOX={shquote(outbox_path)} AIZA_TALKTO={shquote(talkto_path)} "
-        f"claude --dangerously-skip-permissions "
-        f"-p {shquote(text)} --output-format stream-json --verbose"
+        + _headless_program(meta)
     )
-    if meta.get("claude_session_id"):
-        inner += f" --resume {shquote(meta['claude_session_id'])}"
-
     try:
-        proc = subprocess.Popen(
-            ["sandbox", "exec", "--", "sh", "-c", inner],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-        )
+        proc = subprocess.Popen(["sandbox", "--stdin", "exec", "--", "sh", "-c", inner],
+                                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     except OSError as e:
-        append_event(session_id, {"type": "system", "text": f"failed to start claude: {e}"})
+        append_event(session_id, {"type": "system", "text": f"AI を始められませんでした: {e}"})
         return
 
     with _claude_running_lock:
@@ -6469,52 +6535,65 @@ def _run_claude_headless_turn(session_id, text):
     busy_marker = sdir / "busy"
     sb_touch(busy_marker)
 
-    result_text = None
-    new_claude_session_id = None
-    cost_usd = None
+    result, error, conv_id = None, None, None
     try:
+        try:
+            proc.stdin.write(text)
+            proc.stdin.close()
+        except OSError:
+            pass
         for line in proc.stdout:
-            line = line.strip()
-            if not line:
-                continue
             try:
                 obj = json.loads(line)
             except ValueError:
                 continue
-            obj_type = obj.get("type")
-            if obj_type == "system" and obj.get("subtype") == "init":
-                new_claude_session_id = obj.get("session_id")
-            elif obj_type == "result":
-                result_text = obj.get("result")
-                new_claude_session_id = obj.get("session_id", new_claude_session_id)
-                cost_usd = obj.get("total_cost_usd")
+            if not isinstance(obj, dict):
+                continue
+            kind = obj.get("type")
+            if kind == "system" and obj.get("subtype") == "init":
+                conv_id = obj.get("session_id") or conv_id
+            elif kind == "assistant":
+                for block in (obj.get("message") or {}).get("content") or []:
+                    if isinstance(block, dict) and block.get("type") == "tool_use":
+                        tl = _tool_line(block.get("name"), block.get("input"))
+                        if tl:
+                            append_event(session_id, {"type": "tool", "text": tl})
+            elif kind == "result":
+                result = obj
+                conv_id = obj.get("session_id") or conv_id
+            elif kind == "error" and error is None:     # agent-turn.py's own failure
+                error = str(obj.get("text") or "")
         proc.wait(timeout=30)
-    except Exception as e:
-        log(f"claude turn error for {session_id}: {e}")
+    except Exception as e:  # noqa: BLE001 -- the turn is over either way
+        log(f"headless turn error for {session_id}: {e}")
     finally:
         with _claude_running_lock:
             _claude_running.pop(session_id, None)
         busy_marker.unlink(missing_ok=True)
         pid_file.unlink(missing_ok=True)
 
-    if new_claude_session_id and new_claude_session_id != meta.get("claude_session_id"):
-        meta["claude_session_id"] = new_claude_session_id
+    if isinstance(conv_id, str) and conv_id and conv_id != meta.get("claude_session_id"):
+        meta = load_meta(session_id) or meta
+        meta["claude_session_id"] = conv_id
         save_meta(session_id, meta)
 
-    if result_text:
-        append_event(session_id, {"type": "agent_output", "text": result_text, "cost_usd": cost_usd})
-        task_hook(session_id, {"hook_event_name": "Stop", "last_assistant_message": result_text[-1500:]})
+    if result and not result.get("is_error") and result.get("result"):
+        reply = str(result["result"])
+        append_event(session_id, {"type": "agent_output", "text": reply, "cost_usd": result.get("total_cost_usd")})
+        task_hook(session_id, {"hook_event_name": "Stop", "last_assistant_message": reply[-1500:]})
+        return
+    if result:
+        why = _agent_error_text(result.get("api_error_status"), str(result.get("result") or ""))
+    elif error:
+        why = _agent_error_text(None, error)
     else:
-        stderr_tail = ""
+        tail = ""
         try:
-            stderr_tail = (proc.stderr.read() or "")[-2000:]
-        except Exception:
+            tail = (proc.stderr.read() or "")[-2000:]
+        except Exception:  # noqa: BLE001
             pass
-        append_event(session_id, {
-            "type": "system",
-            "text": f"claude produced no result (exit {proc.returncode}). {stderr_tail}".strip(),
-        })
-
+        why = f"AI が答えずに終わりました(終了コード {proc.returncode})。{tail}".strip()
+    append_event(session_id, {"type": "system", "text": why})
 
 
 # The first message of a new session, sent by this backend once Claude
@@ -6526,6 +6605,13 @@ def _run_claude_headless_turn(session_id, text):
 INITIAL_MESSAGE_MAX = 20000
 INITIAL_MESSAGE_WAIT = 120
 _PROMPT_READY_RE = re.compile(r"for shortcuts|bypass permissions|❯")
+# Stricter, for text that must not be lost (a resumed session's first input):
+# the input line's own mark, not a menu's cursor ("❯ 1. Resume from
+# summary"), and no menu waiting for an answer.
+_INPUT_READY_RE = re.compile(r"for shortcuts|bypass permissions|^\s*[❯›](?!\s*\d+\.)", re.M)
+# The page's send to a session it has just resumed waits this long (one
+# request: under aiza-gateway's 60 s to the backend).
+RESUME_SEND_WAIT = 45
 
 
 def send_initial_message(session_id, text, unlock_key=None):
@@ -6574,7 +6660,7 @@ def send_message(session_id, text, submit=True, from_user=None):
     # exactly the "実行/送信 was ignored" failure mode fixed 2026-08-29 for
     # the tmux-command-failed case, reopened here for the passkey-gate case
     # if the ordering were wrong.
-    if not (meta and meta.get("preset") == "claude"):
+    if not (meta and meta.get("preset") in HEADLESS_PRESETS):
         require_unlock_if_outside_sandbox(location)
     if text and submit and not text.lstrip().startswith(("/", "!")):
         note = _take_link_priming(session_id)
@@ -6606,7 +6692,7 @@ def send_message(session_id, text, submit=True, from_user=None):
         sent = append_event(session_id, event)
         if submit:
             _note_pending_user(session_id, sent)
-    if meta and meta.get("preset") == "claude":
+    if meta and meta.get("preset") in HEADLESS_PRESETS:
         with _claude_running_lock:
             already_running = session_id in _claude_running
         if already_running:
@@ -6825,7 +6911,7 @@ def send_key(tmux_name, location, base, ctrl=False, alt=False, shift=False):
 
 def stop_session(session_id):
     meta = load_meta(session_id)
-    if meta and meta.get("preset") == "claude":
+    if meta and meta.get("preset") in HEADLESS_PRESETS:
         with _claude_running_lock:
             proc = _claude_running.get(session_id)
         if proc and proc.poll() is None:
@@ -7588,6 +7674,7 @@ def delete_session(session_id):
     if meta and not meta.get("stopped"):
         stop_session(session_id)
     break_link(session_id, reason="セッションが削除されました")
+    _team_left([session_id], wait=True)   # its team too, linked or not (archive_session)
     shutil.rmtree(session_dir(session_id), ignore_errors=True)
     with _subscribers_lock:
         _subscribers.pop(session_id, None)
@@ -8229,8 +8316,21 @@ def archive_session(session_id, archived):
     meta = load_meta(session_id)
     if meta is None:
         raise ValueError("no such session")
+    was = bool(meta.get("archived"))
     meta["archived"] = bool(archived)
     save_meta(session_id, meta)
+    # An archived session leaves its talkto link (2026-11-27, the user:
+    # "セッションをアーカイブしたらそのセッションは外れるようにして").
+    # Restoring it does not rejoin: link again if wanted.
+    if archived and not was:
+        break_link(session_id, reason=ARCHIVED_LINK_REASON)
+        # And its team (🤝 協力, the deployment notes) even with no link left to
+        # break (2026-11-27, the user: "協力セッションをアーカイブにしたら、
+        # 協力のアイコンだけ残りました"): it helps no one, and if it is a 担当,
+        # its helpers are let go. The item it holds stays linked to it (shown
+        # as gone; restored, it holds it again). Before the answer, so the
+        # page's refresh after archiving no longer shows its 🤝.
+        _team_left([session_id], wait=True)
     return meta
 
 
@@ -8310,6 +8410,13 @@ MAX_INBOX_BYTES = 100 * 1024 * 1024
 
 def session_inbox_dir(session_id):
     d = session_dir(session_id) / "inbox"
+    if _beneath_split(d) is None:
+        # A host or root session (2026-11-27: a root session's attach failed,
+        # 502): its folder is in ~/.aiza-state/sessions, which no sandbox
+        # sees or writes -- its own pane (this user, or root) reads it there.
+        # Kept to this user (0700): root reads it anyway.
+        d.mkdir(mode=0o700, exist_ok=True)
+        return d
     try:
         os.close(open_beneath(*_beneath_split(d), 0, want_dir=True))
     except FileNotFoundError:
@@ -8401,9 +8508,17 @@ def save_inbox_attachment(session_id, meta, filename, data):
             if tmp_path:
                 os.unlink(tmp_path)
     else:
-        path = session_inbox_dir(session_id) / stamped_name
-        sb_write_bytes(path, data)
+        try:
+            path = session_inbox_dir(session_id) / stamped_name
+            sb_write_bytes(path, data)
+        except (OSError, TypeError) as e:
+            # Said in words, not an unexplained 502 (2026-11-27).
+            raise InboxUnavailable(f"このセッションには添付を置けませんでした({type(e).__name__}: {e})")
         return str(path)
+
+
+class InboxUnavailable(OSError, RuntimeError):
+    pass
 
 
 # Marks an outbox file as this backend's own immutable snapshot (see
@@ -8972,15 +9087,15 @@ def search_events(query, on_behalf_of=None):
 # network path, no new privilege: the file lives under this session's own
 # directory under ~/sandhome, exactly like outbox/.
 #
-# Deliberately NOT a new privilege: relaying into a "host"/"root" session
-# still goes through send_message()'s own require_unlock_if_outside_sandbox
-# gate below, unchanged. A relay attempt made while that window is closed
-# raises UnlockRequired same as any human-typed message would -- caught here
-# and turned into a skipped hop (not a disconnect), so a link touching
-# host/root can only make progress while a human keeps that tier's passkey
-# window open. This is intentional and is the real backstop against an
-# unsupervised root loop, more than the time limit below -- that one guards
-# the everyday container<->container/host case where no such window exists.
+# Relaying into a "host"/"root" session (Email and root boxes included) does
+# NOT need the passkey window (2026-11-28, the deployment notes, the user:
+# 「ルート同士だけでなく鍵に関係なく届くようにしてください。開発の箱、メールの
+# 箱を含めてです。」). Until then it did, as the backstop against an
+# unsupervised root loop; the user chose delivery over that. What stays: a
+# link is made only from the page (which needs the window for host/root), a
+# line is relayed only from the session whose own talkto_out.jsonl it is in,
+# to that session's link members, with its name on it; and the link's time
+# limit below.
 #
 # Single-user-scoped by construction: this whole process is one user's own
 # aiza-backend (see BACKEND_SOCKET_PATH), so any session_id that load_meta()
@@ -9004,19 +9119,20 @@ TALKTO_STATUS_FILENAME = "talkto_status.jsonl"
 TALKTO_STATUS_MAX_BYTES = 64 * 1024  # then only the newest lines are kept
 TALKTO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
 # How long a link lasts before it disconnects by itself (seconds).
-DEFAULT_LINK_DURATION = 4 * 3600
-# Shorter when either side is "root": still capped by the unlock window
-# above, but a much shorter leash by default for the one location whose
-# commands run as root.
-DEFAULT_LINK_DURATION_ROOT = 30 * 60
+# One default wherever the sessions run (2026-11-27, the user: "talktoの時間の
+# 標準を箱によらず3時間に"); before, 4 hours, and 30 minutes when root was in
+# it. A relay into host/root needs no unlock window (the deployment notes).
+DEFAULT_LINK_DURATION = 3 * 3600
 # Upper bound on what a client may ask for (POST /sessions/link's
 # duration_minutes), so a typo can't make a link effectively permanent.
 # A link that never expires is a separate, explicit choice ("forever": true,
 # 2026-11-07, the user: "箱とルートの間でずっと繋いでおきたいということが結構
 # ある…切れないようにするっていうオプションが選べるように"): expires_ts None.
-# It still ends with either session, and a relay into host/root still needs
-# the passkey window (send_message), which was always the real backstop.
+# It still ends with either session.
 MAX_LINK_DURATION = 24 * 3600
+
+
+ARCHIVED_LINK_REASON = "アーカイブしたため"
 
 
 def _link_expired(rec, now):
@@ -9024,8 +9140,7 @@ def _link_expired(rec, now):
 
 
 def _default_link_duration(*metas):
-    locations = {(m or {}).get("tmux_location") for m in metas}
-    return DEFAULT_LINK_DURATION_ROOT if "root" in locations else DEFAULT_LINK_DURATION
+    return DEFAULT_LINK_DURATION
 
 
 # A link is a group (2026-11-08, the user: "3つ以上のセッションをつなぐことが
@@ -9076,9 +9191,16 @@ def expire_links():
     deadline by a few seconds, as long as no message crosses it after."""
     now = time.time()
     with _links_lock:
-        expired = [link_id for link_id, rec in _load_links().items() if _link_expired(rec, now)]
+        links = _load_links()
+    expired = [link_id for link_id, rec in links.items() if _link_expired(rec, now)]
     for link_id in expired:
         _dissolve_link(link_id, reason="制限時間に達したため自動切断")
+    # Archived members leave (archive_session does it at once; this catches
+    # the rest -- archive-on-exit through save_meta, and links from before
+    # 2026-11-27 that still hold an archived session).
+    for sid in [m for link_id, rec in links.items() if link_id not in expired
+                for m in rec["members"] if (load_meta(m) or {}).get("archived")]:
+        break_link(sid, reason=ARCHIVED_LINK_REASON)
 
 
 def _fmt_duration(sec):
@@ -9131,7 +9253,8 @@ def _priming(sid, others):
     # より短く。使い方は -h で調べると思うのでコマンドだけでよい / 案内の文、
     # 他のAIとtalktoコマンドで通信できます。でよいのでは?): who is there is
     # `talkto --list`, the rest `talkto --help`. `others` is no longer named.
-    return f"[AI座 セッション連携] 他のAIと`talkto`コマンドで通信できます。{ssh_note}"
+    # The addressing too (2026-11-27): a bare `talkto "…"` is refused.
+    return f"[AI座 セッション連携] 他のAIと`talkto`コマンドで通信できます。{ssh_note}送り先は`--to 名前`、全員へは`--all`。"
 
 
 def _send_or_note(sid, text):
@@ -9309,10 +9432,11 @@ def create_link(session_a, session_b, duration_sec=None, forever=False):
     return {"id": link_id, **rec}
 
 
-def _team_left(sids):
+def _team_left(sids, wait=False):
     """A team needs its talkto link (the deployment notes): these sessions are
     out of theirs, so they help no one and their helpers are let go.
-    Best effort, off the caller's thread."""
+    Best effort, off the caller's thread -- or on it (wait), when the page's
+    next look at the tree must already show it (archive_session)."""
     sids = [x for x in sids if isinstance(x, str) and SESSION_ID_RE.match(x)]
     if not sids or not os.path.exists(TREE_SOCK):
         return
@@ -9323,7 +9447,10 @@ def _team_left(sids):
                 tree_call({"op": "team_left", "session": x})
             except (TreeUnavailable, ValueError):
                 pass
-    threading.Thread(target=go, daemon=True).start()
+    if wait:
+        go()
+    else:
+        threading.Thread(target=go, daemon=True).start()
 
 
 def _dissolve_link(link_id, reason=None):
@@ -9457,8 +9584,15 @@ def link_list_from_session(session_id):
 
 class TalktoText(str):
     """A talkto message; `.to` is the label (or id) of the one member it is
-    for, from `talkto --to NAME`, or None for everyone in the link."""
+    for, from `talkto --to NAME`; `.all` is `talkto --all`. A line with
+    neither is not sent (2026-11-27, the user: "talktoでうっかり放送をする
+    事故がありました。引数なしだとエラーで、放送はオプションにしてください。"),
+    also from an older talkto that still sends one."""
     to = None
+    all = False
+
+
+TALKTO_NEED_TO = "--to <名前> か --all(全員へ)を付けてください。送っていません。"
 
 
 def _pick_target(others, to):
@@ -9550,30 +9684,89 @@ def _ask_root_to_wake(sid):
         return False
 
 
-def _wait_prompt(sid):
-    """Wait (at most INITIAL_MESSAGE_WAIT) for a resumed session's input prompt."""
-    deadline = time.time() + INITIAL_MESSAGE_WAIT
+def _input_ready(sid):
+    with _latest_screen_lock:
+        screen = _latest_screen.get(sid, "")
+    return bool(screen and _INPUT_READY_RE.search(screen) and not screen_is_waiting(screen)
+                and not _screen_waiting.get(sid))
+
+
+def _wait_prompt(sid, wait=INITIAL_MESSAGE_WAIT):
+    """Wait (at most `wait` s) for a resumed session to take input: True once
+    it does, False if it did not (then nothing should be typed into it --
+    it used to be sent anyway, and a menu or a half-started pane lost it)."""
+    deadline = time.time() + wait
     while time.time() < deadline:
         time.sleep(1)
-        with _latest_screen_lock:
-            screen = _latest_screen.get(sid, "")
-        if _PROMPT_READY_RE.search(screen or ""):
+        meta = load_meta(sid)
+        if meta is None or meta.get("stopped"):
+            break
+        if _input_ready(sid):
             time.sleep(1.5)
-            return
-    log(f"resumed {sid}: prompt not seen in {INITIAL_MESSAGE_WAIT}s, sending anyway")
+            if _input_ready(sid):
+                return True
+    log(f"resumed {sid}: input not ready in {wait}s, not sending")
+    return False
 
 
-def _send_when_ready(sid, text, from_user, origin=None):
-    """send_initial_message, but with who it is from (the chat shows 🔗)."""
-    _wait_prompt(sid)
+@contextlib.contextmanager
+def _talkto_relaying():
+    """While a talkto is being typed into a linked member (or its sender
+    told what became of it): no passkey window needed
+    (require_unlock_if_outside_sandbox, the deployment notes)."""
+    before = getattr(_REQ, "talkto_relay", False)
+    _REQ.talkto_relay = True
     try:
-        send_message(sid, text, submit=True, from_user=from_user)
-    except UnlockRequired:
+        yield
+    finally:
+        _REQ.talkto_relay = before
+
+
+def _send_when_ready(sid, text, from_user, origin=None, orig_text=None):
+    with _talkto_relaying():
+        return _send_when_ready_unlocked(sid, text, from_user, origin, orig_text)
+
+
+def _send_when_ready_unlocked(sid, text, from_user, origin=None, orig_text=None):
+    """send_initial_message, but with who it is from (the chat shows 🔗),
+    and never lost: if the resumed session does not come up to take it, or
+    the pane refuses it, the sender (`origin`, a talkto's) is told in its
+    input with the text to send again; with no sender, the text is kept as
+    a line in that session's chat."""
+    why = None
+    if not _wait_prompt(sid):
+        why = f"{INITIAL_MESSAGE_WAIT} 秒待っても入力を受けられる画面にならなかった"
+    else:
+        try:
+            send_message(sid, text, submit=True, from_user=from_user)
+            return True
+        except UnlockRequired:
+            why = "sandbox の外で解錠が閉じている"
+        except (RuntimeError, subprocess.TimeoutExpired, OSError) as e:
+            log(f"to resumed {sid} not sent: {e}")
+            why = "入力に入れられなかった"
+    try:
         if origin:
-            append_event(origin, {"type": "system", "text":
-                f"🔗「{_label_of(sid)}」は再開しましたが、sandbox の外で解錠が閉じているので文は届いていません。解錠されてから送り直してください。"})
-    except (RuntimeError, subprocess.TimeoutExpired, OSError) as e:
-        log(f"talkto to resumed {sid} not sent: {e}")
+            _tell_sender_undelivered(origin, _label_of(sid), why, orig_text if orig_text is not None else text)
+        else:
+            append_event(sid, {"type": "system", "text": f"AI座: 再開しましたが{why}ので、伝えられませんでした: {text}"})
+    except Exception as e:  # noqa: BLE001 -- a thread of its own
+        log(f"to resumed {sid}: telling it was not sent: {e}")
+    return False
+
+
+def _tell_sender_undelivered(origin, label, why, text):
+    """A talkto that went to a resumed member but did not go in: the sender's
+    agent was told it would, so it is told in its input that it did not,
+    with the text (not dropped), else in its chat."""
+    note = (f"[AI座 セッション連携] 「{label}」は再開しましたが、{why}ので、さきほどの talkto は届いていません。"
+            f"送り直す文:\n{text}")
+    try:
+        with _talkto_relaying():
+            send_message(origin, note, submit=True, from_user="🔗 AI座")
+    except Exception as e:  # noqa: BLE001 -- the chat line below is the fallback
+        log(f"talkto: telling {origin} its text did not go in: {e}")
+        append_event(origin, {"type": "system", "text": note})
 
 
 def _relay_to_partner(session_id, text):
@@ -9592,6 +9785,8 @@ def _relay_to_partner(session_id, text):
         return "expired", "連携の制限時間が過ぎていたので、送られませんでした(連携は切れました)。"
     others = _others(rec, session_id)
     to = getattr(text, "to", None)
+    if isinstance(text, TalktoText) and not to and not text.all:
+        return "need_to", f"{TALKTO_NEED_TO}つながっているのは{_labels(others)}です(`talkto --list`)。"
     if to:
         targets = _pick_target(others, to)
         if not targets:
@@ -9625,7 +9820,8 @@ def _relay_to_partner(session_id, text):
             # prompt is up, after the usual "still linked" note.
             note = link_resumed_note(woke)
             threading.Thread(target=_send_when_ready,
-                             args=(woke, (note + "\n" if note else "") + body, f"🔗 {origin_label}", session_id),
+                             args=(woke, (note + "\n" if note else "") + body, f"🔗 {origin_label}", session_id,
+                                   str(text)),
                              daemon=True).start()
             woken.append(f"「{label}」")
             try:
@@ -9644,8 +9840,9 @@ def _relay_to_partner(session_id, text):
 
         try:
             # A sleeping ssh machine is woken first, in a thread (the deployment notes)
-            sent_now = send_message_waking(p, body, submit=True, from_user=f"🔗 {origin_label}",
-                                           on_sent=record, on_fail=not_woken)
+            with _talkto_relaying():
+                sent_now = send_message_waking(p, body, submit=True, from_user=f"🔗 {origin_label}",
+                                               on_sent=record, on_fail=not_woken)
             (done if sent_now else waking).append(f"「{label}」")
         except UnlockRequired:
             unlock.append(f"「{label}」")
@@ -9660,13 +9857,14 @@ def _relay_to_partner(session_id, text):
     if done:
         parts.append(f"届きました({''.join(done)}の入力として送りました)。")
     if woken:
-        parts.append(f"{''.join(woken)}は止まっていたので続きから再開しました。立ち上がったら入力に入ります。")
+        parts.append(f"{''.join(woken)}は止まっていたので続きから再開しました。立ち上がったら入力に入ります"
+                     "(入らなければ、文と一緒にこのセッションに知らせます)。")
     if waking:
         parts.append(f"{''.join(waking)}の機械は寝ていたので起こしています。起きたら入力に入ります"
                      "(起きなければ、このセッションに知らせます)。")
     if by_root:
         parts.append(f"{''.join(by_root)}は止まっていたので、root に再開を頼みました。"
-                     "root のペインには解錠されるまで送れないので、文は届いていません。解錠されてから送り直してください。")
+                     "文は届いていません。立ち上がってから送り直してください。")
     if stopped:
         parts.append(f"{''.join(stopped)}は止まっていて、ここからは再開できないので届いていません(連携は残っていて、再開されればまた送れます)。")
     if unlock:
@@ -9683,7 +9881,8 @@ def _tell_sender_not_woken(session_id, label, why):
     is told in its input (it was told "起こしています"), else its chat."""
     text = f"[AI座 セッション連携] 「{label}」の機械が起きなかったので、さきほどの talkto は届いていません({why})。"
     try:
-        send_message(session_id, text, submit=True, from_user="🔗 AI座")
+        with _talkto_relaying():
+            send_message(session_id, text, submit=True, from_user="🔗 AI座")
     except Exception as e:  # noqa: BLE001 -- the chat line below is the fallback
         log(f"talkto: telling {session_id} its target did not wake: {e}")
         append_event(session_id, {"type": "system", "text": text})
@@ -9848,8 +10047,14 @@ def _parse_talkto_lines(lines):
             item_id = obj.get("id")
             text = TalktoText(text)
             to = obj.get("to")
+            if to is None and isinstance(obj.get("to_b64"), str):  # talkto-remote
+                try:
+                    to = base64.b64decode(obj["to_b64"], validate=True).decode("utf-8", errors="replace")
+                except ValueError:
+                    to = None
             if isinstance(to, str) and 0 < len(to) <= 200:
                 text.to = to  # `talkto --to NAME` (2026-11-08)
+            text.all = obj.get("all") is True  # `talkto --all` (2026-11-27)
             texts.append((item_id if isinstance(item_id, str) and TALKTO_ID_RE.match(item_id) else None, text))
     return texts
 
@@ -14159,49 +14364,163 @@ def clean_desk_deploy(v):
     return {"repo": v["repo"], "sha": v["sha"]}
 
 
-def resolve_desk_commit(spec, meta):
-    """A deploy request (the desk's stage 4): "<sha>" in the session's own
-    working folder, or "<folder> <sha>". Asks git, as this user, for the
-    commit and the repository's top, so the desk's tool can later fetch
-    exactly that commit as this user. A folder seen from the box (its home
-    is ~/sandhome) is found under ~/sandhome too."""
-    parts = spec.split() if isinstance(spec, str) else []
-    if len(parts) not in (1, 2) or not DESK_SHA_RE.match(parts[-1].lower()):
-        raise ValueError("give the commit as <sha> or <folder> <sha>")
-    sha = parts[-1].lower()
-    if len(parts) == 2:
-        folder = os.path.expanduser(parts[0]) if parts[0].startswith("~/") else parts[0]
-        if not folder.startswith("/"):
-            folder = str(HOME / folder)
-        cands = [folder]
+DESK_BRANCH_MAX = 30
+DESK_PULL_MAX = 30
+
+
+def desk_repo(meta):
+    """The git repository a session works in (its folder's top), as this
+    user, or None. A devbox's folder is seen from inside the box, whose
+    $HOME is ~/sandhome."""
+    folder = meta.get("claude_cwd") or meta.get("cwd") or ""
+    if not folder.startswith("/"):
+        folder = str(SANDHOME if (meta.get("tmux_location") or "container") == "container" else HOME)
+    cands = []
+    if (meta.get("tmux_location") or "container") == "container":
         try:
             cands.append(str(SANDHOME / Path(folder).relative_to(HOME)))
         except ValueError:
             pass
-    else:
-        cands = [meta.get("claude_cwd") or meta.get("cwd") or str(SANDHOME)]
-    for folder in cands:
-        if not os.path.isdir(folder):
+    cands.append(folder)
+    for f in cands:
+        if not os.path.isdir(f):
             continue
-        r = subprocess.run(["git", "-C", folder, "rev-parse", "--show-toplevel", "--verify", "--end-of-options",
-                            sha + "^{commit}"], capture_output=True, text=True, timeout=20)
-        lines = r.stdout.split()
-        if r.returncode == 0 and len(lines) == 2:
-            return clean_desk_deploy({"repo": os.path.normpath(lines[0]), "sha": lines[1]})
-    raise ValueError(f"no commit {sha} in {cands[0]}")
+        r = subprocess.run(["git", "-C", f, "rev-parse", "--show-toplevel"], capture_output=True, text=True, timeout=20)
+        if r.returncode == 0 and r.stdout.strip():
+            return os.path.normpath(r.stdout.strip())
+    return None
 
 
-def desk_report(text, session_id=None, ref=None, pos=None, commit=None):
+def _desk_gh_env(meta):
+    """gh as this user: the box's own login for a devbox session (its
+    $HOME is ~/sandhome), else this host's."""
+    env = dict(os.environ, GH_PROMPT_DISABLED="1", GH_NO_UPDATE_NOTIFIER="1", NO_COLOR="1")
+    base = SANDHOME if (meta.get("tmux_location") or "container") == "container" else HOME
+    for d in (base / ".config" / "gh", HOME / ".config" / "gh"):
+        if (d / "hosts.yml").exists():
+            env["GH_CONFIG_DIR"] = str(d)
+            break
+    return env
+
+
+def _desk_pulls(repo, meta):
+    """The repository's open pull requests, by gh as this user: (list, None)
+    or ([], why not) -- no gh, no login, not on GitHub, no answer."""
+    if not shutil.which("gh"):
+        return [], "gh が入っていないので、プルリクは出せません(ブランチから選べます)"
+    env = _desk_gh_env(meta)
+    if "GH_CONFIG_DIR" not in env:
+        return [], "gh にログインしていないので、プルリクは出せません(ブランチから選べます。devbox で gh auth login)"
+    try:
+        r = subprocess.run(["gh", "pr", "list", "--state", "open", "--limit", str(DESK_PULL_MAX),
+                            "--json", "number,title,headRefName,headRefOid"],
+                           cwd=repo, env=env, capture_output=True, text=True, timeout=20)
+    except subprocess.TimeoutExpired:
+        return [], "GitHub が答えなかったので、プルリクは出せません(ブランチから選べます)"
+    if r.returncode != 0:
+        return [], "プルリクを読めませんでした(gh のログイン、または GitHub にあるリポジトリか)。ブランチから選べます"
+    try:
+        rows = json.loads(r.stdout or "[]")
+    except ValueError:
+        return [], "プルリクを読めませんでした"
+    out = []
+    for p in rows if isinstance(rows, list) else []:
+        if isinstance(p, dict) and isinstance(p.get("number"), int) and re.match(r"^[0-9a-f]{40}$", str(p.get("headRefOid"))):
+            out.append({"number": p["number"], "title": str(p.get("title") or "")[:200],
+                        "branch": str(p.get("headRefName") or "")[:200], "sha": p["headRefOid"]})
+    return out, None
+
+
+def desk_choices(session_id):
+    """What a deploy request from this session can name: the branches of
+    its repository and its open pull requests (the deployment notes). Read as this
+    user; nothing is changed."""
+    meta = load_meta(session_id) if SESSION_ID_RE.match(session_id or "") else None
+    if meta is None:
+        raise ValueError("no such session")
+    repo = desk_repo(meta)
+    if repo is None:
+        return {"repo": None, "branches": [], "pulls": [],
+                "note": "このセッションのフォルダは git のリポジトリではありません"}
+    r = subprocess.run(["git", "-C", repo, "for-each-ref", "--sort=-committerdate", f"--count={DESK_BRANCH_MAX}",
+                        "--format=%(refname:short)%00%(objectname)%00%(committerdate:unix)%00%(HEAD)%00%(subject)",
+                        "refs/heads"], capture_output=True, text=True, timeout=20)
+    branches = []
+    for line in r.stdout.splitlines():
+        f = line.split("\0")
+        if len(f) == 5 and re.match(r"^[0-9a-f]{40}$", f[1]):
+            branches.append({"name": f[0], "sha": f[1], "ts": int(f[2]) if f[2].isdigit() else None,
+                             "current": f[3] == "*", "subject": f[4][:200]})
+    pulls, note = _desk_pulls(repo, meta)
+    return {"repo": repo, "branches": branches, "pulls": pulls, "pulls_note": note}
+
+
+def resolve_desk_pick(pick, meta):
+    """A deploy request's commit, from what was picked -- {"branch": name}
+    or {"pull": number} -- resolved here as this user (the page's sha is
+    never taken): the branch's tip, or the open pull request's head,
+    fetched into the repository if it is not there yet, so the desk's tool
+    can take exactly that commit as this user (aiza-desk-deploy)."""
+    repo = desk_repo(meta)
+    if repo is None:
+        raise ValueError("このセッションのフォルダは git のリポジトリではありません")
+    if not isinstance(pick, dict) or len(pick) != 1:
+        raise ValueError("配備するブランチかプルリクを選んでください")
+    if "branch" in pick:
+        name = pick["branch"]
+        if not isinstance(name, str) or not name or name.startswith("-") or len(name) > 200 or subprocess.run(
+                ["git", "check-ref-format", "--branch", name], capture_output=True, timeout=10).returncode != 0:
+            raise ValueError("bad branch")
+        r = subprocess.run(["git", "-C", repo, "rev-parse", "--verify", "--end-of-options", f"refs/heads/{name}^{{commit}}"],
+                           capture_output=True, text=True, timeout=20)
+        if r.returncode != 0:
+            raise ValueError(f"ブランチ {name} がありません")
+        return clean_desk_deploy({"repo": repo, "sha": r.stdout.strip()}), f"ブランチ {name}"
+    n = pick.get("pull")
+    if not (isinstance(n, int) and not isinstance(n, bool) and 0 < n < 10**7):
+        raise ValueError("bad pull request")
+    try:
+        r = subprocess.run(["gh", "pr", "view", str(n), "--json", "headRefOid,state"], cwd=repo, env=_desk_gh_env(meta),
+                           capture_output=True, text=True, timeout=20)
+        v = json.loads(r.stdout) if r.returncode == 0 else None
+    except (subprocess.TimeoutExpired, OSError, ValueError):
+        v = None
+    if not isinstance(v, dict) or not re.match(r"^[0-9a-f]{40}$", str(v.get("headRefOid"))):
+        raise ValueError(f"プルリク #{n} を読めませんでした")
+    if v.get("state") != "OPEN":
+        raise ValueError(f"プルリク #{n} は開いていません")
+    sha = v["headRefOid"]
+    have = lambda: subprocess.run(["git", "-C", repo, "cat-file", "-e", f"{sha}^{{commit}}"],
+                                  capture_output=True, timeout=20).returncode == 0
+    if not have():
+        subprocess.run(["git", "-C", repo, "fetch", "--quiet", "--no-tags", "origin", f"refs/pull/{n}/head"],
+                       capture_output=True, timeout=60, env=dict(os.environ, GIT_TERMINAL_PROMPT="0"))
+        if not have():
+            raise ValueError(f"プルリク #{n} のコミットを取ってこられませんでした")
+    return clean_desk_deploy({"repo": repo, "sha": sha}), f"プルリク #{n}"
+
+
+def desk_report(text, session_id=None, ref=None, pos=None, commit=None, what=None, pick=None, label=None):
+    """A report (what="report") or a deploy request (what="deploy") to the
+    desk (the deployment notes). From one's session, a deploy request names what was
+    picked (resolve_desk_pick); from the other host's page (ref), it
+    carries the {repo, sha} that host resolved."""
     if not isinstance(text, str) or not text.strip():
         raise ValueError("write what happened or what is missing")
+    if what is None:
+        what = "deploy" if (commit or pick) else "report"
+    if what not in ("report", "deploy"):
+        raise ValueError("bad kind")
     conf = desk_conf()
     kind = meta = None
     deploy = None
     if session_id:
         ref, meta = session_ref(session_id)
         kind = session_kind(meta)
-        if commit:
-            deploy = resolve_desk_commit(commit, meta)
+        if what == "deploy":
+            if commit is not None:
+                raise ValueError("画面を読み直してください(配備はブランチかプルリクを選ぶ形になりました)")
+            deploy, label = resolve_desk_pick(pick, meta)
         try:
             pos = session_pos(session_id, meta)
         except Exception as e:  # noqa: BLE001 -- the report still goes, with its time
@@ -14211,7 +14530,9 @@ def desk_report(text, session_id=None, ref=None, pos=None, commit=None):
         if ref is not None and not (isinstance(ref, str) and DESK_REF_RE.match(ref)):
             raise ValueError("bad ref")
         pos = clean_desk_pos(pos) if ref else None
-        if commit:
+        if what == "deploy":
+            if not commit:
+                raise ValueError("a deploy request comes with its commit")
             # Fetched as the ref's user: only one's own session's commit.
             if not ref or ref.split("/")[1] != getpass.getuser():
                 raise ValueError("a deploy request comes with one's own session")
@@ -14226,6 +14547,8 @@ def desk_report(text, session_id=None, ref=None, pos=None, commit=None):
             q["pos"] = json.dumps(pos, separators=(",", ":"))
         if deploy:
             q["c"] = json.dumps(deploy, separators=(",", ":"))
+            if isinstance(label, str) and label:
+                q["l"] = label[:120]   # only shown on the desk's page
         out = {"desk_url": f"{conf['url'].rstrip('#')}#desk&{urlencode(q)}"}
     else:
         req = {"op": "report", "desk": conf["root"], "title": text, "ref": ref, "pos": pos}
@@ -15605,28 +15928,98 @@ def _odd(s):
                    for c in s)
 
 
+# The mail's shape (2026-11-27, the 漏洩対策 audit O1/O2): the box's agent can
+# ask for a card with an .eml of its own making, not only gmail.py compose's,
+# so what the card and its page show must be everything Gmail would send.
+# Only compose's shape is taken -- one text/plain, or multipart/mixed of one
+# text/plain and attachments -- with each header at most once and none it does
+# not know; anything else (HTML, inline or related parts, attached messages,
+# two To lines, Resent-*, ...) is refused, with no card.
+OUT_MAIL_HEADERS = ("from", "to", "cc", "bcc", "subject", "reply-to", "sender", "date", "message-id",
+                    "in-reply-to", "references", "mime-version", "content-type", "content-transfer-encoding")
+OUT_PART_HEADERS = ("content-type", "content-transfer-encoding", "content-disposition", "mime-version")
+# Address headers are read the way the card shows them, and refused when the
+# parser had to guess (audit P1: a malformed To read as nothing showed no To
+# at all on the card). The text's charset is one both sides read alike (P2).
+OUT_ADDR_HEADERS = ("From", "To", "Cc", "Bcc", "Reply-To", "Sender")
+OUT_ADDR_RE = re.compile(r"[^@\s\x00-\x1f\x7f]+@[^@\s\x00-\x1f\x7f]+")
+OUT_CHARSETS = ("us-ascii", "utf-8", "iso-2022-jp")
+
+
+def _out_mail_parts(msg):
+    """(text part, [attachment parts]) of a mail in compose's shape; ValueError otherwise."""
+    def once(part, allowed, where):
+        seen = set()
+        for k in part.keys():
+            kl = k.lower()
+            if kl not in allowed:
+                raise ValueError(f"メールの形: {where}に知らないヘッダー {_odd(k)[:60]}")
+            if kl in seen:
+                raise ValueError(f"メールの形: {where}のヘッダー {k} が 2 つ以上")
+            seen.add(kl)
+        if part.defects:
+            raise ValueError(f"メールの形: {where}が崩れている")
+
+    def is_text(part):
+        return (not part.is_multipart() and part.get_content_type() == "text/plain"
+                and part.get_content_disposition() in (None, "inline") and part.get_filename() is None)
+
+    once(msg, OUT_MAIL_HEADERS, "")
+    if not msg.is_multipart():
+        if not is_text(msg):
+            raise ValueError(f"メールの形: 本文が text/plain でない({msg.get_content_type()})")
+        return msg, []
+    if msg.get_content_type() != "multipart/mixed":
+        raise ValueError(f"メールの形: {msg.get_content_type()} は扱わない(text/plain と添付だけ)")
+    if (msg.preamble or "").strip() or (msg.epilogue or "").strip():
+        raise ValueError("メールの形: 区切りの外に文がある")
+    parts = msg.get_payload()
+    if not isinstance(parts, list) or not parts or not is_text(parts[0]):
+        raise ValueError("メールの形: 最初の部分が text/plain の本文でない")
+    once(parts[0], OUT_PART_HEADERS, "本文の部分")
+    for i, part in enumerate(parts[1:], 1):
+        once(part, OUT_PART_HEADERS, f"添付 {i} ")
+        if (part.is_multipart() or part.get_content_maintype() in ("multipart", "message")
+                or part.get_content_disposition() != "attachment" or not part.get_filename()):
+            raise ValueError(f"メールの形: 部分 {i}({part.get_content_type()})が名前付きの添付でない")
+    return parts[0], parts[1:]
+
+
 def _out_mail_view(raw):
     msg = email.message_from_bytes(raw, policy=email.policy.default)
-    heads = {}
-    for k in ("From", "To", "Cc", "Bcc", "Subject", "In-Reply-To", "References"):
-        heads[k.lower()] = str(msg[k] or "")
-    people = {}
-    for k in ("to", "cc", "bcc"):
-        pairs = email.utils.getaddresses([heads[k]]) if heads[k] else []
-        people[k] = [f"{a} ({n})" if n and n != a else a for n, a in pairs if a or n]
-    body = msg.get_body(preferencelist=("plain",))
-    text, html = (body.get_content() if body else ""), ""
-    if body is None:
-        h = msg.get_body(preferencelist=("html",))
-        html = h.get_content() if h else ""
+    text_part, att_parts = _out_mail_parts(msg)
+    one = lambda k: str(msg[k] or "")
+    people, heads_raw = {}, {}
+    for k in OUT_ADDR_HEADERS:
+        found = []
+        for h in msg.get_all(k) or []:
+            heads_raw[k] = _odd(str(h))[:5000]
+            if getattr(h, "defects", None):
+                raise ValueError(f"メールの形: {k} の宛先の書き方が崩れている")
+            addrs = list(getattr(h, "addresses", None) or ())
+            if str(h).strip() and not addrs:
+                raise ValueError(f"メールの形: {k} の宛先が読めない")
+            for x in addrs:
+                if not OUT_ADDR_RE.fullmatch(x.addr_spec or ""):
+                    raise ValueError(f"メールの形: {k} に読めない宛先がある")
+                n = x.display_name or ""
+                found.append(f"{x.addr_spec} ({n})" if n and n != x.addr_spec else x.addr_spec)
+        people[k.lower()] = found
+    if (text_part.get_content_charset() or "us-ascii").lower() not in OUT_CHARSETS:
+        raise ValueError(f"メールの形: 本文の文字コード {_odd(text_part.get_content_charset() or '')[:40]} は扱わない")
+    try:
+        text = text_part.get_content()
+    except (LookupError, ValueError, UnicodeError):
+        raise ValueError("メールの形: 本文が読めない")
     atts = []
-    for a in msg.iter_attachments():
+    for a in att_parts:
         data = a.get_payload(decode=True) or b""
         atts.append({"name": a.get_filename() or "?", "type": a.get_content_type(), "size": len(data),
                      "sha256": hashlib.sha256(data).hexdigest()})
-    return {"from": heads["from"], "subject": heads["subject"], "to": people["to"], "cc": people["cc"],
-            "bcc": people["bcc"], "reply": bool(heads["in-reply-to"] or heads["references"]),
-            "text": text, "html_only": html, "attachments": atts}
+    return {"from": one("From"), "subject": one("Subject"), "to": people["to"], "cc": people["cc"],
+            "bcc": people["bcc"], "reply_to": one("Reply-To"), "sender": one("Sender"), "heads_raw": heads_raw,
+            "reply": bool(one("In-Reply-To") or one("References")),
+            "text": text, "html_only": "", "attachments": atts}
 
 
 def _out_load(session_id, oid, want_hash):
@@ -15660,7 +16053,12 @@ def _out_load(session_id, oid, want_hash):
             raise ValueError("メールが箱に無い")
         if hashlib.sha256(eml).hexdigest() != action["eml_sha256"]:
             raise ValueError("メールがカードのときと違う")
-        view["mail"] = _out_mail_view(eml)
+        try:
+            view["mail"] = _out_mail_view(eml)
+        except ValueError:
+            raise
+        except Exception as e:  # noqa: BLE001 -- a mail the parser cannot take is not shown, so no card
+            raise ValueError(f"メールの形: 読めない({type(e).__name__})")
         view["eml"] = eml
         size += len(eml)
     elif action.get("attachments"):
@@ -15695,14 +16093,16 @@ def _out_summary(view):
     if k == "mail":
         m = view["mail"]
         parts = [f"{lab} {len(m[key])} 件: {', '.join(m[key])}" for lab, key in (("宛先", "to"), ("Cc", "cc"), ("Bcc", "bcc")) if m[key]]
-        parts += [f"差出人: {m['from'] or '(既定)'}", f"件名: {m['subject']}", "返信" if m["reply"] else "新しいメール",
+        parts += [f"差出人: {m['from'] or '(既定)'}"] + [f"{lab}: {m[key]}" for lab, key in (("返信先(Reply-To)", "reply_to"), ("Sender", "sender")) if m.get(key)]
+        parts += [f"件名: {m['subject']}", "返信" if m["reply"] else "新しいメール",
                   "添付: " + (", ".join(f"{x['name']}({x['size']} バイト)" for x in m["attachments"]) or "なし"),
                   f"本文 {len(m['text'] or m['html_only'])} 字"]
     elif k == "trash":
         parts = [f"{len(a['threads'])} スレッド: " + " / ".join(f"{t.get('subject') or '(件名なし)'}({t.get('from') or '?'})" for t in a["threads"][:5])
                  + (f" ほか {len(a['threads']) - 5}" if len(a["threads"]) > 5 else "")]
     elif k in ("slack", "discord"):
-        parts = [f"投稿先: {a.get('channel') or '(名前なし)'} {a['channel_url']}"]
+        # The name is what the preparing side wrote (audit O3); the URL is what is opened.
+        parts = [f"投稿先: {a['channel_url']}(名前「{a.get('channel') or 'なし'}」は用意した側の申告)"]
         if a.get("thread_ts"):
             parts.append(f"スレッド {a['thread_ts']} への返信")
         parts.append(f"本文 {len(a['text'])} 字")
@@ -15880,7 +16280,7 @@ def out_attachment(session_id, oid, n):
         return atts[n]["name"], view["files"][n]
     if "eml" not in view:
         raise LookupError("no attachments")
-    atts = list(email.message_from_bytes(view["eml"], policy=email.policy.default).iter_attachments())
+    atts = _out_mail_parts(email.message_from_bytes(view["eml"], policy=email.policy.default))[1]
     if not 0 <= n < len(atts):
         raise LookupError("no such attachment")
     return atts[n].get_filename() or "attachment", atts[n].get_payload(decode=True) or b""
@@ -16344,12 +16744,13 @@ def _ask_write_status(talkto_path, ask_id, status, answer):
 # Questions and permission prompts of Claude on the ssh machines (2026-11-25,
 # the deployment notes). The machine's account is shared by every aiza user and by
 # the AI there, so the answer file proves nothing: the answer is the hook's
-# own stdout, signed with the one key of this host (ASK_SIGN_KEY, readable by
-# every aiza user's backend like the machines' shared ssh key next to it --
-# whoever reads that one can do anything there anyway); the hook checks it
+# own stdout, signed with the one key of this host (ASK_SIGN_KEY, root:
+# sandboxusers 0640, readable by every aiza user's backend on the host; not
+# in /opt/aiza-ssh since 2026-11-27, which every container mounts -- the
+# user: 移すだけ); the hook checks it
 # against the public key the backend gave the pane, bound to the request's
 # id and the hash of the hook's input, before printing it.
-ASK_SIGN_KEY = Path("/opt/aiza-ssh/ask-sign.key")
+ASK_SIGN_KEY = Path("/etc/aiza/ask-sign.key")
 ASK_SIGN_PREFIX = "aiza-ask-v1"
 _ask_remote = {}          # (session id, ask id) -> {"machine", "mode", "payload", "hash"}
 _ask_sign_pub_cache = []
@@ -16593,9 +16994,16 @@ def ask_close(session_id, ask_id, how, text=None):
     append_event(session_id, done)
 
 
-def ask_answer(session_id, body):
+ASK_DISMISS_TEXT = "答えずにチャットで書く"
+
+
+def ask_answer(session_id, body, from_page=True):
     """POST /sessions/<id>/ask: {"ask_id", "answer": {...}}. Returns the
-    text shown for the answer; raises LookupError when nothing waits."""
+    text shown for the answer; raises LookupError when nothing waits.
+    answer {"dismiss": true} is 「答えずにチャットで書く」 (2026-11-27): no
+    answer, and the agent stops as on Esc (aiza-ask-hook output); an
+    outward action's card is not sent (a deny). from_page=False: aiza's own
+    (ask_dismiss_for_chat), not bound to a card the page showed."""
     ask_id = body.get("ask_id") if isinstance(body, dict) else None
     answer = body.get("answer") if isinstance(body, dict) else None
     if not isinstance(ask_id, str) or not TALKTO_ID_RE.match(ask_id) or not isinstance(answer, dict):
@@ -16616,7 +17024,7 @@ def ask_answer(session_id, body):
         # A card the host does not hold (made before it kept them, or its
         # record lost): the hook can only be told to go to the terminal.
         ev, answer = {"kind": "permission"}, {"terminal": True}
-    elif answer.get("terminal") is not True:
+    elif answer.get("terminal") is not True and from_page:
         shown = body.get("card_hash")
         if not (isinstance(shown, str) and hmac.compare_digest(shown, _ask_hash(ev))):
             raise ValueError("カードの中身が変わりました。ページを読み込み直してください")
@@ -16625,6 +17033,10 @@ def ask_answer(session_id, body):
         answer = {"terminal": True}
     if answer.get("terminal") is True:
         out, text = {"terminal": True}, "端末で答える"
+    elif answer.get("dismiss") is True:
+        # The outward action is not sent (the deployment notes: never the sending side).
+        out = {"behavior": "deny"} if ev.get("gate_out") else {"dismiss": True}
+        text = ASK_DISMISS_TEXT
     elif ev.get("kind") == "question":
         given = answer.get("answers")
         if not isinstance(given, dict) or not given:
@@ -16677,9 +17089,63 @@ def ask_answer(session_id, body):
             _ask_record(session_id, ask_id, out, ask_sum)
         _ask_write_status(str(sdir / TALKTO_FILENAME), ask_id, "answer", out)
     ask_close(session_id, ask_id, "phone", text)
-    if not out.get("terminal"):
+    if not out.get("terminal") and not out.get("dismiss"):
         set_task(session_id, {"state": "working", "text": "", "ts": time.time(), "declared": False})
     return text
+
+
+# A chat sent from the page while a question/permission card is open
+# (2026-11-27, the user): typed into the terminal's menu, the text was thrown
+# away and the Enter chose whatever option was highlighted (checked on a
+# scratch Claude Code). So the cards are closed first as 「答えずにチャット
+# で書く」 (Esc), and the text goes only once the menu is gone and the agent
+# stopped; else it is not sent, and the page puts it back in the box.
+# Outward actions' cards (the deployment notes) are left open: they hold no
+# terminal and are answered on the page only.
+ASK_DISMISS_WAIT = 15        # an ssh machine's hook reads its answer over ssh
+_WORKING_RE = re.compile(r"esc to interrupt", re.I)
+
+
+class AskStillOpen(Exception):
+    pass
+
+
+def ask_dismiss_for_chat(session_id, meta):
+    ids = _ask_open_closable(session_id)
+    try:
+        # After a restart the open cards are only in the host's record.
+        ids += [k for k, v in _ask_store_load(session_id).items()
+                if k not in ids and isinstance(v, dict) and isinstance(v.get("card"), dict)
+                and not v["card"].get("gate_out")]
+    except OSError:
+        pass
+    if not ids:
+        return False
+    for ask_id in ids:
+        try:
+            ask_answer(session_id, {"ask_id": ask_id, "answer": {"dismiss": True}}, from_page=False)
+        except LookupError:
+            pass                 # answered meanwhile
+    location = meta.get("tmux_location", "container")
+    tmux_name = meta.get("tmux_name", session_id)
+    codex = meta.get("preset") in CODEX_TUI_PRESETS or meta.get("launch") == "codex"
+    deadline = time.time() + ASK_DISMISS_WAIT
+    time.sleep(1.0)              # the hook looks for its answer every 0.5 s
+    while True:
+        try:
+            cap = tmux_query(location, ["capture-pane", "-p", "-t", tmux_name])
+            screen = cap.stdout if cap.returncode == 0 else None
+        except subprocess.TimeoutExpired:
+            screen = None
+        if screen is not None and not screen_is_waiting(screen):
+            tail = "\n".join([l for l in _ANSI_RE.sub("", screen).splitlines() if l.strip()][-4:])
+            # Codex is not interrupted by its hook (it goes on; a message
+            # typed meanwhile waits in its queue).
+            if codex or not _WORKING_RE.search(tail):
+                return True
+        if time.time() >= deadline:
+            raise AskStillOpen(f"質問・許可のカードを {ASK_DISMISS_WAIT} 秒で閉じられませんでした")
+        time.sleep(0.5)
 
 
 def _task_quietly_gone(session_id, meta):
@@ -17029,8 +17495,8 @@ def _task_wake_at_until(sid, meta, task):
         if meta.get("stopped"):
             woke = _wake_for_talkto(sid, meta)
             sid_now = woke if woke not in (None, WAKE_BY_ROOT) else None
-            if sid_now:
-                _wait_prompt(sid_now)
+            if sid_now and not _wait_prompt(sid_now):
+                sid_now = None   # did not come up to take it: the push below
         if sid_now:
             # a sleeping ssh machine: woken in a thread; if it does not wake, the old push
             send_message_waking(sid_now, text, submit=True, from_user="⏰ AI座",
@@ -17518,7 +17984,49 @@ def _board_feeds():
     return out
 
 
+# What the page gets of a blackboard entry (2026-11-28, the deployment notes): only
+# these fields, each of its own type and length, and the words the page
+# looks up (source, state, ended_why) only from their lists. board.json is
+# shared with everyone who has a shell on the host, so what it holds is not
+# trusted to be what this backend wrote.
+BOARD_ENTRY_TEXT = {"key": 40, "machine": 100, "user": 64, "host": 100, "session_id": 40,
+                    "label": 200, "what": 1000, "command": 1000}
+BOARD_ENTRY_TIME = ("since", "updated", "ended_at", "last_activity")
+BOARD_ENTRY_WORDS = {"source": ("auto", "ssh", "claim"), "state": ("using", "idle", "asleep", "ended"),
+                     "ended_why": ("stopped", "fell", "deleted", "released", "disconnected")}
+
+
+def _board_clean_entry(e):
+    if not isinstance(e, dict):
+        return None
+    out = {}
+    for k, n in BOARD_ENTRY_TEXT.items():
+        v = e.get(k)
+        out[k] = v[:n] if isinstance(v, str) else None
+    for k in BOARD_ENTRY_TIME:
+        v = e.get(k)
+        out[k] = v if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) else None
+    for k, words in BOARD_ENTRY_WORDS.items():
+        out[k] = e.get(k) if e.get(k) in words else None
+    if not out["user"] or not out["machine"]:
+        return None   # whose and which machine: every line has them (the page reads both)
+    out["state"] = out["state"] or "using"
+    return {k: v for k, v in out.items() if v is not None}   # absent stays absent, as written
+
+
+def _board_clean(entries):
+    if not isinstance(entries, list):
+        return []
+    return [c for c in map(_board_clean_entry, entries) if c is not None]
+
+
 def board_view():
+    v = _board_view()
+    v["entries"] = _board_clean(v.get("entries"))
+    return v
+
+
+def _board_view():
     me = getpass.getuser()
     if not BOARD_IS_MAIN:
         try:
@@ -18407,6 +18915,15 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError as e:
                 return self._json(400, {"error": str(e)})
 
+        if parts == ["desk", "choices"]:
+            # What a deploy request from one's session can name (the deployment notes).
+            if on_behalf_of is not None:
+                return self._json(403, {"error": "forbidden"})
+            try:
+                return self._json(200, desk_choices((qs.get("session") or [""])[0]))
+            except (ValueError, subprocess.TimeoutExpired, OSError) as e:
+                return self._json(400, {"error": str(e)})
+
         if parts == ["desk"]:
             if on_behalf_of is not None:
                 return self._json(403, {"error": "forbidden"})
@@ -18498,6 +19015,8 @@ class Handler(BaseHTTPRequestHandler):
                        if SSH_MACHINES[m].get("ssh_host") and SSH_MACHINES[m]["ssh_host"] in reachable}
             reachable = [m for m in reachable if not SSH_MACHINES[m].get("ssh_host")]
             return self._json(200, {
+                # A demo room: only these presets can be started (the deployment notes).
+                **({"demo": True, "presets": sorted(DEMO_PRESETS)} if DEMO_ROOM else {}),
                 "root_shell": root_shell_allowed(),
                 # Shows the ⚙ link to everyone's logins (the deployment notes).
                 # Only a hint: aiza-login-list itself decides.
@@ -19206,10 +19725,27 @@ class Handler(BaseHTTPRequestHandler):
             meta, err = resolve_session_access(session_id, on_behalf_of)
             if err:
                 return self._json(*err)
+            body = self._read_json_body()
+            if meta.get("stopped") and meta.get("preset") not in HEADLESS_PRESETS:
+                # Stopped: there is no pane to type into. Said before anything
+                # is written to the chat (it used to show the text as sent,
+                # then fail on the pane), so the page resumes it and sends
+                # again, or puts the text back in the box (2026-11-27, the
+                # user: 停止中のセッションに送ると、メッセージが捨てられること
+                # があります。再開してから送る…できなければ入力欄に戻す).
+                return self._json(409, {"error": "このセッションは止まっています", "stopped": True,
+                                        "not_sent": True})
             loc = meta.get("tmux_location") or ""
             if loc.startswith("ssh:") and ssh_wakeable(loc[4:]):
                 ssh_reachable_or_wake(loc[4:])     # asleep: wake it before sending (the deployment notes)
-            body = self._read_json_body()
+            if body.get("wait_ready") and meta.get("preset") not in HEADLESS_PRESETS:
+                # Just resumed by the page to take this text: only once its
+                # input is up (a resume can show a menu first, and typing into
+                # it loses the text); else nothing is written or sent and the
+                # page puts the text back.
+                if not _wait_prompt(session_id, RESUME_SEND_WAIT):
+                    return self._json(503, {"error": f"立ち上がって入力を受けられるようにならなかった({RESUME_SEND_WAIT} 秒)",
+                                            "not_ready": True, "wait": RESUME_SEND_WAIT, "not_sent": True})
             text = body.get("text", "")
             # Default True: a client that predates the 送信/実行 split, or any
             # other caller that just posts a text, still gets text-then-Enter.
@@ -19227,6 +19763,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(400, {"error": "this preset takes whole messages only"})
             if not text and not submit:
                 return self._json(400, {"error": "nothing to send"})
+            if body.get("typed") and meta.get("preset") not in HEADLESS_PRESETS:
+                # An open card first, as 「答えずにチャットで書く」 (ask_dismiss_for_chat).
+                try:
+                    ask_dismiss_for_chat(session_id, meta)
+                except UnlockRequired as e:
+                    return self._unlock_required(e)
+                except AskStillOpen as e:
+                    return self._json(409, {"error": f"{e}。文は送っていません", "not_sent": True, "ask_open": True})
             # Tag who actually typed this when it's a shared collaborator, not
             # the owner (the deployment notes) -- renderEvent() shows this as a name
             # prefix so a co-worked session stays legible about who said what.
@@ -19235,6 +19779,10 @@ class Handler(BaseHTTPRequestHandler):
             except UnlockRequired as e:
                 return self._unlock_required(e)
             except (RuntimeError, subprocess.TimeoutExpired) as e:
+                if text:
+                    # the line above it was written before the pane refused it
+                    append_event(session_id, {"type": "system", "text":
+                        "(直前の文はセッションに届いていません。送った画面の入力欄に戻しています)"})
                 return self._json(502, {"error": f"message may not have reached the session: {e}"})
             if submit and not body.get("quiet_reply"):
                 task_user_sent(session_id)  # the deployment notes: Claude's turn now
@@ -19280,6 +19828,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self._unlock_required(e)
             try:
                 path = save_inbox_attachment(session_id, meta, filename, data)
+            except InboxUnavailable as e:
+                return self._json(409, {"error": str(e)})
             except RuntimeError as e:
                 return self._json(502, {"error": str(e)})
             return self._json(201, {"path": path})
@@ -19292,7 +19842,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(400, {"error": "bad request"})
             try:
                 return self._json(200, desk_report(body.get("text"), body.get("session"), body.get("ref"), body.get("pos"),
-                                                   body.get("commit")))
+                                                   body.get("commit"), body.get("kind"), body.get("pick"),
+                                                   body.get("label")))
             except TreeUnavailable as e:
                 return self._json(503, {"error": str(e)})
             except ValueError as e:

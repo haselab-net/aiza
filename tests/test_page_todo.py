@@ -69,12 +69,20 @@ CASES = {
         OPEN, ("press('済んだ', '✓')", 1200),
         ("out.toast = toast()", 100),
     ]),
+    # The page's own popup (the deployment notes): the usual times as buttons, or a date and time.
     "💤: a choice, a date, unreadable, cancelled": ({**BASE, **TASK(Y2, {"state": "you", "ts": T0, "declared": False})}, [
-        OPEN, (ASK % "'2'" + "press('黙った', '💤')", 800),
-        (ASK % "'12/31 18:30'" + "press('黙った', '💤')", 800),
-        (ASK % "'12/31'" + "press('黙った', '💤')", 800),
-        (ASK % "'あした'" + "press('黙った', '💤')", 800),
-        (ASK % "null" + "press('黙った', '💤')", 800),
+        OPEN, ("window.__popManual = true; press('黙った', '💤')", 800),
+        ("const P = (q) => document.querySelector('.aiza-pop-ask ' + q); " + "out.labels = [...document.querySelectorAll('.aiza-pop-ask .pop-choice')].map((b) => b.textContent);"
+         " out.title = P('.pop-head span').textContent; document.querySelectorAll('.aiza-pop-ask .pop-choice')[1].click();"
+         " P('.pop-ok').click()", 800),
+        ("press('黙った', '💤')", 800),
+        ("const P = (q) => document.querySelector('.aiza-pop-ask ' + q); " + "let y = new Date().getFullYear(); if (new Date(y, 11, 31, 18, 30) < new Date()) y++;"
+         " const c = P('.pop-custom'); c.value = y + '-12-31T18:30'; c.dispatchEvent(new Event('input')); P('.pop-ok').click()", 800),
+        ("press('黙った', '💤')", 800),
+        ("const P = (q) => document.querySelector('.aiza-pop-ask ' + q); " + "const c = P('.pop-custom'); c.value = '2000-01-01T09:00'; c.dispatchEvent(new Event('input')); P('.pop-ok').click()", 800),
+        ("press('黙った', '💤')", 800),
+        ("const P = (q) => document.querySelector('.aiza-pop-ask ' + q); " + "P('.close').click()", 500),
+        ("out.open = document.querySelectorAll('.aiza-pop').length", 100),
     ]),
     "⏰ on a snoozed one": ({**BASE, **TASK(SN, {"state": "you", "ts": T0})}, [
         OPEN, ("press('寝た', '⏰')", 1000),
@@ -175,19 +183,16 @@ class PageTodoTest(unittest.TestCase):
 
     def test_snooze_choices_a_date_and_one_unreadable(self):
         out = self.got("💤: a choice, a date, unreadable, cancelled")
-        self.assertEqual(len(out["asked"]), 5)
-        self.assertEqual(out["asked"][0].split("\n")[1:4][0][:5], "1: 明日")
+        self.assertEqual(out["title"], "いつまで寝かせますか")
+        self.assertTrue(out["labels"][0].startswith("明日"), out["labels"])
         sent = [b["until"] for b in posted(out, f"POST /sessions/{Y2}/task")]
-        self.assertEqual(len(sent), 3)
+        self.assertEqual(len(sent), 2)
         self.assertEqual(sent[0], at9(3))
         now = datetime.now()
-
-        def md(m, d, h, mi):
-            x = datetime(now.year, m, d, h, mi)
-            return (x if x >= now else x.replace(year=now.year + 1)).timestamp()
-        self.assertEqual(sent[1], md(12, 31, 18, 30))
-        self.assertEqual(sent[2], md(12, 31, 9, 0))
-        self.assertEqual(out["alerts"], ["日付が読めませんでした"])
+        x = datetime(now.year, 12, 31, 18, 30)
+        self.assertEqual(sent[1], (x if x >= now else x.replace(year=now.year + 1)).timestamp())
+        self.assertEqual(out["alerts"], ["日付が読めませんでした"])   # a time gone by: said, not sent
+        self.assertEqual(out["open"], 0)                              # ✕ closed it, nothing written to lose
         self.assertTrue(all(b["state"] == "snooze" for b in posted(out, f"POST /sessions/{Y2}/task")))
 
     def test_wake_a_snoozed_one(self):

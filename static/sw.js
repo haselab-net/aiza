@@ -3,6 +3,10 @@
 // we have a place to receive Web Push events. No offline caching -- this is
 // a live control panel, not a static site.
 
+// The page's base ("" or a demo seat's "/r/<seat>", the deployment notes): the
+// scope this worker was registered for, without its last "/".
+const BASE = new URL(self.registration.scope).pathname.replace(/\/$/, "");
+
 self.addEventListener("install", (event) => {
   self.skipWaiting();
 });
@@ -35,7 +39,7 @@ self.addEventListener("push", (event) => {
   event.waitUntil(
     self.registration.showNotification(payload.title || "AI座", {
       body: payload.message || "New activity",
-      icon: "/agents/icons/aiza-192.png",
+      icon: BASE + "/agents/icons/aiza-192.png",
       data: { session_id: payload.session_id, url },
       tag: payload.session_id || (url ? `aiza-url:${url}` : "aiza"),
     })
@@ -67,14 +71,15 @@ self.addEventListener("notificationclick", (event) => {
   }
   const sessionId = event.notification.data && event.notification.data.session_id;
   // The tabs' addresses (the deployment notes, 2026-11-25): a session over 仕事.
-  const url = sessionId ? `/work#${sessionId}` : "/work";
-  const isApp = (c) => /^\/(work(\/[a-z]+)?|inbox|settings)\/?$/.test(new URL(c.url).pathname) || new URL(c.url).pathname === "/agents/";
+  const url = sessionId ? `${BASE}/work#${sessionId}` : `${BASE}/work`;
+  const inBase = (c) => { const p = new URL(c.url).pathname; return p.startsWith(BASE + "/") ? p.slice(BASE.length) : null; };
+  const isApp = (c) => { const p = inBase(c); return p !== null && (/^\/(work(\/[a-z]+)?|inbox|settings)\/?$/.test(p) || p === "/agents/"); };
   event.waitUntil((async () => {
     const clientsArr = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
     // Prefer the app itself (/agents/) over its helper pages
     // (outbox-browse.html, docs.html, ...) that share this scope.
     const app = clientsArr.find(isApp)
-      || clientsArr.find((c) => new URL(c.url).pathname.startsWith("/agents/"));
+      || clientsArr.find((c) => (inBase(c) || "").startsWith("/agents/"));
     if (!app) return self.clients.openWindow(url);
     try { await app.focus(); } catch (e) { /* not focusable: still try to open the session */ }
     if (!sessionId) return;
@@ -87,7 +92,7 @@ self.addEventListener("notificationclick", (event) => {
     app.postMessage({ type: "open-session", session_id: sessionId });
     if (typeof app.navigate === "function") {
       // Over the tab it is on (only the #<id> changes).
-      const here = isApp(app) ? new URL(app.url).pathname : "/work";
+      const here = isApp(app) ? new URL(app.url).pathname : `${BASE}/work`;
       try { await app.navigate(`${here}#${sessionId}`); } catch (e) { /* message above already handled it */ }
     }
   })());

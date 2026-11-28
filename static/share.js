@@ -43,7 +43,7 @@
     // throw on this endpoint's plain-text body.
     const res = await fetch(sessionApiUrl(sid, "/download", chatNow.owner)).catch(() => null);
     if (!res || !res.ok) {
-      alert(t("share.download_failed") + (res ? `: ${res.status}` : ""));
+      ui.toast(t("share.download_failed") + (res ? `: ${res.status}` : ""), { error: true });
       return;
     }
     const disposition = res.headers.get("Content-Disposition") || "";
@@ -101,7 +101,7 @@
         const all = lastSessions.find((x) => x.id === m.id && !x.owner) ? lastSessions : await refreshSessions();
         if (!still()) return;
         const meta = (all || []).find((x) => x.id === m.id && !x.owner);
-        if (!meta) { alert(t("common.cannot_see_session_no_longer")); return; }
+        if (!meta) { ui.toast(t("common.cannot_see_session_no_longer"), { error: true }); return; }
         setShareVisible(false);
         chatNow.open(meta);
       });
@@ -168,7 +168,7 @@
     const codexMove = hasMailboxCodex && (chatNow.preset === "codex-tui" ||
       (chatNow.preset === "shell" && chatNow.meta && chatNow.meta.codex_resume_id));
     const move = hasMailbox && (chatNow.preset === "claude-tui" || codexMove)
-      ? `<div class="share-save"><button id="move-mail-btn">${t("share.move_into_box", { box: mailboxLabel })}</button></div>` : "";
+      ? `<div class="share-save"><button id="move-mail-btn">${t("share.move_into_box", { box: escapeHtml(mailboxLabel) })}</button></div>` : "";
     // The desk (the deployment notes): a report with a link to this session.
     const desk = `<div class="share-save"><button id="desk-report-btn">${t("share.send_desk_bug_request")}</button></div>`;
     // To this session's place in the work tree (2026-11-20, the user:
@@ -202,7 +202,7 @@
     updateChatTreeBtn();
     const moveBtn = sharePaneEl.querySelector("#move-mail-btn");
     if (moveBtn) moveBtn.addEventListener("click", async () => {
-      if (!confirm(t("share.move_session_into_box_conversation", { box: mailboxLabel }))) return;
+      if (!(await ui.confirm(t("share.move_session_into_box_conversation", { box: mailboxLabel })))) return;
       const sid = chatNow.id;
       const still = ui.ticket();
       moveBtn.disabled = true;
@@ -210,7 +210,7 @@
         const meta = await withUnlockRetry(() => api(`/sessions/${sid}/to-mailbox`, { method: "POST" }));
         await refreshSessions();
         if (still()) chatNow.open(meta);   // moved elsewhere meanwhile: it is in the list
-      } catch (e) { moveBtn.disabled = false; alert(e.message); }
+      } catch (e) { moveBtn.disabled = false; ui.toast(e.message, { error: true }); }
     });
     const targetEl = sharePaneEl.querySelector("#share-target");
     const userEl = sharePaneEl.querySelector("#share-username");
@@ -242,7 +242,7 @@
             body: JSON.stringify({ username }),
           }), still);
         } catch (e) {
-          alert(t("share.could_not_stop_sharing_err", { err: e.message }));
+          ui.toast(t("share.could_not_stop_sharing_err", { err: e.message }), { error: true });
         }
       });
     });
@@ -258,7 +258,7 @@
           body: JSON.stringify({ username, mode }),
         }), still);
       } catch (e) {
-        alert(t("share.could_not_share_err", { err: e.message }));
+        ui.toast(t("share.could_not_share_err", { err: e.message }), { error: true });
       }
     });
   }

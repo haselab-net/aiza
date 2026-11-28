@@ -98,32 +98,101 @@ class DeskIntakeTest(unittest.TestCase):
                              check=True, env=env).stdout.strip()
         return d, sha
 
-    def test_a_deploy_request_names_the_commit_in_the_sessions_folder(self):
+    def _gh(self, sha, state="OPEN"):
+        """A stand-in gh on PATH: one open pull request, #7, at `sha`."""
+        bindir = Path(self.tmp.name) / "bin"
+        bindir.mkdir(exist_ok=True)
+        gh = bindir / "gh"
+        pr = {"number": 7, "title": "直した", "headRefName": "fix", "headRefOid": sha}
+        gh.write_text("#!/bin/sh\n"
+                      f"if [ \"$2\" = list ]; then echo '{json.dumps([pr])}'; else echo '{json.dumps({'headRefOid': sha, 'state': state})}'; fi\n")
+        gh.chmod(0o755)
+        self.saved_path = os.environ["PATH"]
+        os.environ["PATH"] = f"{bindir}:{self.saved_path}"
+        self.addCleanup(lambda: os.environ.__setitem__("PATH", self.saved_path))
+        B._desk_gh_env = lambda meta: dict(os.environ, GH_CONFIG_DIR=str(bindir))
+        self.addCleanup(lambda: setattr(B, "_desk_gh_env", self.saved_gh_env))
+
+    def setUp_gh_env(self):
+        self.saved_gh_env = B._desk_gh_env
+
+    def test_a_deploy_request_names_a_branch_resolved_here(self):
         d, sha = self._repo()
         self.metas["0123456789ab"]["cwd"] = str(d)
+        self.metas["0123456789ab"]["tmux_location"] = "host"
         self.write(root="nd", readers=["desk1"])
-        B.desk_report("直した", "0123456789ab", commit=sha[:8])
+        branch = B.subprocess.run(["git", "-C", str(d), "branch", "--show-current"], capture_output=True, text=True).stdout.strip()
+        B.desk_report("直した", "0123456789ab", what="deploy", pick={"branch": branch})
         self.assertEqual(self.calls[0]["deploy"], {"repo": str(d.resolve()), "sha": sha})
-        self.calls.clear()
-        B.desk_report("直した", "0123456789ab", commit=f"{d} {sha[:10]}")
-        self.assertEqual(self.calls[0]["deploy"]["sha"], sha)
-        for bad in ("zzzz", f"{d} {sha} x", "deadbeef0"):
+        for bad in ({"branch": "no-such"}, {"branch": "-x"}, {"branch": "a..b"}, {}, {"branch": "x", "pull": 1}, "main", None):
             with self.assertRaises(ValueError):
-                B.desk_report("直した", "0123456789ab", commit=bad)
+                B.desk_report("直した", "0123456789ab", what="deploy", pick=bad)
+        with self.assertRaises(ValueError):   # a typed sha is not taken any more
+            B.desk_report("直した", "0123456789ab", commit=sha[:8])
+
+    def test_a_deploy_request_names_an_open_pull_request(self):
+        self.setUp_gh_env()
+        d, sha = self._repo()
+        self.metas["0123456789ab"].update(cwd=str(d), tmux_location="host")
+        self.write(root="nd")
+        self._gh(sha)
+        got = B.desk_choices("0123456789ab")
+        self.assertEqual([p["number"] for p in got["pulls"]], [7])
+        self.assertEqual(len(got["branches"]), 1)
+        B.desk_report("直した", "0123456789ab", what="deploy", pick={"pull": 7})
+        self.assertEqual(self.calls[0]["deploy"]["sha"], sha)
+        for bad in ({"pull": "7"}, {"pull": 0}, {"pull": True}):
+            with self.assertRaises(ValueError):
+                B.desk_report("直した", "0123456789ab", what="deploy", pick=bad)
+
+    def test_a_closed_pull_request_is_refused(self):
+        self.setUp_gh_env()
+        d, sha = self._repo()
+        self.metas["0123456789ab"].update(cwd=str(d), tmux_location="host")
+        self.write(root="nd")
+        self._gh(sha, state="MERGED")
+        with self.assertRaises(ValueError):
+            B.desk_report("直した", "0123456789ab", what="deploy", pick={"pull": 7})
+        self.assertEqual(self.calls, [])
+
+    def test_without_a_gh_login_only_branches_are_offered(self):
+        self.setUp_gh_env()
+        d, sha = self._repo()
+        self.metas["0123456789ab"].update(cwd=str(d), tmux_location="host")
+        B._desk_gh_env = lambda meta: {"PATH": os.environ["PATH"]}
+        self.addCleanup(lambda: setattr(B, "_desk_gh_env", self.saved_gh_env))
+        got = B.desk_choices("0123456789ab")
+        self.assertEqual(got["pulls"], [])
+        self.assertTrue(got["pulls_note"])
+        self.assertEqual(got["branches"][0]["sha"], sha)
+
+    def test_not_a_repository_offers_nothing(self):
+        self.metas["0123456789ab"].update(cwd=self.tmp.name, tmux_location="host")
+        got = B.desk_choices("0123456789ab")
+        self.assertEqual((got["repo"], got["branches"], got["pulls"]), (None, [], []))
+
+    def test_a_report_carries_no_commit(self):
+        self.write(root="nd")
+        B.desk_report("動かない", "0123456789ab", what="report")
+        self.assertNotIn("deploy", self.calls[0])
 
     def test_a_deploy_request_rides_along_to_the_other_hosts_desk(self):
         d, sha = self._repo()
-        self.metas["0123456789ab"]["cwd"] = str(d)
+        self.metas["0123456789ab"].update(cwd=str(d), tmux_location="host")
         self.write(url="https://desk.example/agents/")
-        r = B.desk_report("直した", "0123456789ab", commit=sha)
+        branch = B.subprocess.run(["git", "-C", str(d), "branch", "--show-current"], capture_output=True, text=True).stdout.strip()
+        r = B.desk_report("直した", "0123456789ab", what="deploy", pick={"branch": branch})
         self.assertIn("c=", r["desk_url"])
+        self.assertIn("l=", r["desk_url"])     # what was picked, shown on the desk's page
         self.write(root="nd")
         me = B.getpass.getuser()
         c = json.dumps({"repo": "/home/x/aiza", "sha": sha})
-        B.desk_report("直した", ref=f"other/{me}/devbox/0123456789ab", commit=c)
+        B.desk_report("直した", ref=f"other/{me}/devbox/0123456789ab", commit=c, what="deploy")
         self.assertEqual(self.calls[0]["deploy"], {"repo": "/home/x/aiza", "sha": sha})
         with self.assertRaises(ValueError):   # someone else's session
             B.desk_report("直した", ref="other/zz-nobody/devbox/0123456789ab", commit=c)
+        with self.assertRaises(ValueError):   # a deploy request with nothing to deploy
+            B.desk_report("直した", ref=f"other/{me}/devbox/0123456789ab", what="deploy")
         for bad in ('{"repo":"/a/../b","sha":"%s"}' % sha, '{"repo":"/a","sha":"abc"}', "{"):
             with self.assertRaises(ValueError):
                 B.desk_report("直した", ref=f"other/{me}/devbox/0123456789ab", commit=bad)

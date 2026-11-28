@@ -14,7 +14,8 @@ import subprocess
 import sys
 
 MAX_INPUT = 1024 * 1024
-REASON = 'ローカル LLM 専用の結果を開く操作、または箱の番人を確認できない操作は実行できません。'
+REASON = ('ローカル LLM 専用の結果を開く操作、Email の箱からの discord-dm(Discord へは aiza-out discord でカードを)、'
+          'または箱の番人を確認できない操作は実行できません。')
 
 
 def box_home():
@@ -25,9 +26,14 @@ def box_home():
     return home
 
 
+# discord-dm (the deployment notes) posts to the lab's people with no card: from
+# the Email box Discord goes only through `aiza-out discord` (2026-11-27).
+BLOCKED = ('.local-only', 'discord-dm')
+
+
 def protected(value):
     if isinstance(value, str):
-        return '.local-only' in value
+        return any(b in value for b in BLOCKED)
     if isinstance(value, dict):
         return any(protected(k) or protected(v) for k, v in value.items())
     if isinstance(value, list):

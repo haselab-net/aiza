@@ -106,8 +106,48 @@ LOGIN = {"id": "bbbbbbbbbb01", "label": "login", "preset": "claude-login", "tmux
 PRE_JS = r"""
 // Every uncaught error and rejected promise of the page: the probes report them.
 window.__jsErrors = [];
+window.addEventListener("securitypolicyviolation", (e) => window.__jsErrors.push("csp: " + e.violatedDirective + " " + (e.blockedURI || "inline")));
 window.addEventListener("error", (e) => window.__jsErrors.push("error: " + e.message));
 window.addEventListener("unhandledrejection", (e) => window.__jsErrors.push("rejection: " + ((e.reason && e.reason.message) || e.reason) + ((e.reason && e.reason.stack && window.__jsStack) ? " " + e.reason.stack : "")));
+// The page's own popups and toasts (the deployment notes) answered the way the
+// probes' stand-ins for the browser's dialogs say: a ui.confirm by
+// window.confirm(text), each field of a ui.ask by window.prompt(label,
+// value) (null cancels; for a choice, its value or else the field of one's
+// own), and a toast handed to window.alert. A probe that drives a popup
+// itself sets window.__popManual.
+new MutationObserver((muts) => {
+  for (const m of muts) for (const el of m.addedNodes) {
+    if (!(el instanceof HTMLElement)) continue;
+    if (el.classList.contains("aiza-toast")) { try { window.alert(el.querySelector("span").textContent); } catch (e) {} continue; }
+    if (!el.classList.contains("aiza-pop") || el.id === "desk-modal" || window.__popManual) continue;
+    setTimeout(() => {
+      if (!el.isConnected) return;
+      const click = (q) => { const b = el.querySelector(q); if (b) b.click(); };
+      if (el.classList.contains("aiza-pop-confirm")) {
+        const yes = window.confirm(el.querySelector(".pop-text").textContent);
+        return click(yes ? ".pop-actions button:last-child" : ".pop-actions .pop-cancel");
+      }
+      for (const f of el.querySelectorAll(".pop-field")) {
+        const label = (f.querySelector(":scope > span") || {}).textContent || el.querySelector(".pop-head span").textContent;
+        const input = f.querySelector(":scope > input:not(.pop-custom), :scope > textarea, :scope > select");
+        const choices = [...f.querySelectorAll(".pop-choice")];
+        const on = choices.find((b) => b.classList.contains("on"));
+        const ans = window.prompt(label, input ? input.value : on ? on.dataset.value : "");
+        if (ans === null || ans === undefined) {
+          for (const x of el.querySelectorAll(".pop-field input, .pop-field textarea")) x.value = "";
+          return click(".pop-cancel");
+        }
+        if (input) input.value = String(ans);
+        else {
+          const hit = choices.find((b) => b.dataset.value === String(ans));
+          if (hit) hit.click();
+          else { const c = f.querySelector(".pop-custom"); c.value = String(ans); c.dispatchEvent(new Event("input")); }
+        }
+      }
+      click(".pop-actions button:last-child");
+    }, 0);
+  }
+}).observe(document.documentElement, { childList: true, subtree: true });
 window.__recs = [];
 class FakeRec { constructor() { window.__recs.push(this); this.n = 0; } start() {} stop() {} abort() {} }
 window.SpeechRecognition = FakeRec; window.webkitSpeechRecognition = FakeRec;
@@ -182,6 +222,14 @@ POST_ENDS = {"/archive": dict(NEW, archived=True), "/unarchive": NEW, "/stop": {
 UNANSWERED = set()
 
 
+def _load_gateway():
+    from test_gateway_login import load_gateway
+    return load_gateway()
+
+
+_GATEWAY = _load_gateway()
+
+
 def make_handler(probe_js, st, static=STATIC):
     class H(http.server.BaseHTTPRequestHandler):
         def log_message(self, *a):
@@ -190,6 +238,11 @@ def make_handler(probe_js, st, static=STATIC):
         def send(self, code, data, ctype):
             self.send_response(code)
             self.send_header("Content-Type", ctype)
+            if ctype.startswith("text/html"):
+                # The pages run under the policy a demo room enforces
+                # (aiza-gateway's page_csp, the deployment notes): a script it
+                # would block shows up as a page error (PRE_JS).
+                self.send_header("Content-Security-Policy", _GATEWAY.page_csp(data))
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             self.wfile.write(data)

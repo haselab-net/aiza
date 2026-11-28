@@ -11,6 +11,13 @@ from pathlib import Path
 
 from test_shared_search import B
 
+
+def to_all(text):
+    """`talkto --all "…"` -- a bare talkto is refused since 2026-11-27."""
+    t = B.TalktoText(text)
+    t.all = True
+    return t
+
 A, B2, C, D = "aaaaaaaaaaa1", "aaaaaaaaaaa2", "aaaaaaaaaaa3", "aaaaaaaaaaa4"
 
 
@@ -62,7 +69,7 @@ class LinkGroupTest(unittest.TestCase):
         self.assertIn("`talkto`", self.sent[0][1])
         self.assertTrue(all(any(s == m and "加わりました" in ev["text"] for s, ev in self.events) for m in (A, B2, C)))
         self.sent.clear()
-        status, msg = B._relay_to_partner(A, B.TalktoText("こんにちは"))
+        status, msg = B._relay_to_partner(A, to_all("こんにちは"))
         self.assertEqual(status, "delivered")
         self.assertEqual(sorted(s for s, _ in self.sent), [B2, C])
         self.assertTrue(all(t.startswith("[🔗「aizaE」から] ") for _, t in self.sent))
@@ -94,7 +101,7 @@ class LinkGroupTest(unittest.TestCase):
     def test_stopped_member_stays(self):
         B.create_link(A, B2)
         self.meta(B2, stopped=True)
-        status, msg = B._relay_to_partner(A, B.TalktoText("x"))
+        status, msg = B._relay_to_partner(A, to_all("x"))
         self.assertEqual(status, "stopped")
         self.assertTrue(B._session_is_linked(A) and B._session_is_linked(B2))
         self.meta(B2, stopped=False)
@@ -109,7 +116,7 @@ class LinkGroupTest(unittest.TestCase):
         self.assertNotIn(B2, [s for s, _ in self.sent])
         self.meta(B2, stopped=False)
         note = B.link_resumed_note(B2)
-        self.assertEqual(note, "[AI座 セッション連携] 他のAIと`talkto`コマンドで通信できます。")
+        self.assertEqual(note, "[AI座 セッション連携] 他のAIと`talkto`コマンドで通信できます。送り先は`--to 名前`、全員へは`--all`。")
         self.assertIsNone(B.link_resumed_note(B2))  # once only
         self.meta(C, stopped=True)
         B.create_link(D, A)  # a newcomer is no news for a member already told
@@ -128,10 +135,10 @@ class LinkGroupTest(unittest.TestCase):
             self.meta(replace_session, stopped=False)
             return {"id": replace_session}
         B.create_session = create_session
-        B._send_when_ready = lambda sid, text, who, origin=None: sent_later.append((sid, text, who))
+        B._send_when_ready = lambda sid, text, who, origin=None, orig_text=None: sent_later.append((sid, text, who))
         B.handoff_record = lambda *a: None
         try:
-            status, msg = B._relay_to_partner(A, B.TalktoText("起きて"))
+            status, msg = B._relay_to_partner(A, to_all("起きて"))
             import time
             time.sleep(0.1)
         finally:
@@ -147,7 +154,7 @@ class LinkGroupTest(unittest.TestCase):
         self.assertNotIn("[AI座 セッション連携]", text)  # it was told when linked
         # one with nothing to resume (a shell where claude never ran) is left stopped, and says so
         self.meta(B2, stopped=True, preset="shell", claude_session_id=None)
-        status, msg = B._relay_to_partner(A, B.TalktoText("x"))
+        status, msg = B._relay_to_partner(A, to_all("x"))
         self.assertEqual(status, "stopped")
         self.assertIn("再開できない", msg)
 
@@ -189,7 +196,7 @@ class LinkGroupTest(unittest.TestCase):
         B.load_meta = lambda sid: (json.loads((self.root / sid / "meta.json").read_text()) | {"tmux_location": "root"}
                                    if sid == B2 else real_load(sid))
         try:
-            status, msg = B._relay_to_partner(A, B.TalktoText("root へ"))
+            status, msg = B._relay_to_partner(A, to_all("root へ"))
         finally:
             for n, v in saved.items():
                 setattr(B, n, v)

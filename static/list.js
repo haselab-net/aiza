@@ -72,16 +72,13 @@
   // the row with its real name (2026-10-09, at the user's request).
   const lockedListBarEl = document.createElement("div");
   lockedListBarEl.hidden = true;
-  lockedListBarEl.style.cssText =
-    "display: flex; align-items: center; gap: 0.6rem; margin: 0 0 0.6rem; padding: 0.6rem 0.8rem; " +
-    "border-radius: 10px; border: 1px solid #b45309; background: rgba(180,83,9,0.15); color: #fcd34d; font-size: 0.9rem;";
+  lockedListBarEl.className = "locked-bar";   // style.css
   const lockedListTextEl = document.createElement("span");
-  lockedListTextEl.style.flex = "1";
+  lockedListTextEl.className = "locked-text";
   const lockedListBtnEl = document.createElement("button");
   lockedListBtnEl.type = "button";
   lockedListBtnEl.textContent = t("list.unlock_show");
-  lockedListBtnEl.style.cssText =
-    "flex-shrink: 0; padding: 0.4rem 0.8rem; border-radius: 8px; border: none; background: #4285F4; color: white; font-weight: 600;";
+  lockedListBtnEl.className = "locked-unlock";
   lockedListBarEl.append(lockedListTextEl, lockedListBtnEl);
   // Above the list and its folders, not under them (2026-11-03, the user:
   // with many sessions in a folder the bar was pushed out of sight).
@@ -103,7 +100,7 @@
     try {
       await unlockAndRefresh(lockedListTier);
     } catch (e) {
-      alert(e.message);
+      ui.toast(e.message, { error: true });
     } finally {
       lockedListBtnEl.disabled = false;
     }
@@ -114,7 +111,7 @@
       const all = await unlockAndRefresh(sessionKind(s).root ? "root" : "host");
       chatNow.open((all || []).find((x) => x.id === s.id && x.owner === s.owner) || s);
     } catch (e) {
-      alert(e.message);
+      ui.toast(e.message, { error: true });
     }
   }
 
@@ -226,7 +223,7 @@
         body: JSON.stringify({ ops }),
       });
     } catch (e) {
-      alert(t("list.could_not_save_folders_err", { err: e.message }));
+      ui.toast(t("list.could_not_save_folders_err", { err: e.message }), { error: true });
       folderDoc = await api("/folders").catch(() => folderDoc);
     } finally {
       folderSaving--;
@@ -237,7 +234,7 @@
     return "f" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   }
   async function createFolder(parentId, given) {
-    const name = (given !== undefined ? given : prompt(t("list.folder_name"), "") || "").trim();
+    const name = (given !== undefined ? given : (await ui.ask(t("list.folder_name"), "")) || "").trim();
     if (!name) return;
     const f = { id: newFolderId(), name, parent: parentId, archived: false, last_stopped: [] };
     folderDoc.folders.push(f);
@@ -245,7 +242,7 @@
     await saveFolders([{ op: "put", folder: f }]);
   }
   async function renameFolder(f) {
-    const name = (prompt(t("list.new_name"), f.name) || "").trim();
+    const name = ((await ui.ask(t("list.new_name"), f.name)) || "").trim();
     if (!name || name === f.name) return;
     f.name = name;
     await saveFolders([{ op: "put", folder: { id: f.id, name } }]);
@@ -254,10 +251,10 @@
   // for the sandbox, to $HOME for host-shell and to /root for root-shell;
   // a folder without one uses the nearest folder above's.
   async function setFolderWorkdir(f) {
-    const raw = prompt(t("list.working_folder_relative_sandhome_in"), f.workdir || "");
+    const raw = await ui.ask(t("list.working_folder_relative_sandhome_in"), f.workdir || "");
     if (raw === null) return;
     const workdir = raw.trim().replace(/^~\//, "").replace(/^\/+|\/+$/g, "");
-    if (workdir.split("/").includes("..")) { alert(t("list.not_allowed")); return; }
+    if (workdir.split("/").includes("..")) { ui.toast(t("list.not_allowed"), { error: true }); return; }
     f.workdir = workdir;
     await saveFolders([{ op: "put", folder: { id: f.id, workdir } }]);
   }
@@ -296,10 +293,10 @@
     const subs = childFolders(f.id).length;
     const inside = lastSessions.filter((s) => !s.owner && folderOfSession(s) === f.id).length;
     if (subs || inside) {
-      alert(t("list.name_not_empty_so_cannot", { name: f.name, f: subs, n: inside }));
+      ui.toast(t("list.name_not_empty_so_cannot", { name: f.name, f: subs, n: inside }), { error: true });
       return;
     }
-    if (!confirm(t("list.delete_folder_name", { name: f.name }))) return;
+    if (!(await ui.confirm(t("list.delete_folder_name", { name: f.name }), { danger: true }))) return;
     folderDoc.folders = folderDoc.folders.filter((x) => x.id !== f.id);
     openFolders.delete(f.id);
     saveOpenFolders();
@@ -318,7 +315,7 @@
   async function stopFolder(f) {
     const list = sessionsInSubtree(f.id, lastVisibleSessions.filter((s) => !s.owner && !s.archived && s.alive));
     if (!list.length) return;
-    if (!confirm(t("list.stop_n_sessions_in_name", { name: f.name, n: list.length }))) return;
+    if (!(await ui.confirm(t("list.stop_n_sessions_in_name", { name: f.name, n: list.length }), { danger: true }))) return;
     const stopped = [];
     const failed = [];
     await runLimited(list, 3, async (s) => {
@@ -331,7 +328,7 @@
     });
     f.last_stopped = stopped;
     await saveFolders([{ op: "put", folder: { id: f.id, last_stopped: stopped } }]);
-    if (failed.length) alert(t("list.could_not_stop") + "\n" + failed.join("\n"));
+    if (failed.length) ui.toast(t("list.could_not_stop") + "\n" + failed.join("\n"), { error: true });
     await refreshSessions();
   }
   function folderResumable(f) {
@@ -342,12 +339,12 @@
   async function resumeFolder(f) {
     let list = folderResumable(f);
     if (!list.length) return;
-    if (!confirm(t("list.resume_n_sessions_last_stop", { name: f.name, n: list.length }))) return;
+    if (!(await ui.confirm(t("list.resume_n_sessions_last_stop", { name: f.name, n: list.length })))) return;
     if (list.some((s) => s.locked)) {
       try {
         await unlockAndRefresh(lockedTierFor(list.filter((s) => s.locked)));
       } catch (e) {
-        alert(e.message);
+        ui.toast(e.message, { error: true });
         return;
       }
       list = folderResumable(f);
@@ -367,7 +364,7 @@
     });
     f.last_stopped = [];
     await saveFolders([{ op: "put", folder: { id: f.id, last_stopped: [] } }]);
-    if (failed.length) alert(t("list.could_not_resume") + "\n" + failed.join("\n"));
+    if (failed.length) ui.toast(t("list.could_not_resume") + "\n" + failed.join("\n"), { error: true });
     await refreshSessions();
   }
   async function runLimited(items, n, fn) {
@@ -763,7 +760,6 @@
     if (listLoaded && !nodes.length && !lastSessions.some((s) => !s.owner)) {
       const hint = document.createElement("div");
       hint.className = "list-empty";
-      hint.style.cssText = "color:#9aa5b1;padding:0.8rem 0.6rem;line-height:1.5";
       hint.textContent = t("list.no_sessions_yet_choose_ai");
       put(hint);
     }
@@ -901,7 +897,15 @@
         <span class="label">${typeIcon(s)}${screenBadge(s)}${escapeHtml(s.label)}${waitingBadge(s)}</span>
         <div class="meta">${machinePrefix(s)}${cwdPrefix(s)}${fmtTime(s.created_ts)}${ownerBadge}${issueSuffix(s)}${linkSuffix(s)}</div>
       </div>`;
-    row.addEventListener("click", () => (s.locked ? openLockedSession(s) : chatNow.open(s)));
+    // While choosing the other side of a link (the banner is up), a tap on
+    // one's own session adds it to the link rather than opening it, the same
+    // as its 🔗 (2026-11-27, the user: リンク先を選ぶとき、セッションをタップ
+    // したら開いてしまいました。リンクに加えるようにしてください).
+    // The armed one itself still opens (backing out is the banner's キャンセル).
+    row.addEventListener("click", () => {
+      if (linkArmedSessionId !== null && linkArmedSessionId !== s.id && !s.owner) { onLinkButtonTapped(s); return; }
+      s.locked ? openLockedSession(s) : chatNow.open(s);
+    });
     wireSessionDrag(row.querySelector(".drag-handle"), row);
     // Tapping an ended session's grey dot offers to resume it (2026-10-09,
     // user request: "灰色のスイッチを押したら、再開するか確認して、OKなら再開") --
@@ -1193,13 +1197,13 @@
     await refreshSessions().catch(() => null);
     const meta = lastSessions.find((s) => s.id === id && !s.owner);
     if (!meta) return;
-    if (kind === "delete" && !confirm(t("list.delete_conversation_log_label_cannot", { label: meta.label }))) return;
+    if (kind === "delete" && !(await ui.confirm(t("list.delete_conversation_log_label_cannot", { label: meta.label }), { danger: true }))) return;
     const next = patrolTarget(1);
     if (kind === "archive") {
       await archiveSession(meta);
     } else {
       const ok = await api(`/sessions/${id}/delete`, { method: "POST" }).then(() => true, (e) => {
-        alert(t("list.could_not_delete_err", { err: e.message }));
+        ui.toast(t("list.could_not_delete_err", { err: e.message }), { error: true });
         return false;
       });
       if (!ok) return;
@@ -1457,7 +1461,7 @@
 
   async function archiveSession(meta) {
     const ok = await api(`/sessions/${meta.id}/archive`, { method: "POST" }).then(() => true, (e) => {
-      alert(t("list.could_not_archive_err", { err: e.message }));
+      ui.toast(t("list.could_not_archive_err", { err: e.message }), { error: true });
       return false;
     });
     if (ok) {
@@ -1470,7 +1474,7 @@
 
   async function unarchiveSession(meta) {
     const ok = await api(`/sessions/${meta.id}/unarchive`, { method: "POST" }).then(() => true, (e) => {
-      alert(t("list.could_not_restore_err", { err: e.message }));
+      ui.toast(t("list.could_not_restore_err", { err: e.message }), { error: true });
       return false;
     });
     await refreshSessions();
@@ -1846,13 +1850,13 @@
   }
 
   async function deleteSession(meta) {
-    if (!confirm(t("list.delete_conversation_log_label_cannot", { label: meta.label }))) return;
+    if (!(await ui.confirm(t("list.delete_conversation_log_label_cannot", { label: meta.label }), { danger: true }))) return;
     await api(`/sessions/${meta.id}/delete`, { method: "POST" });
     await refreshSessions();
   }
 
   async function renameSession(meta) {
-    const next = prompt(t("list.new_name"), meta.label);
+    const next = await ui.ask(t("list.new_name"), meta.label);
     if (next === null) return; // cancelled
     const trimmed = next.trim();
     if (!trimmed || trimmed === meta.label) return;
@@ -1860,7 +1864,7 @@
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ label: trimmed }),
-    }).catch((e) => alert(t("list.could_not_rename_err", { err: e.message })));
+    }).catch((e) => ui.toast(t("list.could_not_rename_err", { err: e.message }), { error: true }));
     await refreshSessions();
     // The chat header's own label is a separate DOM element (set once in
     // openSession(), not re-read from the session list) -- keep it in sync
@@ -1924,7 +1928,7 @@
         cols: computeScreenCols(), rows: computeScreenRows(),
       }),
     })).catch((e) => {
-      alert(t("list.could_not_connect_err", { err: e.message }));
+      ui.toast(t("list.could_not_connect_err", { err: e.message }), { error: true });
       return null;
     });
     if (!meta) return;

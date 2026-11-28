@@ -43,7 +43,9 @@ help() {
 aiza の「セッション連携」でこのセッションとつながっている、もう一方のセッション
 (別の Claude Code など)に、文を1つ送ります。送られるのは talkto に渡した文だけで、
 あなたの応答が自動で転送されることはありません。
-3つ以上つながっているときは、ほかの全員に届きます。相手はあとから加わることがあり、
+送り先は必ず指定します: 1人に送るときは --to にその名前(aiza の一覧の名前)、
+つながっている全員に送るときは --all を付けます。どちらも無いときは送らずに終わります
+(終了コード 1。相手が1人だけでも同じ)。相手はあとから加わることがあり、
 そのとき知らせは来ません。今の相手は talkto --list で分かります(何も送りません)。
 
 送ったあと、aiza が転送した結果を最大${WAIT_SECONDS}秒待って表示します:
@@ -55,6 +57,8 @@ aiza の「セッション連携」でこのセッションとつながってい
 
 オプション:
   -h, --help, -help   この説明を表示する(何も送らない)
+  --to 名前           つながっている相手のうち、その名前の1人だけに送る
+  --all               つながっている全員に送る(--to か --all のどちらかが要る)
   --list              今つながっている相手(名前・種類・動いているか)を表示する(何も送らない)
   --no-wait           結果を待たずに終わる
   -                   文を標準入力から読む(文の引数が無いときも同じ)
@@ -67,24 +71,36 @@ EOF
 
 usage_error() {
     echo "talkto: $1" >&2
-    echo '使い方: talkto "相手に送る文"   (詳しくは talkto --help)' >&2
+    echo '使い方: talkto --to 名前 "相手に送る文"   (全員へは --all。詳しくは talkto --help)' >&2
     exit 2
 }
 
 no_wait=0
 from_stdin=0
 list=0
+to=
+all=0
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --) shift; break ;;
         -h|--help|-help) help; exit 0 ;;
         --no-wait) no_wait=1; shift ;;
+        --all) [ -z "$to" ] || usage_error "--to と --all は一緒に使えません"; all=1; shift ;;
+        --to) [ "$#" -ge 2 ] || usage_error "--to のあとに相手の名前がありません"; [ "$all" -eq 0 ] || usage_error "--to と --all は一緒に使えません"
+              to=$2; [ -n "${to//[[:space:]]/}" ] || usage_error "--to の名前が空です"; shift 2 ;;
+        --to=*) [ "$all" -eq 0 ] || usage_error "--to と --all は一緒に使えません"
+                to=${1#--to=}; [ -n "${to//[[:space:]]/}" ] || usage_error "--to の名前が空です"; shift ;;
         --list) [ "$#" -eq 1 ] || usage_error "--list にはほかの引数を付けられません"; list=1; shift ;;
         -) shift; [ "$#" -eq 0 ] || usage_error "'-'(標準入力から読む)のあとに文は付けられません"; from_stdin=1; break ;;
         -?*) usage_error "知らないオプションです: $1('-' で始まる文は talkto -- \"$1…\" で送れます)" ;;
         *) break ;;
     esac
 done
+if [ "$list" -eq 0 ] && [ -z "$to" ] && [ "$all" -eq 0 ]; then
+    # 2026-11-27 (the user): no broadcast without --all. Nothing is sent.
+    echo "talkto: --to <名前> か --all(全員へ)を付けてください。送っていません。相手は talkto --list で分かります。" >&2
+    exit 1
+fi
 if [ "$list" -eq 1 ]; then
     text=x
 elif [ "$from_stdin" -eq 1 ] || [ "$#" -eq 0 ]; then
@@ -124,7 +140,12 @@ if [ "$list" -eq 1 ]; then
     no_wait=0
 else
     b64=$(printf '%s' "$text" | base64 | tr -d '\r\n') || exit 1
-    printf '{"ts":%s,"id":"%s","b64":"%s"}\n' "$(date +%s)" "$id" "$b64" >> "$path" || exit 1
+    if [ "$all" -eq 1 ]; then
+        target='"all":true'
+    else
+        target="\"to_b64\":\"$(printf '%s' "$to" | base64 | tr -d '\r\n')\""
+    fi
+    printf '{"ts":%s,"id":"%s","b64":"%s",%s}\n' "$(date +%s)" "$id" "$b64" "$target" >> "$path" || exit 1
 fi
 if [ "$no_wait" -eq 1 ]; then
     echo "talkto: 送りました(結果は待っていません)"

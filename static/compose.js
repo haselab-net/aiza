@@ -46,6 +46,13 @@
     const here = () => chatNow.id === sid && chatNow.owner === owner;   // the box is still that session's
     textEl.value = "";
     autoResizeTextarea();
+    // Stopped: resumed first, and the text goes in once it can take it
+    // (2026-11-27, the user: 停止中のセッションに送ると、メッセージが捨てられる
+    // ことがあります。再開してから送る…できなければ入力欄に戻す). The server
+    // says so too (409 stopped) when this page did not know yet.
+    if (chatNow.meta && chatNow.meta.alive === false && !HEADLESS_PRESETS.includes(chatNow.preset)) {
+      return sendResuming(sid, owner, label, text, submit, here);
+    }
     // Immediate feedback: a headless turn can take several seconds and
     // produces no output at all until it's fully done, which otherwise
     // looks exactly like nothing is happening.
@@ -65,33 +72,60 @@
         body: JSON.stringify({ text, submit: !!submit, typed: true }),
       }));
     } catch (e) {
-      // The box was already cleared above (so a *successful* send doesn't
-      // flash the old text back before the reply arrives) -- without this,
-      // a POST failure (a network blip on the phone, aiza-backend-proxy's
-      // socket-activation cold start, a transient 502/504) silently
-      // dropped the message with zero indication: the box looked like it
-      // had sent, nothing ever reached claude, and there was nothing to
-      // retry because the text was already gone. Reported 2026-08-17 as
-      // "たまにclaudeにメッセージが届かない" (occasionally, since it only
-      // shows up on that one unlucky request). Restoring the text and
-      // re-growing the box puts the user back exactly where they were
-      // before pressing send/実行, instead of just losing the message.
-      //
-      // Prepended rather than overwriting (2026-08-29, at the user's
-      // request): the failure only surfaces after the request round-trips,
-      // by which point the user may have already started typing something
-      // new into the now-empty box -- a plain overwrite would silently
-      // discard *that* instead.
-      if (!here()) {
-        // Moved to another session meanwhile: the text waits for its own.
-        unsentFor(sid, owner, text, true);
-        alert(t("compose.sending_label_failed_err", { label, err: e.message }) + "\n"
-          + t("compose.open_session_unsent_text_back"));
-        return;
-      }
-      textEl.value = textEl.value ? `${text}\n${textEl.value}` : text;
-      autoResizeTextarea();
-      alert(t("compose.sending_failed_err", { err: e.message }) + "\n" + t("common.try_again"));
+      if (e.stopped) return sendResuming(sid, owner, label, text, submit, here);
+      putBack(sid, owner, label, text, here, e.message);
+    }
+  }
+
+  // The box was already cleared (so a *successful* send doesn't flash the
+  // old text back before the reply arrives) -- without this, a POST failure
+  // (a network blip on the phone, aiza-backend-proxy's socket-activation
+  // cold start, a transient 502/504) silently dropped the message with zero
+  // indication (2026-08-17, "たまにclaudeにメッセージが届かない"). The text
+  // goes back where the user was, prepended (2026-08-29): by the time the
+  // failure is known they may have started typing something new.
+  function putBack(sid, owner, label, text, here, why) {
+    if (!text) { ui.toast(t("compose.sending_failed_err", { err: why }), { error: true }); return; }
+    if (!here()) {
+      // Moved to another session meanwhile: the text waits for its own.
+      unsentFor(sid, owner, text, true);
+      ui.toast(t("compose.sending_label_failed_err", { label, err: why }) + "\n"
+        + t("compose.open_session_unsent_text_back"), { error: true });
+      return;
+    }
+    textEl.value = textEl.value ? `${text}\n${textEl.value}` : text;
+    autoResizeTextarea();
+    ui.toast(t("compose.sending_failed_err", { err: why }) + "\n" + t("common.try_again"), { error: true });
+  }
+
+  // A send to a stopped session: resume it as ↻ would (resumeBody, same
+  // passkey handling), then send with wait_ready -- the server types it in
+  // only once the resumed pane takes input. If it cannot be resumed, or does
+  // not come up in time, nothing is sent and the text goes back to the box
+  // with why; it is never dropped.
+  async function sendResuming(sid, owner, label, text, submit, here) {
+    if (!text.trim()) {
+      // a bare Enter or nothing: not worth resuming for
+      ui.toast(t("compose.session_is_stopped"));
+      return;
+    }
+    let nid;
+    try {
+      nid = await resumeToSend(sid, owner, here);
+    } catch (e) {
+      putBack(sid, owner, label, text, here, e.message);
+      return;
+    }
+    const hereNow = () => chatNow.id === nid && !chatNow.owner;
+    try {
+      await withUnlockRetry(() => api(sessionPath(nid, "/messages", null), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, submit: !!submit, typed: true, wait_ready: true }),
+      }));
+    } catch (e) {
+      const why = e.notReadyWait ? t("compose.resumed_not_ready", { s: e.notReadyWait }) : e.message;
+      putBack(nid, null, label, text, hereNow, why);
     }
   }
 
@@ -180,11 +214,11 @@
 
   // Any file type since 2026-10-07 (user request) -- the session only ever
   // gets a path, so what the file is doesn't matter to anything here.
+  // Returns null when attached, else what went wrong (shown by attachFiles).
   async function attachFile(file) {
-    if (!chatNow.id) return;
+    if (!chatNow.id) return null;
     if (file.size > MAX_ATTACH_BYTES) {
-      alert(t("compose.file_too_large_limit_mb", { mb: Math.floor(MAX_ATTACH_BYTES / (1024 * 1024)) }));
-      return;
+      return t("compose.file_too_large_limit_mb", { mb: Math.floor(MAX_ATTACH_BYTES / (1024 * 1024)) });
     }
     let path;
     const sid = chatNow.id, owner = chatNow.owner;
@@ -200,39 +234,53 @@
         body: JSON.stringify({ filename: file.name || (file.type.startsWith("image/") ? "image.png" : "upload"), data_base64 }),
       })));
     } catch (e) {
-      alert(t("compose.could_not_attach_file_err", { err: e.message }));
-      return;
+      return t("compose.could_not_attach_file_err", { err: e.message });
     }
-    if (!here()) { unsentFor(sid, owner, `${path} `, false); return; }   // its path waits for its own session
+    if (!here()) { unsentFor(sid, owner, `${path} `, false); return null; }   // its path waits for its own session
     const sep = textEl.value && !/[\s]$/.test(textEl.value) ? " " : "";
     textEl.value = `${textEl.value}${sep}${path} `;
     autoResizeTextarea();
     textEl.focus();
+    return null;
+  }
+
+  // Several at once (2026-11-27, the user: 複数選択に対応させてください):
+  // one after another (each can be up to 100MB, so not all in memory at
+  // once), their paths in the order picked. Each file is judged on its own
+  // as before; only the ones that failed are told, in one alert.
+  async function attachFiles(files) {
+    const failed = [];
+    for (const file of files) {
+      const err = await attachFile(file);
+      if (err) failed.push([file, err]);
+    }
+    if (!failed.length) return;
+    if (files.length === 1) { ui.toast(failed[0][1], { error: true }); return; }   // the same words as before
+    ui.toast(t("compose.some_files_not_attached", {
+      list: failed.map(([f, err]) => `${f.name || "upload"}: ${err}`).join("\n"),
+    }), { error: true });
   }
 
   attachFileInputEl.addEventListener("change", () => {
-    const file = attachFileInputEl.files[0];
+    const files = Array.from(attachFileInputEl.files || []);
     attachFileInputEl.value = ""; // so picking the same file again still fires "change"
-    if (file) attachFile(file);
+    if (files.length) attachFiles(files);
   });
 
   // Clipboard-paste is the other half of "両方で" (2026-09-08): works in
   // every preset, headless "claude" chat included, since the composer
-  // itself (unlike #key-toolbar) is never hidden.
+  // itself (unlike #key-toolbar) is never hidden. Every pasted file, not
+  // only the first (2026-11-27, with the picker's multiple choice).
   textEl.addEventListener("paste", (e) => {
     const items = e.clipboardData && e.clipboardData.items;
     if (!items) return;
-    for (const item of items) {
-      // Any pasted file (not just images, 2026-10-07); plain text pastes
-      // have kind "string" and fall through to the normal paste.
-      if (item.kind === "file") {
-        const file = item.getAsFile();
-        if (!file) continue;
-        e.preventDefault();
-        attachFile(file);
-        break; // one file per paste, same as the file picker's one-file flow
-      }
-    }
+    // Any pasted file (not just images, 2026-10-07); plain text pastes
+    // have kind "string" and fall through to the normal paste.
+    const files = Array.from(items).filter((it) => it.kind === "file")
+      .map((it) => it.getAsFile()).filter(Boolean);
+    if (!files.length) return;
+    e.preventDefault();
+    attachFiles(files);
   });
 
   sendBtn.addEventListener("click", () => send(false));

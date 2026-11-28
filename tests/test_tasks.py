@@ -187,7 +187,7 @@ class TaskTest(unittest.TestCase):
         self.addCleanup(lambda: [setattr(B, n, v) for n, v in saved.items()])
         sent, woke = [], []
         B._wake_for_talkto = lambda sid, meta: woke.append(sid) or "n" + sid
-        B._wait_prompt = lambda sid: None
+        B._wait_prompt = lambda sid: True
         B.task_user_sent = lambda sid: None
         def send(sid, text, submit=True, from_user=None):
             if sid == "w5":

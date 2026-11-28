@@ -1,0 +1,539 @@
+#!/usr/bin/python3
+"""aiza-demo-door — the public demo's front door (on the demo host, 127.0.0.1:8890 behind a TLS proxy).
+
+Rooms and seats (docker/demo-host/README.md). A seat is one person in one room, at
+https://<host>/r/<seat>/ ; everything of aiza for that person lives under that
+prefix (the room's gateway strips it). The door:
+  - turns a one-time invite (/r/<seat>/_door/join#<token>) into a cookie
+    scoped to Path=/r/<seat>/ (so one browser can be several people, one per tab);
+  - checks that cookie on every request, drops any X-Demo-* from outside and
+    sends the request on to the room's gateway in the VM with
+    X-Demo-Room/Seat/User/Role/Exp and X-Demo-Sig =
+    HMAC-SHA256(room key, Room\\nSeat\\nUser\\nRole\\nExp\\nMethod\\nTarget);
+  - gives the room's owner /r/<seat>/_door/ : invite links, kick;
+  - closes rooms at their end or after they sit idle.
+CLI (root, on the demo host): aiza-demo-door create [--seats N] [--hours H] [--label TEXT]
+                    aiza-demo-door list | close <room> | reissue <room> <user>
+"""
+import asyncio, contextlib, fcntl, hashlib, hmac, html, json, os, re, secrets, subprocess, sys, time
+
+STATE_DIR = os.environ.get("DOOR_STATE", "/var/lib/aiza-demo-door")
+STATE = f"{STATE_DIR}/rooms.json"
+# The rooms closed before their end, for the relay (its seat keys are good
+# until the room's end otherwise): {room: its end}, readable by all (room ids
+# are no secret: they are in every seat key), in a folder of its own.
+CLOSED = os.environ.get("DOOR_CLOSED", "/var/lib/aiza-demo-closed/closed.json")
+
+
+def _door_host():
+    """The demo's public name: the service's Environment=DOOR_HOST (the CLI, run
+    by hand, reads it from the unit)."""
+    if os.environ.get("DOOR_HOST"):
+        return os.environ["DOOR_HOST"]
+    out = subprocess.run(["systemctl", "show", "-p", "Environment", "--value", "aiza-demo-door"],
+                         capture_output=True, text=True).stdout
+    for kv in out.split():
+        if kv.startswith("DOOR_HOST="):
+            return kv.split("=", 1)[1]
+    sys.exit("aiza-demo-door: DOOR_HOST is not set (the service's Environment=)")
+
+
+HOST = _door_host()
+VM = os.environ.get("DOOR_VM", "10.77.0.2")
+CRED = os.environ.get("CREDENTIALS_DIRECTORY", "/etc/aiza-demo")
+VMCTL = ["ssh", "-i", f"{STATE_DIR}/id_ed25519", "-o", "BatchMode=yes", "-o", "UserKnownHostsFile=" + f"{STATE_DIR}/known_hosts",
+         "-o", "StrictHostKeyChecking=yes", f"door@{VM}"]   # forced command on the VM: aiza-demo-vmctl
+PORT0 = 20100                       # room n's gateway: VM:PORT0+n
+MAX_SEATS, MAX_ROOMS = 8, 4
+IDLE = 2 * 3600
+COOKIE = "aiza_demo_seat"
+SEAT_RE = re.compile(r"^/r/([a-z0-9]{24})(/.*)?$")
+HEAD_BAD = re.compile(r"[\x00-\x08\x0a-\x1f\x7f]")
+EXTERNAL_LINK_NOTE = "このリンクは1回だけ使えます。開いたブラウザがこの席になります。"
+
+
+def log(*a):
+    print(time.strftime("%Y-%m-%dT%H:%M:%S"), *a, flush=True)
+
+
+def h(s):
+    return hashlib.sha256(s.encode()).hexdigest()
+
+
+def load():
+    try:
+        return json.load(open(STATE))
+    except (OSError, ValueError):
+        return {"rooms": {}}
+
+
+@contextlib.contextmanager
+def locked():
+    """Every read-change-write of rooms.json, in the service and the admin CLI
+    alike, under one flock: nothing changes between the read and the write
+    (a slow request body is read before, never inside)."""
+    os.makedirs(STATE_DIR, mode=0o700, exist_ok=True)
+    fd = os.open(STATE + ".lock", os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        if os.geteuid() == 0:
+            import pwd
+            u = pwd.getpwnam("aiza-demo-door")
+            os.fchown(fd, u.pw_uid, u.pw_gid)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield load()
+    finally:
+        os.close(fd)
+
+
+def save(st):
+    os.makedirs(STATE_DIR, mode=0o700, exist_ok=True)
+    tmp = STATE + ".tmp"
+    with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
+        json.dump(st, f, indent=1)
+    if os.geteuid() == 0:            # the admin CLI run as root: keep the service the owner
+        import pwd
+        u = pwd.getpwnam("aiza-demo-door")
+        os.chown(tmp, u.pw_uid, u.pw_gid)
+    os.replace(tmp, STATE)
+
+
+def find_seat(st, seat):
+    for rid, r in st["rooms"].items():
+        if seat in r["seats"]:
+            return rid, r, r["seats"][seat]
+    return None, None, None
+
+
+def new_seat(r, role):
+    used = {s["user"] for s in r["seats"].values()}
+    free = [f"demo{i}" for i in range(1, r["max_seats"] + 1) if f"demo{i}" not in used]
+    if not free:
+        raise ValueError("この部屋は満席です")
+    seat = secrets.token_hex(12)          # 24 hex chars: [a-z0-9]{24}
+    token = secrets.token_urlsafe(24)
+    r["seats"][seat] = {"user": free[0], "role": role, "token": h(token), "cookie": None,
+                        "created": int(time.time()), "claimed": None}
+    return seat, f"https://{HOST}/r/{seat}/_door/join#{token}"
+
+
+def vmctl(*args, stdin=None):
+    return subprocess.run(VMCTL + list(args), input=stdin, capture_output=True, text=True, timeout=300)
+
+
+def seat_key(rid, user, until):
+    """The relay's key for this seat until the room's end (aiza-demo-relay checks
+    it and puts the real one in its place)."""
+    secret = open(os.path.join(CRED, "relay.secret")).read().strip().encode()
+    sig = hmac.new(secret, f"{rid}.{user}.{until}".encode(), hashlib.sha256).hexdigest()[:32]
+    return f"demo.{rid}.{user}.{until}.{sig}"
+
+
+def create_room(seats, hours, label):
+    # Reserve the room (its port) under the lock, start it without holding the
+    # lock (that takes seconds), then give it its owner's seat.
+    with locked() as st:
+        if len(st["rooms"]) >= MAX_ROOMS:
+            raise ValueError("部屋の数が上限です")
+        ports = {r["port"] for r in st["rooms"].values()}
+        port = next(PORT0 + i for i in range(1, 100) if PORT0 + i not in ports)
+        rid = secrets.token_hex(6)
+        r = {"label": label, "created": int(time.time()), "ends": int(time.time() + hours * 3600),
+             "last": int(time.time()), "max_seats": min(seats, MAX_SEATS), "port": port,
+             "key": secrets.token_hex(32), "seats": {}}
+        st["rooms"][rid] = r
+        save(st)
+    keys = {f"demo{i}": seat_key(rid, f"demo{i}", r["ends"]) for i in range(1, r["max_seats"] + 1)}
+    p = vmctl("start", rid, str(port), str(r["max_seats"]), stdin=json.dumps({"key": r["key"], "seat_keys": keys}))
+    with locked() as st:
+        if p.returncode != 0 or rid not in st["rooms"]:
+            st["rooms"].pop(rid, None)
+            save(st)
+            vmctl("stop", rid)
+            raise RuntimeError("VM で部屋を起こせません: " + (p.stderr or p.stdout)[-400:])
+        seat, link = new_seat(st["rooms"][rid], "owner")
+        save(st)
+    log("create", rid, port, r["max_seats"])
+    return rid, link
+
+
+def mark_closed(rid, ends):
+    """Adds the room to CLOSED (the ones past their end left out: their keys
+    have ended anyway). Called under locked()."""
+    try:
+        with open(CLOSED) as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        d = {}
+    now = time.time()
+    d = {k: v for k, v in (d.items() if isinstance(d, dict) else ()) if isinstance(v, (int, float)) and v >= now}
+    d[rid] = int(ends)
+    tmp = CLOSED + ".tmp"
+    with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644), "w") as f:
+        json.dump(d, f)
+    os.chmod(tmp, 0o644)
+    if os.geteuid() == 0:
+        import pwd
+        u = pwd.getpwnam("aiza-demo-door")
+        os.chown(tmp, u.pw_uid, u.pw_gid)
+    os.replace(tmp, CLOSED)
+
+
+def close_room(rid, why):
+    with locked() as st:
+        r = st["rooms"].pop(rid, None)
+        if r is None:
+            return False
+        try:
+            mark_closed(rid, r.get("ends") or time.time())
+        except OSError as e:
+            log("close", rid, "could not tell the relay", e)
+        save(st)
+    p = vmctl("stop", rid)
+    log("close", rid, why, p.returncode, (p.stderr or "")[-200:])
+    return True
+
+
+def sign(r, rid, seat, user, role, method, target):
+    exp = str(int(time.time()) + 60)
+    msg = "\n".join([rid, seat, user, role, exp, method, target])
+    sig = hmac.new(bytes.fromhex(r["key"]), msg.encode(), hashlib.sha256).hexdigest()
+    return {"X-Demo-Room": rid, "X-Demo-Seat": seat, "X-Demo-User": user, "X-Demo-Role": role,
+            "X-Demo-Exp": exp, "X-Demo-Sig": sig}
+
+
+# ---------------------------------------------------------------- HTTP
+
+PAGE_CSP = "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+
+
+async def respond(w, code, body, ctype="text/html; charset=utf-8", extra=()):
+    if isinstance(body, str):
+        body = body.encode()
+    hdr = [f"HTTP/1.1 {code} x", f"Content-Type: {ctype}", f"Content-Length: {len(body)}",
+           "Cache-Control: no-store", "Connection: close", "X-Content-Type-Options: nosniff",
+           "Referrer-Policy: no-referrer", f"Content-Security-Policy: {PAGE_CSP}"] + list(extra)
+    w.write(("\r\n".join(hdr) + "\r\n\r\n").encode() + body)
+    await w.drain()
+    w.close()
+
+
+def page(title, inner, script=None):
+    s = f'<script src="{script}"></script>' if script else ""
+    return (f'<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+            f'<title>{html.escape(title)}</title><style>body{{font-family:system-ui,sans-serif;background:#0b0f14;color:#e6e6e6;'
+            f'max-width:40rem;margin:2rem auto;padding:0 1rem;line-height:1.6}}a{{color:#8ab4f8}}button{{font:inherit;padding:.4rem 1rem;'
+            f'border-radius:8px;border:1px solid #2a3542;background:#1c2531;color:#e6e6e6;cursor:pointer}}code{{word-break:break-all}}'
+            f'table{{border-collapse:collapse}}td{{padding:.3rem .6rem;border-bottom:1px solid #2a3542}}</style>'
+            f'<h1>{html.escape(title)}</h1>{inner}{s}</html>')
+
+
+JOIN_JS = """
+(async () => {
+  const seat = location.pathname.split('/')[2];
+  const token = location.hash.slice(1);
+  history.replaceState(null, '', location.pathname);
+  const out = document.getElementById('out');
+  if (!token) { out.textContent = 'リンクの鍵がありません。招待リンクをもう一度そのまま開いてください。'; return; }
+  const r = await fetch(`/r/${seat}/_door/claim`, {method: 'POST', headers: {'Content-Type': 'application/json', 'X-Door': '1'}, body: JSON.stringify({token})});
+  const j = await r.json().catch(() => ({}));
+  if (r.ok) location.replace(`/r/${seat}/work`);
+  else out.textContent = j.error || '入れませんでした。';
+})();
+"""
+
+OWNER_JS = """
+const seat = location.pathname.split('/')[2];
+const post = (p, b) => fetch(`/r/${seat}/_door/${p}`, {method: 'POST', headers: {'Content-Type': 'application/json', 'X-Door': '1'}, body: JSON.stringify(b || {})}).then(r => r.json());
+document.getElementById('invite').addEventListener('click', async () => {
+  const j = await post('invite');
+  const o = document.getElementById('link');
+  o.textContent = j.link || j.error;
+});
+for (const b of document.querySelectorAll('button[data-kick]')) b.addEventListener('click', async () => {
+  if (!b.dataset.sure) { b.dataset.sure = '1'; b.textContent = 'もう一度押すと追い出します'; return; }
+  await post('kick', {seat: b.dataset.kick}); location.reload();
+});
+"""
+
+
+def owner_page(rid, r, me):
+    rows = []
+    for s, v in sorted(r["seats"].items(), key=lambda kv: int(kv[1]["user"][4:])):
+        state = "入室済み" if v["claimed"] else "招待中(未使用)"
+        btn = "" if s == me else f'<button data-kick="{s}">追い出す</button>'
+        rows.append(f"<tr><td>{v['user']}</td><td>{'作り手' if v['role'] == 'owner' else '招待'}</td><td>{state}</td><td>{btn}</td></tr>")
+    left = max(0, r["ends"] - int(time.time())) // 60
+    return page("部屋", f"<p>部屋 {html.escape(r.get('label') or rid)}・あと {left // 60} 時間 {left % 60} 分で消えます(2 時間使われないときも)。"
+                f"席 {len(r['seats'])}/{r['max_seats']}。</p><table>{''.join(rows)}</table>"
+                f"<p><button id=invite>招待リンクを作る</button></p><p><code id=link></code></p>"
+                f"<p>{EXTERNAL_LINK_NOTE}</p><p><a href=\"/r/{me}/work\">AI座 に戻る</a></p>", f"/r/{me}/_door/owner.js")
+
+
+def get_cookie(hdr):
+    for part in hdr.get("cookie", "").split(";"):
+        k, _, v = part.strip().partition("=")
+        if k == COOKIE:
+            return v
+    return None
+
+
+async def read_body(r, hdr, limit=65536):
+    """The request body, read in full before anything is looked up (and within 10 s)."""
+    if "transfer-encoding" in hdr:
+        raise ValueError("chunked")
+    n = int(hdr.get("content-length", "0") or 0)
+    if not 0 <= n <= limit:
+        raise ValueError("too large")
+    return await asyncio.wait_for(r.readexactly(n), 10)
+
+
+def _json_field(body, k):
+    try:
+        v = json.loads(body).get(k, "")
+    except (ValueError, AttributeError):
+        return ""
+    return v if isinstance(v, str) else ""
+
+
+def _owner_ok(s, hdr):
+    c = get_cookie(hdr)
+    return bool(c and s["cookie"] and hmac.compare_digest(h(c), s["cookie"]) and s["role"] == "owner")
+
+
+async def door(r, w, method, target, hdr, seat, rest):
+    body = b""
+    if method == "POST":
+        if hdr.get("x-door") != "1":
+            return await respond(w, 403, '{"error":"bad request"}', "application/json")
+        try:
+            body = await read_body(r, hdr)
+        except (ValueError, asyncio.TimeoutError, asyncio.IncompleteReadError):
+            return await respond(w, 400, '{"error":"bad request"}', "application/json")
+    elif method != "GET":
+        return await respond(w, 405, "")
+    rid, room, s = find_seat(load(), seat)
+    if not room:
+        return await respond(w, 404, page("見つかりません", "<p>この席はありません(部屋が終わったか、追い出されました)。</p>"))
+    if method == "GET":
+        if rest == "/_door/join.js":
+            return await respond(w, 200, JOIN_JS, "text/javascript")
+        if rest == "/_door/owner.js":
+            return await respond(w, 200, OWNER_JS, "text/javascript")
+        if rest == "/_door/join":
+            return await respond(w, 200, page("AI座 のデモに入る", f"<p id=out>入っています…</p><p>{EXTERNAL_LINK_NOTE}</p>", f"/r/{seat}/_door/join.js"))
+        if rest in ("/_door", "/_door/"):
+            if not _owner_ok(s, hdr):
+                return await respond(w, 403, page("入れません", "<p>部屋の作り手だけが使えます。</p>"))
+            return await respond(w, 200, owner_page(rid, room, seat))
+        return await respond(w, 404, page("見つかりません", ""))
+
+    if rest == "/_door/claim":
+        tok = _json_field(body, "token")
+        with locked() as st:
+            rid, room, s = find_seat(st, seat)
+            if not room or s["claimed"] or not tok or not s["token"] or not hmac.compare_digest(h(tok), s["token"]):
+                ok = False
+            else:
+                ok = True
+                c = secrets.token_urlsafe(32)
+                s.update(cookie=h(c), claimed=int(time.time()), token=None)
+                room["last"] = int(time.time())
+                save(st)
+        if not ok:
+            return await respond(w, 403, '{"error":"このリンクはもう使われたか、正しくありません。作り手に出し直してもらってください。"}', "application/json")
+        log("claim", rid, s["user"])
+        return await respond(w, 200, '{"ok":true}', "application/json",
+                             [f"Set-Cookie: {COOKIE}={c}; Path=/r/{seat}/; HttpOnly; Secure; SameSite=Lax; Max-Age={room['ends'] - int(time.time())}"])
+    if rest == "/_door/invite":
+        with locked() as st:
+            rid, room, s = find_seat(st, seat)
+            if not room or not _owner_ok(s, hdr):
+                err = (403, "部屋の作り手だけが使えます。")
+            else:
+                try:
+                    ns, link = new_seat(room, "guest")
+                    save(st)
+                    err = None
+                except ValueError as e:
+                    err = (409, str(e))
+        if err:
+            return await respond(w, err[0], json.dumps({"error": err[1]}), "application/json")
+        log("invite", rid, room["seats"][ns]["user"])
+        return await respond(w, 200, json.dumps({"link": link}), "application/json")
+    if rest == "/_door/kick":
+        victim = _json_field(body, "seat")
+        with locked() as st:
+            rid, room, s = find_seat(st, seat)
+            v = room["seats"].get(victim) if room else None
+            if not room or not _owner_ok(s, hdr):
+                err = 403
+            elif not v or victim == seat:
+                err = 404
+            else:
+                err = None
+                del room["seats"][victim]
+                save(st)
+        if err:
+            return await respond(w, err, '{"error":"no"}', "application/json")
+        await kick_in_room(rid, room, v["user"])
+        await asyncio.to_thread(vmctl, "kick", rid, v["user"])
+        log("kick", rid, v["user"])
+        return await respond(w, 200, '{"ok":true}', "application/json")
+    return await respond(w, 404, page("見つかりません", ""))
+
+
+async def kick_in_room(rid, room, user):
+    target = "/_room/kick"
+    body = json.dumps({"user": user}).encode()
+    hd = sign(room, rid, "-", user, "door", "POST", target)
+    try:
+        ur, uw = await asyncio.wait_for(asyncio.open_connection(VM, room["port"]), 10)
+        head = [f"POST {target} HTTP/1.1", f"Host: {HOST}", "Content-Type: application/json",
+                f"Content-Length: {len(body)}", "Connection: close"] + [f"{k}: {v}" for k, v in hd.items()]
+        uw.write(("\r\n".join(head) + "\r\n\r\n").encode() + body)
+        await uw.drain()
+        await asyncio.wait_for(ur.read(), 15)
+        uw.close()
+    except Exception as e:
+        log("kick-room-failed", rid, user, e)
+
+
+async def pipe(a, b):
+    try:
+        while (x := await a.read(65536)):
+            b.write(x)
+            await b.drain()
+    except (ConnectionError, asyncio.IncompleteReadError, asyncio.CancelledError):
+        pass
+    finally:
+        try:
+            b.close()
+        except Exception:
+            pass
+
+
+async def proxy(r, w, method, target, hdr_lines, hdr, seat):
+    st = load()
+    rid, room, s = find_seat(st, seat)
+    c = get_cookie(hdr)
+    if not room or not c or not s["cookie"] or not hmac.compare_digest(h(c), s["cookie"]):
+        return await respond(w, 403, page("入れません", "<p>この席に入るには、招待リンクから開いてください。"
+                                                    "部屋が終わったか、追い出された場合もこの表示になります。</p>"))
+    if time.time() - room["last"] > 60:
+        with locked() as st2:
+            if rid in st2["rooms"]:
+                st2["rooms"][rid]["last"] = int(time.time())
+                save(st2)
+    try:
+        ur, uw = await asyncio.wait_for(asyncio.open_connection(VM, room["port"]), 10)
+    except Exception:
+        return await respond(w, 502, page("部屋に届きません", "<p>部屋の準備中か、止まっています。少し待って開き直してください。</p>"))
+    upgrade = hdr.get("upgrade", "").lower() == "websocket"
+    out = [f"{method} {target} HTTP/1.1"]
+    for k, v in hdr_lines:
+        lk = k.lower()
+        if lk.startswith("x-demo-") or lk in ("connection", "keep-alive", "proxy-connection", "x-forwarded-for", "x-real-ip"):
+            continue
+        if lk == "cookie":   # the door's own cookie stays here
+            v = "; ".join(p.strip() for p in v.split(";") if not p.strip().startswith(COOKIE + "="))
+            if not v:
+                continue
+        out.append(f"{k}: {v}")
+    out.append("Connection: Upgrade" if upgrade else "Connection: close")
+    out += [f"{k}: {v}" for k, v in sign(room, rid, seat, s["user"], s["role"], method, target).items()]
+    uw.write(("\r\n".join(out) + "\r\n\r\n").encode())
+    await uw.drain()
+    await asyncio.gather(pipe(r, uw), pipe(ur, w))
+
+
+async def handle(r, w):
+    try:
+        head = await asyncio.wait_for(r.readuntil(b"\r\n\r\n"), 30)
+    except Exception:
+        w.close()
+        return
+    # CR LF only as line ends: a bare LF or CR, or any other control character, is refused
+    # (what goes on to the room is these lines; the TLS proxy in front refuses most of this already).
+    lines = head[:-4].decode("latin-1").split("\r\n")
+    if any(HEAD_BAD.search(l) for l in lines):
+        return await respond(w, 400, "")
+    parts = lines[0].split(" ")
+    if len(parts) != 3:
+        return await respond(w, 400, "")
+    method, target, _ = parts
+    hdr_lines = []
+    for l in lines[1:]:
+        k, sep, v = l.partition(":")
+        if not sep or not k or k != k.strip():
+            return await respond(w, 400, "")
+        hdr_lines.append((k, v.strip()))
+    hdr = {k.lower(): v for k, v in hdr_lines}
+    path = target.split("?", 1)[0]
+    if path in ("/", "/index.html"):
+        return await respond(w, 200, page("AI座 のデモ", "<p>AI座(人々と AI たちの一座)を、何人かで試す場所です。"
+                                         "部屋に入るには、部屋の作り手から届いた招待リンクを開いてください。</p>"
+                                         "<p>今は部屋を作れる人が決まっています。</p>"))
+    m = SEAT_RE.match(path)
+    if not m:
+        return await respond(w, 404, page("見つかりません", ""))
+    seat, rest = m.group(1), m.group(2) or "/"
+    try:
+        if rest.startswith("/_door"):
+            return await door(r, w, method, target, hdr, seat, rest)
+        return await proxy(r, w, method, target, hdr_lines, hdr, seat)
+    except Exception as e:
+        log("error", type(e).__name__, e)
+        try:
+            await respond(w, 500, "")
+        except Exception:
+            pass
+
+
+async def sweeper():
+    while True:
+        await asyncio.sleep(300)
+        now = time.time()
+        for rid, r in list(load()["rooms"].items()):
+            if now > r["ends"]:
+                await asyncio.to_thread(close_room, rid, "ended")
+            elif now - r["last"] > IDLE and any(s["claimed"] for s in r["seats"].values()):
+                await asyncio.to_thread(close_room, rid, "idle")
+            elif now - r["created"] > IDLE and not any(s["claimed"] for s in r["seats"].values()):
+                await asyncio.to_thread(close_room, rid, "never-used")
+
+
+async def main():
+    srv = await asyncio.start_server(handle, "127.0.0.1", int(os.environ.get("DOOR_PORT", "8890")))
+    asyncio.create_task(sweeper())
+    log("listening 127.0.0.1:8890")
+    async with srv:
+        await srv.serve_forever()
+
+
+if __name__ == "__main__":
+    a = sys.argv[1:]
+    if not a:
+        asyncio.run(main())
+    elif a[0] == "create":
+        opts = dict(zip(a[1::2], a[2::2]))
+        rid, link = create_room(int(opts.get("--seats", 4)), float(opts.get("--hours", 24)), opts.get("--label", ""))
+        print(f"room {rid}\nowner link (1回だけ): {link}")
+    elif a[0] == "list":
+        for rid, r in load()["rooms"].items():
+            seats = ", ".join(f"{v['user']}({v['role'][0]}{'+' if v['claimed'] else '-'})" for v in r["seats"].values())
+            print(rid, r.get("label", ""), "ends", time.strftime("%m/%d %H:%M", time.localtime(r["ends"])), "port", r["port"], seats)
+    elif a[0] == "close" and len(a) == 2:
+        print("closed" if close_room(a[1], "by-admin") else "no such room")
+    elif a[0] == "reissue" and len(a) == 3:
+        with locked() as st:
+            r = st["rooms"][a[1]]
+            old = [k for k, v in r["seats"].items() if v["user"] == a[2]]
+            role = r["seats"][old[0]]["role"] if old else "guest"
+            for k in old:
+                del r["seats"][k]
+            seat, link = new_seat(r, role)
+            r["seats"][seat]["user"] = a[2]
+            save(st)
+        print(f"link (1回だけ): {link}")
+    else:
+        sys.exit(__doc__)

@@ -69,7 +69,7 @@
     const base = owner
       ? `/shared/${encodeURIComponent(owner)}/sessions/${sessionId}`
       : `/sessions/${sessionId}`;
-    return `/agents/api${base}${suffix}`;
+    return `${window.aizaBase}/agents/api${base}${suffix}`;
   }
 
   function outboxFilesUrl(dir, filename) {
@@ -81,7 +81,7 @@
     const params = new URLSearchParams({ src, name: label });
     if (opts?.type) params.set("type", opts.type);
     if (opts?.mtl) params.set("mtl", opts.mtl);
-    return `/agents/viewer3d.html?${params}`;
+    return `${window.aizaBase}/agents/viewer3d.html?${params}`;
   }
 
   function renderCrumbs(dir) {

@@ -319,6 +319,43 @@ class BackendAskTest(unittest.TestCase):
                          "拒否: no")
         self.assertEqual(self.status()[0]["answer"], {"behavior": "deny", "message": "no"})
 
+    def test_dismiss_closes_the_card_without_an_answer(self):
+        # 「答えずにチャットで書く」 (2026-11-27): the hook is told to stop as on Esc.
+        self.ask("permission")
+        self.assertEqual(page_answer(self.sid, {"ask_id": "ask-1", "answer": {"dismiss": True}}), "答えずにチャットで書く")
+        self.assertEqual(self.status()[0]["answer"], {"dismiss": True})
+        self.assertEqual([e["type"] for e in self.events()], ["ask", "ask_done"])
+        self.assertEqual(self.tasks, ["you"])          # not "working": the agent stopped
+
+    def test_a_chat_closes_the_open_card_first(self):
+        # A chat from the page's box while a card is open: closed as dismiss,
+        # then sent once the pane shows no menu; else not sent (AskStillOpen).
+        self.ask()
+        menu = "❯ 1. Tea\n  2. Coffee\nEnter to select · ↑/↓ to navigate · Esc to cancel\n"
+        idle = "❯ \n  ? for shortcuts\n"
+        saved = (B.tmux_query, B.ASK_DISMISS_WAIT, B.time.sleep)
+        screens = [menu, idle]
+        try:
+            B.time.sleep = lambda s: None
+            B.tmux_query = lambda loc, args, **kw: subprocess.CompletedProcess(args, 0, screens.pop(0) if len(screens) > 1 else screens[0], "")
+            self.assertTrue(B.ask_dismiss_for_chat(self.sid, {"tmux_location": "container"}))
+            self.assertEqual(self.status()[0]["answer"], {"dismiss": True})
+            self.assertFalse(B.ask_dismiss_for_chat(self.sid, {"tmux_location": "container"}))   # none open now
+        finally:
+            B.tmux_query, B.ASK_DISMISS_WAIT, B.time.sleep = saved
+
+    def test_a_card_that_will_not_close_keeps_the_chat(self):
+        self.ask()
+        menu = "❯ 1. Tea\n  2. Coffee\nEnter to select · ↑/↓ to navigate · Esc to cancel\n"
+        saved = (B.tmux_query, B.ASK_DISMISS_WAIT)
+        try:
+            B.ASK_DISMISS_WAIT = 1.2
+            B.tmux_query = lambda loc, args, **kw: subprocess.CompletedProcess(args, 0, menu, "")
+            with self.assertRaises(B.AskStillOpen):
+                B.ask_dismiss_for_chat(self.sid, {"tmux_location": "container"})
+        finally:
+            B.tmux_query, B.ASK_DISMISS_WAIT = saved
+
     def test_terminal_answer_closes_once(self):
         self.ask()
         B.ask_close(self.sid, "ask-1", "terminal")
@@ -383,6 +420,17 @@ class HookOutputTest(unittest.TestCase):
         self.assertIsNone(H.output("perm", {}, {"terminal": True}))
         self.assertIsNone(H.output("perm", {}, None))
         self.assertIsNone(H.output("pre", {}, {"behavior": "allow"}))   # pre only answers questions or denies
+
+    def test_dismiss_stops_as_esc_does(self):
+        # Checked on a scratch Claude Code 2026-11-27: these end as Esc does.
+        d = H.output("perm", {}, {"dismiss": True})["hookSpecificOutput"]["decision"]
+        self.assertEqual((d["behavior"], d["interrupt"]), ("deny", True))
+        pre = H.output("pre", {}, {"dismiss": True})
+        self.assertIs(pre["continue"], False)
+        self.assertEqual(pre["hookSpecificOutput"]["permissionDecision"], "deny")
+        cx = H.output("codex", {}, {"dismiss": True})["hookSpecificOutput"]["decision"]
+        self.assertEqual(cx["behavior"], "deny")
+        self.assertNotIn("interrupt", cx)               # reserved by Codex
 
     def test_deny(self):
         d = H.output("perm", {}, {"behavior": "deny", "message": "no"})["hookSpecificOutput"]["decision"]
@@ -466,6 +514,24 @@ class HookRunTest(unittest.TestCase):
         res = json.loads(out)["hookSpecificOutput"]
         self.assertEqual(res["updatedInput"]["answers"], {"Tea or coffee?": "Coffee"})
 
+    def test_a_question_asked_again_after_the_page_answered_gets_that_answer(self):
+        # 2026-11-27: Claude Code asked again (PermissionRequest) after the
+        # PreToolUse allow with the answers; the second card's answer was lost.
+        pre = {"tool_name": "AskUserQuestion", "tool_input": QUESTION, "permission_mode": "bypassPermissions",
+               "session_id": CONV, "hook_event_name": "PreToolUse"}
+        self.run_hook("pre", pre, {"answers": {"Tea or coffee?": "Green tea, please"}})
+        perm = dict(pre, hook_event_name="PermissionRequest")
+        req, out = self.run_hook("perm", perm, None, status="none")
+        self.assertIsNone(req)                          # no second card
+        res = json.loads(out)["hookSpecificOutput"]["decision"]
+        self.assertEqual(res["updatedInput"]["answers"], {"Tea or coffee?": "Green tea, please"})
+        # used once; another question is not given it
+        other = dict(perm, tool_input={"questions": [dict(QUESTION["questions"][0], question="Milk?")]})
+        self.run_hook("pre", pre, {"answers": {"Tea or coffee?": "Tea"}})
+        req, out = self.run_hook("perm", other, {"answers": {"Milk?": "Yes"}})
+        self.assertIsNotNone(req)
+        self.assertEqual(json.loads(out)["hookSpecificOutput"]["decision"]["updatedInput"]["answers"], {"Milk?": "Yes"})
+
     def test_pre_leaves_other_modes_to_permission_request(self):
         payload = {"tool_name": "AskUserQuestion", "tool_input": QUESTION, "permission_mode": "default"}
         req, out = self.run_hook("pre", payload)
@@ -522,6 +588,32 @@ class HookRunTest(unittest.TestCase):
         req, out = self.run_hook("perm", payload, {"answers": {"Tea or coffee?": "Tea"}}, container=True, backend=None)
         self.assertEqual(json.loads(out)["hookSpecificOutput"]["decision"]["updatedInput"]["answers"], {"Tea or coffee?": "Tea"})
         self.assertEqual(self.checked, [])
+
+
+class OldNameTest(unittest.TestCase):
+    """2026-11-27: under the pre-rename name (aigw-ask-hook / aigw-task-hook,
+    left in someone's ~/.claude/settings.json beside the managed aiza-*
+    hooks) the hook does nothing, so one question is one card, not two."""
+
+    def test_old_names_do_nothing(self):
+        with tempfile.TemporaryDirectory() as d:
+            talk = Path(d) / "talkto"
+            talk.touch()
+            env = dict(os.environ, AIZA_TALKTO=str(talk), AIZA_SESSION_ID="aaaaaaaaaaaa")
+            task = ROOT / "bin" / "aiza-task-hook"
+            run = lambda path, arg: subprocess.run([sys.executable, str(path), arg], input=json.dumps(
+                {"session_id": "s", "hook_event_name": "SessionStart", "tool_name": "Bash", "tool_input": {}}),
+                capture_output=True, text=True, env=env, timeout=30)
+            # The real name says something at SessionStart (the status-line rule) ...
+            self.assertTrue(run(task, "start").stdout)
+            talk.write_text("")
+            # ... the old names, nothing at all.
+            for real, old, arg in ((HOOK, "aigw-ask-hook", "perm"), (task, "aigw-task-hook", "start")):
+                link = Path(d) / old
+                link.symlink_to(real)
+                r = run(link, arg)
+                self.assertEqual((r.returncode, r.stdout), (0, ""), old)
+            self.assertEqual(talk.read_text(), "")
 
 
 if __name__ == "__main__":

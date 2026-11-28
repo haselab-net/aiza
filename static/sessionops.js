@@ -25,9 +25,7 @@
   // than the phone's real screen.
   function computeScreenCols() {
     const probe = document.createElement("pre");
-    probe.style.cssText =
-      "position: absolute; visibility: hidden; white-space: pre; margin: 0; padding: 0; " +
-      "font-family: ui-monospace, monospace; font-size: 0.7rem; line-height: 1.25;";
+    probe.className = "screen-measure";   // style.css: the screen's font, unseen
     const sample = "0".repeat(100);
     probe.textContent = sample;
     document.body.appendChild(probe);
@@ -155,7 +153,7 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       }))).catch((e) => {
-        alert(t("common.could_not_create_session_err", { err: e.message }));
+        ui.toast(t("common.could_not_create_session_err", { err: e.message }), { error: true });
         return null;
       });
       if (!meta) return;
@@ -223,11 +221,11 @@
   // for a later resume, then ends the session (aiza-backend's
   // _graceful_claude_exit).
   async function stopSessionConfirmed(sessionId, owner, fromChat) {
-    if (!confirm(t("sessionops.stop_session_if_claude_running"))) return;
+    if (!(await ui.confirm(t("sessionops.stop_session_if_claude_running"), { danger: true }))) return;
     try {
       await withUnlockRetry(() => api(sessionPath(sessionId, "/stop", owner), { method: "POST" }));
     } catch (e) {
-      alert(t("sessionops.could_not_stop_err", { err: e.message }));
+      ui.toast(t("sessionops.could_not_stop_err", { err: e.message }), { error: true });
       return;
     }
     // Close only the chat it was stopped from, not one the user went to meanwhile.
@@ -257,7 +255,7 @@
   let resumingSession = false;
   async function resumeEndedSession(s, confirmed) {
     if (resumingSession) return;
-    if (!confirmed && !confirm(t("sessionops.resume_label", { label: s.label }))) return;
+    if (!confirmed && !(await ui.confirm(t("sessionops.resume_label", { label: s.label })))) return;
     resumingSession = true;
     try {
       const body = resumeBody(s);
@@ -278,7 +276,7 @@
             return null;
           }
         }
-        alert(t("sessionops.could_not_resume_err", { err: e.message }));
+        ui.toast(t("sessionops.could_not_resume_err", { err: e.message }), { error: true });
         return null;
       });
       if (!meta) return;
@@ -287,6 +285,32 @@
     } finally {
       resumingSession = false;
     }
+  }
+
+  // A send to a stopped session (compose.js's sendResuming, 2026-11-27):
+  // resumed as ↻ would, without asking (the send was the ask), and opened
+  // if its chat is still the one shown. The id it runs under now; throws,
+  // with why for the user, when it is not resumed (then nothing is sent).
+  async function resumeToSend(sid, owner, here) {
+    const m = (here() && chatNow.meta) || lastSessions.find((x) => x.id === sid && (x.owner || null) === (owner || null));
+    if (owner || !m || !canResumeEnded(m)) throw new Error(t("compose.stopped_cannot_resume"));
+    showUndoToast(t("compose.resuming_then_sending"), false);
+    let meta;
+    try {
+      meta = await withUnlockRetry(() => api("/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(resumeBody(m)),
+      }));
+    } catch (e) {
+      if (!e.runningSession) throw new Error(t("compose.could_not_resume_err", { err: e.message }));
+      meta = { id: e.runningSession };   // already running elsewhere: that one takes it
+    }
+    const wasHere = here();
+    const list = await refreshSessions().catch(() => lastSessions);
+    const full = (list || lastSessions).find((x) => x.id === meta.id && !x.owner) || (meta.preset ? meta : null);
+    if (wasHere && here() && full) chatNow.open(full);
+    return meta.id;
   }
 
   function resumeBody(s) {

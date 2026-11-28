@@ -1,0 +1,117 @@
+#!/usr/bin/python3
+"""aiza-demo-boxd <room> <seats> — one per room, in the demo VM (docker/demo-host/README.md).
+
+Listens on /run/aiza-demo/<room>/boxd.sock (bind-mounted into the room's
+container as /run/aiza-boxd/boxd.sock). The room's `sandbox exec` connects,
+sends one JSON line {"argv":[...], "tty":bool, "stdin":bool} with its
+stdin/stdout/stderr as SCM_RIGHTS, and gets {"exit":N} back.
+Who runs it is the caller's uid (SO_PEERCRED): demo<n> = uid 1000+n, 1..seats;
+anyone else is refused. Each person has one box (gVisor), kept running so
+their tmux server lives on between execs.
+"""
+import array, json, os, socket, struct, subprocess, sys, threading
+
+ROOM, SEATS = sys.argv[1], int(sys.argv[2])
+assert ROOM.isalnum() and len(ROOM) == 12
+RUN = f"/run/aiza-demo/{ROOM}"
+DATA = f"/var/lib/aiza-demo/rooms/{ROOM}"
+IMAGE = os.environ.get("BOX_IMAGE", "aiza-demo-box")
+KEYS = json.load(open(f"{DATA}/seat-keys.json"))       # demo<n> -> relay seat key (written by vmctl)
+lock = threading.Lock()
+
+
+def box_name(n):
+    return f"box-{ROOM}-{n}"
+
+
+def ensure_box(n):
+    name, uid, user = box_name(n), 1000 + n, f"demo{n}"
+    with lock:
+        r = subprocess.run(["docker", "inspect", "-f", "{{.State.Running}}", name], capture_output=True, text=True)
+        if r.stdout.strip() == "true":
+            return name
+        if r.returncode == 0:
+            subprocess.run(["docker", "rm", "-f", name], capture_output=True)
+        home = f"/home/{user}/sandhome"
+        subprocess.run([
+            "docker", "run", "-d", "--name", name, "--runtime=runsc", "--network", "demo-boxes",
+            "--user", f"{uid}:{uid}", "--hostname", f"{user}-box", "--init",
+            "--memory", "1g", "--cpus", "1", "--pids-limit", "512", "--cap-drop", "ALL",
+            "--security-opt", "no-new-privileges", "--read-only", "--tmpfs", "/tmp:size=256m",
+            "--dns", "127.0.0.1",
+            "-v", f"{DATA}/home/{user}/sandhome:{home}", "-w", home,
+            "-e", f"HOME={home}", "-e", f"USER={user}", "-e", "LANG=C.UTF-8",
+            "-e", "ANTHROPIC_BASE_URL=http://10.77.0.1:3128/anthropic",
+            "-e", f"ANTHROPIC_API_KEY={KEYS[user]}",
+            "-e", "HTTPS_PROXY=http://10.77.0.1:3128", "-e", "https_proxy=http://10.77.0.1:3128",
+            "-e", "NO_PROXY=10.77.0.1", "-e", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
+            # Sonnet for the demo (the user, 2026-11-27); the relay lets only these two through
+            "-e", "ANTHROPIC_MODEL=claude-sonnet-5-5", "-e", "ANTHROPIC_DEFAULT_HAIKU_MODEL=claude-haiku-5-5",
+            "--label", f"aiza-demo-room={ROOM}",
+            IMAGE, "sleep", "infinity"], check=True, capture_output=True)
+        return name
+
+
+def serve(conn):
+    try:
+        cred = conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
+        _, uid, _ = struct.unpack("3i", cred)
+        n = uid - 1000
+        if not 1 <= n <= SEATS:
+            conn.sendall(b'{"exit":126,"error":"not a demo user"}\n')
+            return
+        fds = array.array("i")
+        msg, anc, _, _ = conn.recvmsg(65536, socket.CMSG_SPACE(3 * fds.itemsize))
+        for level, typ, data in anc:
+            if level == socket.SOL_SOCKET and typ == socket.SCM_RIGHTS:
+                fds.frombytes(data[:len(data) - len(data) % fds.itemsize])
+        req = json.loads(msg.split(b"\n", 1)[0])
+        argv = req["argv"]
+        if len(fds) != 3 or not isinstance(argv, list) or not argv or not all(isinstance(a, str) for a in argv):
+            conn.sendall(b'{"exit":126,"error":"bad request"}\n')
+            return
+        name = ensure_box(n)
+        cmd = ["docker", "exec"] + (["-i"] if req.get("stdin") or req.get("tty") else []) + (["-t"] if req.get("tty") else [])
+        cmd += [name] + argv
+        p = subprocess.Popen(cmd, stdin=fds[0], stdout=fds[1], stderr=fds[2], close_fds=True)
+        for fd in fds:
+            os.close(fd)
+        # The caller going away (its socket closes) ends the exec.
+        def watch():
+            try:
+                conn.recv(1)
+            except OSError:
+                pass
+            if p.poll() is None:
+                p.kill()
+        threading.Thread(target=watch, daemon=True).start()
+        code = p.wait()
+        conn.sendall(json.dumps({"exit": code}).encode() + b"\n")
+    except Exception as e:
+        try:
+            conn.sendall(json.dumps({"exit": 125, "error": str(e)[:200]}).encode() + b"\n")
+        except OSError:
+            pass
+    finally:
+        conn.close()
+
+
+def main():
+    os.makedirs(RUN, exist_ok=True)
+    os.chmod(RUN, 0o755)
+    path = f"{RUN}/boxd.sock"
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.bind(path)
+    os.chmod(path, 0o666)        # who may do what: SO_PEERCRED above
+    s.listen(64)
+    while True:
+        c, _ = s.accept()
+        threading.Thread(target=serve, args=(c,), daemon=True).start()
+
+
+if __name__ == "__main__":
+    main()

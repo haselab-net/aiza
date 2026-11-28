@@ -57,7 +57,7 @@
       s.task = r.task || undefined;
       taskLocal.set(s.id, { seq: ++taskSeq, task: s.task });
       for (const x of lastSessions) if (x.id === s.id) x.task = s.task;
-    } catch (e) { alert(e.message); }
+    } catch (e) { ui.toast(e.message, { error: true }); }
     updateTodoBadge();
   }
   function markTaskSeen(s) {
@@ -77,7 +77,7 @@
   }
   function closeSessionNotifications(id) {
     if (!id || !("serviceWorker" in navigator)) return;
-    navigator.serviceWorker.getRegistration("/work")
+    navigator.serviceWorker.getRegistration(window.aizaBase + "/work")
       .then((r) => r && r.getNotifications({ tag: id }))
       .then((ns) => (ns || []).forEach((n) => n.close()))
       .catch(() => {});
@@ -128,7 +128,7 @@
       : h.to_gone ? t("todo.other_session_gone")
       : ({ working: t("todo.other_side_working"), you: t("todo.waiting_on_there"), snooze: t("todo.other_side_waiting"), done: t("todo.other_side_done") }[h.to_state] || t("common.delivered"));
     row.innerHTML = `
-      <a class="body" href="/agents/#${encodeURIComponent(h.to)}">
+      <a class="body" href="${window.aizaBase}/agents/#${encodeURIComponent(h.to)}">
         <div class="who">🔁 ${escapeHtml(h.from_label)} → ${escapeHtml(h.to_label)}</div>
         <div class="msg">${escapeHtml(h.head || "")}</div>
         <div class="when">${escapeHtml(st + " · " + fmtStamp(h.ts))}</div>
@@ -143,7 +143,7 @@
         await api(`/handoffs/${encodeURIComponent(h.id)}`, { method: "POST" });
         handoffs = handoffs.filter((x) => x.id !== h.id);
         handoffsKey = JSON.stringify(handoffs);
-      } catch (err) { alert(err.message); }
+      } catch (err) { ui.toast(err.message, { error: true }); }
       renderTodo();
     });
     btns.appendChild(b);
@@ -316,7 +316,7 @@
     const extraTitle = (extra.find((x) => x && x.title) || {}).title;
     for (const x of extra) if (x && x.note) sub.push(x.note);
     row.innerHTML = `
-      <a class="body" href="/agents/#${encodeURIComponent(s.id)}">
+      <a class="body" href="${window.aizaBase}/agents/#${encodeURIComponent(s.id)}">
         <div class="who">${typeIcon(s)}${escapeHtml(extraTitle || s.label)}</div>
         ${what ? `<div class="msg">${escapeHtml(what)}</div>` : ""}
         ${sub.length ? `<div class="when">${escapeHtml(sub.join(" · "))}</div>` : ""}
@@ -355,7 +355,7 @@
             s.task = r.task || undefined;
             taskLocal.set(s.id, { seq: ++taskSeq, task: s.task });
             for (const x of lastSessions) if (x.id === s.id) x.task = s.task;
-          } catch (err) { alert(err.message); }
+          } catch (err) { ui.toast(err.message, { error: true }); }
           updateTodoBadge();
           renderTodo();
           showUndoToast(t("todo.restored_label", { label: s.label }), false);
@@ -373,19 +373,18 @@
     if (g === "you" || g === "due" || g === "done") {
       add("💤", t("todo.snooze"), async () => {
         const ch = snoozeChoices();
-        const ans = prompt(t("todo.snooze_until_when") + "\n" + ch.map((c, i) => `${i + 1}: ${c[0]} (${fmtUntil(c[1] / 1000)})`).join("\n")
-          + "\n" + t("todo.or_month_day_hh_mm"), "1");
+        // Picked, not typed (the deployment notes): the usual times, or a date and time.
+        const ans = await ui.ask({
+          title: t("todo.snooze_until_when"),
+          fields: [{ name: "when", type: "choice", value: String(+ch[0][1]),
+                     options: ch.map((c) => ({ value: String(+c[1]), label: `${c[0]} (${fmtUntil(c[1] / 1000)})` })),
+                     custom: { type: "datetime", label: t("todo.or_pick_date_time") } }],
+          ok: "💤 " + t("todo.snooze"),
+        });
         if (ans == null) return;
-        let when = null;
-        const k = parseInt(ans, 10);
-        if (/^\d$/.test(ans.trim()) && ch[k - 1]) when = ch[k - 1][1];
-        const m = ans.trim().match(/^(\d{1,2})\/(\d{1,2})(?:\s+(\d{1,2}):(\d{2}))?$/);
-        if (m) {
-          const now = new Date();
-          when = new Date(now.getFullYear(), +m[1] - 1, +m[2], m[3] ? +m[3] : 9, m[4] ? +m[4] : 0);
-          if (when < now) when.setFullYear(when.getFullYear() + 1);
-        }
-        if (!when) return alert(t("todo.could_not_read_date"));
+        const ms = Number(ans.when);
+        if (!Number.isFinite(ms) || ms <= Date.now()) return ui.toast(t("todo.could_not_read_date"), { error: true });
+        const when = new Date(ms);
         await taskSet(s, { state: "snooze", until: when.getTime() / 1000 });
       });
     }
@@ -473,7 +472,7 @@
   todoModalEl.addEventListener("click", (e) => {
     const a = e.target.closest("a");
     if (!a || !plainClick(e)) return;
-    const href = a.getAttribute("href") || "";
+    const href = ui.localPath(a.getAttribute("href") || "");
     const m = /^\/agents\/#([0-9a-f]{8,32})$/.exec(href);
     if (m) {
       e.preventDefault();

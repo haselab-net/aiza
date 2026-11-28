@@ -15,6 +15,29 @@
 // picks it up after logging in. Loaded by index.html, outbox-browse.html and
 // the deployment's own pages (login, ...), which all share this origin;
 // those define() their own words.
+// The page's base (2026-11-27, the public demo, the deployment notes): "" on a
+// deployment, "/r/<seat>" when the page is a seat of a demo room -- every
+// address the page makes starts with it (window.aizaBase), and this
+// browser's storage is the seat's own (a key prefix), so two seats in two
+// tabs of one browser are two people. First thing the page runs.
+(function () {
+  const m = typeof location === "undefined" ? null : /^\/r\/[a-z0-9]{24}(?=\/)/.exec(location.pathname);
+  window.aizaBase = m ? m[0] : "";
+  if (!m) return;
+  let real;
+  try { real = window.localStorage; } catch (e) { return; }
+  const P = `seat:${m[0].slice(3)}:`;
+  const mine = () => { const ks = []; for (let i = 0; i < real.length; i++) { const k = real.key(i); if (k && k.startsWith(P)) ks.push(k); } return ks; };
+  const seat = {
+    getItem: (k) => real.getItem(P + k),
+    setItem: (k, v) => real.setItem(P + k, v),
+    removeItem: (k) => real.removeItem(P + k),
+    key: (i) => { const k = mine()[i]; return k === undefined ? null : k.slice(P.length); },
+    clear: () => { for (const k of mine()) real.removeItem(k); },
+    get length() { return mine().length; },
+  };
+  try { Object.defineProperty(window, "localStorage", { value: seat, configurable: true }); } catch (e) { /* the shared storage, then */ }
+})();
 (function () {
   // aigw-legacy: this browser's settings from before the name AI座
   // (2026-11-23) are under keys that began with "aigw": copy them once.
@@ -45,10 +68,14 @@
 
   // t("list.new_name", { n: 3 }): the word in the chosen language; English,
   // then Japanese, when that language lacks it (the tests keep all three);
-  // an unknown key comes back as it is.
+  // an unknown key comes back as it is, HTML-escaped (2026-11-28): the
+  // words are put in markup in many places, and a value with no word (a
+  // language code, a key the server is newer about, or anything else
+  // passed in) must not become markup there. Keys never hold <>&"'.
+  const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
   function t(key, vars) {
     const w = W[key];
-    let out = w ? (w[lang] ?? w.en ?? w.ja) : key;
+    let out = w ? (w[lang] ?? w.en ?? w.ja) : String(key ?? "").replace(/[&<>"']/g, (c) => ESC[c]);
     if (vars) out = out.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k]) : m));
     return out;
   }
@@ -88,7 +115,7 @@
     if (!(next in LANGS) || next === lang) return;
     try { localStorage.setItem(STORE_KEY, next); } catch (e) { /* private mode */ }
     try {
-      await fetch("/agents/api/prefs", {
+      await fetch(window.aizaBase + "/agents/api/prefs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ lang: next }),
@@ -102,7 +129,7 @@
   async function syncFromServer() {
     let r;
     try {
-      r = await fetch("/agents/api/prefs").then((x) => (x.ok ? x.json() : null));
+      r = await fetch(window.aizaBase + "/agents/api/prefs").then((x) => (x.ok ? x.json() : null));
     } catch (e) {
       return;
     }
@@ -110,7 +137,7 @@
     if (!server) {
       // First time on the server: record what this browser already uses.
       const local = readStored();
-      if (local) fetch("/agents/api/prefs", {
+      if (local) fetch(window.aizaBase + "/agents/api/prefs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ lang: local }),
@@ -166,25 +193,110 @@
       "zh-CN": "🔓 解锁(点任意处即弹出)",
     },
     // app
-    "app.ask_deploy_give_sha_commit": {
-      ja: "配備の依頼なら、直したコミットの SHA を書いてください(このセッションの作業ディレクトリのリポジトリ。別のディレクトリなら「ディレクトリ SHA」)。窓口の決まりの範囲なら自動で両方のホストに入ります。報告だけなら空のままで。",
-      en: "To ask for a deploy, give the SHA of the commit with your fix (in the repository of this session's working directory; for another directory, \"directory SHA\"). Within the desk's rule it goes onto both hosts on its own. Leave it empty for a report only.",
-      "zh-CN": "如需部署，请写下修复所在提交的 SHA(本会话工作目录中的仓库；其他目录则写「目录 SHA」)。在窗口规则范围内会自动部署到两台主机。仅报告则留空。",
-    },
     "app.could_not_read_issue_err": {
       ja: "Issue を読めませんでした: {err}",
       en: "Could not read the issue: {err}",
       "zh-CN": "无法读取 Issue:{err}",
     },
+    "app.desk_branches": {
+      ja: "ブランチ",
+      en: "Branches",
+      "zh-CN": "分支",
+    },
+    "app.desk_choose": {
+      ja: "選んでください",
+      en: "Choose one",
+      "zh-CN": "请选择",
+    },
+    "app.desk_choose_first": {
+      ja: "配備するブランチかプルリクを選んでください",
+      en: "Pick the branch or pull request to deploy",
+      "zh-CN": "请选择要部署的分支或拉取请求",
+    },
+    "app.desk_closing_keeps_draft": {
+      ja: "閉じても書いた文は残ります",
+      en: "Closing keeps what you wrote",
+      "zh-CN": "关闭后已写的内容会保留",
+    },
+    "app.desk_commit_from_other_host": {
+      ja: "配備するコミット(もう一方のホストで選んだもの)",
+      en: "The commit to deploy (picked on the other host)",
+      "zh-CN": "要部署的提交(在另一台主机上选择)",
+    },
+    "app.desk_deploy_hint": {
+      ja: "自分で直したものの配備を頼みます。直したブランチかプルリクを選び、何を直したかを書いてください。窓口の決まりの範囲なら自動で両方のホストに入ります。",
+      en: "Ask for your own fix to be deployed: pick the branch or pull request with it and write what it fixes. Within the desk's rule it goes onto both hosts on its own.",
+      "zh-CN": "请求部署自己的修复：选择包含修复的分支或拉取请求，并写下修复了什么。在窗口规则范围内会自动部署到两台主机。",
+    },
+    "app.desk_deploy_needs_session": {
+      ja: "配備の依頼は、直したセッションの ⋯ の「窓口」から送ってください",
+      en: "Send a deploy request from the ⋯ menu of the session where you fixed it",
+      "zh-CN": "请从修复所在会话的 ⋯ 菜单发送部署请求",
+    },
+    "app.desk_deploy_placeholder": {
+      ja: "何を直したか",
+      en: "What it fixes",
+      "zh-CN": "修复了什么",
+    },
+    "app.desk_deploy_sent": {
+      ja: "配備を頼みました({what})。仕事の木の「AI座 の窓口」で進み具合が見えます。",
+      en: "Deploy requested ({what}). Follow it under \"AI座 の窓口\" in the work tree.",
+      "zh-CN": "已请求部署({what})。可在工作树的「AI座 の窓口」中查看进展。",
+    },
+    "app.desk_deploy_tab": {
+      ja: "配備の依頼",
+      en: "Deploy request",
+      "zh-CN": "部署请求",
+    },
+    "app.desk_pick_what": {
+      ja: "配備するもの",
+      en: "What to deploy",
+      "zh-CN": "要部署的内容",
+    },
+    "app.desk_pulls": {
+      ja: "開いているプルリク",
+      en: "Open pull requests",
+      "zh-CN": "打开的拉取请求",
+    },
+    "app.desk_reading_branches": {
+      ja: "ブランチとプルリクを読んでいます…",
+      en: "Reading branches and pull requests…",
+      "zh-CN": "正在读取分支和拉取请求…",
+    },
+    "app.desk_report_hint": {
+      ja: "何が起きたか、何が足りないかを書いてください。座の皆に見えます。セッションはリンクだけで、devbox の会話は窓口だけが読みます。",
+      en: "Write what happened or what is missing. Everyone in AI-za can see it. The session goes as a link only; only the desk reads a devbox conversation.",
+      "zh-CN": "请写下发生了什么或缺少什么。座内的所有人都能看到。会话只附链接，devbox 的对话只有窗口能读。",
+    },
+    "app.desk_report_placeholder": {
+      ja: "何が起きたか・何が足りないか",
+      en: "What happened, or what is missing",
+      "zh-CN": "发生了什么，或缺少什么",
+    },
+    "app.desk_report_tab": {
+      ja: "報告(不具合・要望)",
+      en: "Report (bug or request)",
+      "zh-CN": "报告(问题・需求)",
+    },
+    "app.desk_send": {
+      ja: "送る",
+      en: "Send",
+      "zh-CN": "发送",
+    },
+    "app.desk_title": {
+      ja: "窓口",
+      en: "Desk",
+      "zh-CN": "窗口",
+    },
+    "app.desk_write_something": {
+      ja: "何か書いてください",
+      en: "Write something first",
+      "zh-CN": "请先写点内容",
+    },
     "app.could_not_send_desk_err": {
       ja: "窓口に送れませんでした: {err}",
       en: "Could not send to the desk: {err}",
       "zh-CN": "未能提交给窗口: {err}",
-    },
-    "app.deploy_request_commit_sha_in": {
-      ja: "配備の依頼: {repo} のコミット {sha}",
-      en: "Deploy request: commit {sha} in {repo}",
-      "zh-CN": "部署请求：{repo} 中的提交 {sha}",
     },
     "app.issue_closed": {
       ja: "⚠ この Issue は閉じています",
@@ -215,11 +327,6 @@
       ja: "~/sandhome/{repo} がありません。先に clone してください",
       en: "~/sandhome/{repo} does not exist. Clone it first",
       "zh-CN": "~/sandhome/{repo} 不存在。请先 clone",
-    },
-    "app.send_desk_write_what_happened": {
-      ja: "窓口に送る: 何が起きたか、何が足りないかを書いてください。座の皆に見えます。セッションはリンクだけで、devbox の会話は窓口だけが読みます。",
-      en: "Send to the desk: write what happened or what is missing. Everyone in AI-za can see it. The session goes as a link only; only the desk reads a devbox conversation.",
-      "zh-CN": "提交给窗口：请写下发生了什么或缺少什么。座内的所有人都能看到。会话只附链接，devbox 的对话只有窗口能读。",
     },
     "app.sent_desk_follow_under_ai": {
       ja: "窓口に送りました。仕事の木の「AI座 の窓口」で進み具合が見えます。",
@@ -298,6 +405,11 @@
       en: "Allowed",
       "zh-CN": "已允许",
     },
+    "chat.dismiss_write_in_chat": {
+      ja: "答えずにチャットで書く",
+      en: "Write in the chat instead",
+      "zh-CN": "不回答，在聊天中写",
+    },
     "chat.answer_on_terminal": {
       ja: "端末で答える",
       en: "Answer on the terminal",
@@ -363,6 +475,21 @@
       en: "Failed",
       "zh-CN": "执行失败",
     },
+    "chat.reply_to_header": {
+      ja: "返信先(Reply-To)",
+      en: "Reply-To",
+      "zh-CN": "回复地址(Reply-To)",
+    },
+    "chat.address_headers_as_written": {
+      ja: "宛先のヘッダー(書かれたまま)",
+      en: "Address headers (as written)",
+      "zh-CN": "地址头(原样)",
+    },
+    "chat.channel_name_declared": {
+      ja: "名前「{x}」は用意した側の申告(開くのは上の URL)",
+      en: "The name “{x}” is what the preparing side wrote (the URL above is what is opened)",
+      "zh-CN": "名称“{x}”是准备方填写的(实际打开的是上面的 URL)",
+    },
     "chat.from": {
       ja: "差出人",
       en: "From",
@@ -402,6 +529,31 @@
       ja: "新しいメール",
       en: "New mail",
       "zh-CN": "新邮件",
+    },
+    "chat.needs_you": {
+      ja: "見てほしいことがあります",
+      en: "Something for you to look at",
+      "zh-CN": "有需要您查看的内容",
+    },
+    "chat.status_checked": {
+      ja: "確認した",
+      en: "Checked",
+      "zh-CN": "已确认",
+    },
+    "chat.status_later": {
+      ja: "後で",
+      en: "Later",
+      "zh-CN": "稍后",
+    },
+    "chat.status_checked_message": {
+      ja: "確認しました",
+      en: "Checked.",
+      "zh-CN": "已确认。",
+    },
+    "chat.could_not_send_checked_err": {
+      ja: "「確認しました」を送れませんでした: {err}",
+      en: "Could not send \"Checked\": {err}",
+      "zh-CN": "无法发送「已确认」:{err}",
     },
     "chat.no_enter": {
       ja: "⏎なし",
@@ -628,6 +780,11 @@
       ja: "🙋 番ごと",
       en: "🙋 By turn",
       "zh-CN": "🙋 按轮次",
+    },
+    "common.ok": {
+      ja: "OK",
+      en: "OK",
+      "zh-CN": "确定",
     },
     "common.cancel": {
       ja: "やめる",
@@ -1230,6 +1387,11 @@
       en: "Could not attach the file: {err}",
       "zh-CN": "添加附件失败:{err}",
     },
+    "compose.some_files_not_attached": {
+      ja: "次のファイルは添付できませんでした(ほかは添付しました):\n{list}",
+      en: "These files could not be attached (the others were):\n{list}",
+      "zh-CN": "以下文件未能添加(其他文件已添加):\n{list}",
+    },
     "compose.file_too_large_limit_mb": {
       ja: "ファイルが大きすぎます(上限{mb}MB)。",
       en: "The file is too large (limit {mb} MB).",
@@ -1239,6 +1401,31 @@
       ja: "そのセッションを開くと、送れなかった文が入力欄に戻ります。",
       en: "Open that session and the unsent text will be back in the input box.",
       "zh-CN": "打开那个会话,未发送的文字会回到输入框。",
+    },
+    "compose.session_is_stopped": {
+      ja: "このセッションは止まっています。",
+      en: "This session has stopped.",
+      "zh-CN": "这个会话已停止。",
+    },
+    "compose.stopped_cannot_resume": {
+      ja: "セッションが止まっていて、ここからは再開できないので送っていません",
+      en: "the session has stopped and cannot be resumed from here, so nothing was sent",
+      "zh-CN": "会话已停止且无法从这里恢复,所以没有发送",
+    },
+    "compose.could_not_resume_err": {
+      ja: "止まっていたセッションを再開できなかったので送っていません({err})",
+      en: "the stopped session could not be resumed, so nothing was sent ({err})",
+      "zh-CN": "无法恢复已停止的会话,所以没有发送({err})",
+    },
+    "compose.resumed_not_ready": {
+      ja: "再開しましたが、{s} 秒のうちに入力を受けられるようにならなかったので送っていません",
+      en: "resumed, but it was not ready for input within {s} s, so nothing was sent",
+      "zh-CN": "已恢复,但 {s} 秒内未能接受输入,所以没有发送",
+    },
+    "compose.resuming_then_sending": {
+      ja: "止まっていたので再開しています。立ち上がったら送ります",
+      en: "It had stopped; resuming it. The text goes in once it is up",
+      "zh-CN": "会话已停止,正在恢复。启动后发送",
     },
     "compose.sending_failed_err": {
       ja: "送信に失敗しました: {err}",
@@ -1280,6 +1467,21 @@
       ja: "(フォルダに入れない)",
       en: "(in no folder)",
       "zh-CN": "(不放入文件夹)",
+    },
+    "form.demo_ai": {
+      ja: "AI",
+      en: "AI",
+      "zh-CN": "AI",
+    },
+    "form.demo_room": {
+      ja: "部屋",
+      en: "Room",
+      "zh-CN": "房间",
+    },
+    "form.demo_room_invite": {
+      ja: "招待する・追い出す(部屋の入口のページ)",
+      en: "Invite or send out (the room's door)",
+      "zh-CN": "邀请或请出(房间入口页面)",
     },
     "form.name_new_folder": {
       ja: "新しいディレクトリの名前",
@@ -1819,15 +2021,55 @@
       en: "🔗 Tap the session to link with “{label}”",
       "zh-CN": "🔗 请点按要与「{label}」连接的会话",
     },
-    "links.unlink_automatically_after_how_many": {
-      ja: "何分で自動的に切断するかを入力してください(最大1440分=24時間)。0 にすると切りません(どちらかのセッションが終わるまで)。",
-      en: "Unlink automatically after how many minutes? (up to 1440 = 24 h). 0 keeps the link until either session ends.",
-      "zh-CN": "请输入几分钟后自动断开(最多 1440 分钟 = 24 小时)。输入 0 则不自动断开(直到任一会话结束)。",
-    },
     "links.unlink_b": {
       ja: "「{a}」と「{b}」の連携を切断します。よろしいですか?",
       en: "Unlink “{a}” and “{b}”?",
       "zh-CN": "要断开「{a}」与「{b}」的连接吗?",
+    },
+    "links.unlink_after": {
+      ja: "自動で切るまで",
+      en: "Unlink automatically after",
+      "zh-CN": "自动断开前",
+    },
+    "links.d_30m": {
+      ja: "30分",
+      en: "30 min",
+      "zh-CN": "30 分钟",
+    },
+    "links.d_1h": {
+      ja: "1時間",
+      en: "1 h",
+      "zh-CN": "1 小时",
+    },
+    "links.d_3h": {
+      ja: "3時間",
+      en: "3 h",
+      "zh-CN": "3 小时",
+    },
+    "links.d_8h": {
+      ja: "8時間",
+      en: "8 h",
+      "zh-CN": "8 小时",
+    },
+    "links.d_24h": {
+      ja: "24時間",
+      en: "24 h",
+      "zh-CN": "24 小时",
+    },
+    "links.d_never": {
+      ja: "切らない(どちらかが終わるまで)",
+      en: "Never (until either ends)",
+      "zh-CN": "不断开(直到任一结束)",
+    },
+    "links.or_minutes_up_to_1440": {
+      ja: "または分で(最大1440)",
+      en: "Or minutes (up to 1440)",
+      "zh-CN": "或输入分钟(最多 1440)",
+    },
+    "links.link_ok": {
+      ja: "つなぐ",
+      en: "Link",
+      "zh-CN": "连接",
     },
     "links.what_do_on_m_hand": {
       ja: "{m} ですることを書いてください(セッションに結び付かない手書きの書き込みになります):",
@@ -2167,6 +2409,21 @@
       "zh-CN": "未指定会话。",
     },
     // page
+    "page.discard_what_you_wrote": {
+      ja: "書いた内容を捨てますか？",
+      en: "Discard what you wrote?",
+      "zh-CN": "要丢弃已写的内容吗？",
+    },
+    "page.keep_writing": {
+      ja: "戻って続ける",
+      en: "Keep writing",
+      "zh-CN": "返回继续",
+    },
+    "page.discard": {
+      ja: "捨てる",
+      en: "Discard",
+      "zh-CN": "丢弃",
+    },
     "page.chat_stopped_updating_too_log": {
       ja: "チャットの更新も止まっています。ログインし直すと、この画面に戻ります(書きかけの文は残します)。",
       en: "The chat has stopped updating too. Log in again to come back to this screen (unsent text is kept).",
@@ -2633,11 +2890,6 @@
       en: "Nothing to do right now",
       "zh-CN": "现在没有待办",
     },
-    "todo.or_month_day_hh_mm": {
-      ja: "または 月/日 [時:分]",
-      en: "or month/day [hh:mm]",
-      "zh-CN": "或 月/日 [时:分]",
-    },
     "todo.other_session_gone": {
       ja: "相手のセッションはもうありません",
       en: "The other session is gone",
@@ -2672,6 +2924,11 @@
       ja: "寝かせる",
       en: "Snooze",
       "zh-CN": "搁置",
+    },
+    "todo.or_pick_date_time": {
+      ja: "または日時を選ぶ",
+      en: "Or pick a date and time",
+      "zh-CN": "或选择日期和时间",
     },
     "todo.snooze_until_when": {
       ja: "いつまで寝かせますか",

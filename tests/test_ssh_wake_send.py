@@ -13,6 +13,7 @@ from pathlib import Path
 from unittest import mock
 
 from test_shared_search import B
+from test_link_groups import to_all
 
 A, P = "aaaaaaaaaab1", "aaaaaaaaaab2"
 MACHINES = {
@@ -93,7 +94,7 @@ class SshWakeSendTest(unittest.TestCase):
 
     def test_awake_machine_sent_at_once(self):
         self.awake["pc"] = True
-        status, msg = B._relay_to_partner(A, B.TalktoText("ラベルを刷って"))
+        status, msg = B._relay_to_partner(A, to_all("ラベルを刷って"))
         self.assertEqual(status, "delivered")
         self.assertIn("届きました", msg)
         self.assertEqual(len(self.to_p()), 1)
@@ -101,7 +102,7 @@ class SshWakeSendTest(unittest.TestCase):
         self.assertEqual(self.handoffs, [(A, P)])
 
     def test_sleeping_machine_woken_then_sent_once(self):
-        status, msg = B._relay_to_partner(A, B.TalktoText("ラベルを刷って"))
+        status, msg = B._relay_to_partner(A, to_all("ラベルを刷って"))
         self.assertEqual(status, "delivered")
         self.assertIn("起こしています", msg)
         self.assertEqual(self.to_p(), [])            # not yet: the sender did not wait
@@ -115,7 +116,7 @@ class SshWakeSendTest(unittest.TestCase):
 
     def test_not_woken_nothing_sent_sender_told(self):
         self.wakes_up = False
-        status, msg = B._relay_to_partner(A, B.TalktoText("ラベルを刷って"))
+        status, msg = B._relay_to_partner(A, to_all("ラベルを刷って"))
         self.assertIn("起こしています", msg)
         self.run_threads()
         self.assertEqual(self.to_p(), [])
@@ -127,7 +128,7 @@ class SshWakeSendTest(unittest.TestCase):
     def test_unwakeable_machine_sent_at_once_as_before(self):
         meta = json.loads((self.root / P / "meta.json").read_text()) | {"tmux_location": "ssh:other", "preset": "claude-tui-other"}
         (self.root / P / "meta.json").write_text(json.dumps(meta))
-        status, msg = B._relay_to_partner(A, B.TalktoText("x"))
+        status, msg = B._relay_to_partner(A, to_all("x"))
         self.assertIn("届きました", msg)
         self.assertEqual(len(self.to_p()), 1)
         self.assertEqual(HeldThread.queue, [])

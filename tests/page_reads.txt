@@ -82,6 +82,7 @@ chat.js api.js updateUnlockNotice
 chat.js sessionops.js computeScreenCols
 chat.js sessionops.js computeScreenRows
 chat.js sessionops.js updateChatResumeBtn
+chat.js sessionops.js resumeToSend
 chat.js compose.js restoreUnsent
 share.js page.js sessionKind
 share.js page.js shareBtn
@@ -199,7 +200,6 @@ api.js page.js topHeaderEl
 api.js share.js currentShareMode
 api.js form.js mountPathLabel
 links.js page.js pageNow
-links.js page.js sessionKind
 links.js page.js viewChat
 links.js list.js lastSessions
 links.js list.js openLockedSession
@@ -243,6 +243,7 @@ compose.js page.js sendBtn
 compose.js page.js textEl
 compose.js chat.js addThinkingIndicator
 compose.js list.js lastSessions
+compose.js sessionops.js resumeToSend
 compose.js form.js HEADLESS_PRESETS
 app.js page.js chatLabelEl
 app.js page.js loginUrl

@@ -54,6 +54,12 @@ PROBE = r"""
     const dt = new DataTransfer(); dt.items.add(new File(["x"], name, { type: "text/plain" }));
     input.files = dt.files; input.dispatchEvent(new Event("change"));
   };
+  const files = (names) => { const dt = new DataTransfer(); for (const n of names) dt.items.add(new File(["x"], n, { type: "text/plain" })); return dt; };
+  const pickMany = (names) => {
+    const input = document.getElementById("attach-file-input");
+    input.files = files(names).files; input.dispatchEvent(new Event("change"));
+  };
+  const pasteFiles = (names) => box().dispatchEvent(new ClipboardEvent("paste", { clipboardData: files(names), bubbles: true, cancelable: true }));
   const scrollTop = () => { const m = document.getElementById("messages"); m.scrollTop = 0; m.dispatchEvent(new Event("scroll")); };
   const steps = __STEPS__;
   let i = 0;
@@ -134,6 +140,20 @@ CASES = {
     "attach fails: said, the box as it was": ({ATTACH: [{"status": 413, "body": {"error": "attachment too large"}}]}, [
         ("type('abc')", 300),
         ("pick('a.txt')", 1500),
+        ("out.box = box().value", 100),
+    ]),
+    "attach several: every path in order, only the failed one said": ({ATTACH: [
+        {"status": 201, "body": {"path": "/inbox/a.txt"}},
+        {"status": 413, "body": {"error": "attachment too large"}},
+        {"status": 201, "body": {"path": "/inbox/c.txt"}}]}, [
+        ("type('abc')", 300),
+        ("out.multiple = document.getElementById('attach-file-input').multiple; pickMany(['a.txt', 'b.txt', 'c.txt'])", 2500),
+        ("out.box = box().value; out.first = document.querySelector('#key-modrow button').textContent", 100),
+    ]),
+    "paste several files: all attached": ({ATTACH: [
+        {"status": 201, "body": {"path": "/inbox/a.png"}},
+        {"status": 201, "body": {"path": "/inbox/b.png"}}]}, [
+        ("pasteFiles(['a.png', 'b.png'])", 2000),
         ("out.box = box().value", 100),
     ]),
     "older history: a failed page is tried again by scrolling": ({PAGE + "?limit=50": [
@@ -312,6 +332,23 @@ class PageFailureTest(unittest.TestCase):
         self.assertEqual(out["box"], "abc")
         self.assertEqual(len(out["alerts"]), 1)
         self.assertIn("attachment too large", out["alerts"][0])
+
+    def test_several_files_attach_in_order_and_only_the_failed_one_is_said(self):
+        out = self.got("attach several: every path in order, only the failed one said")
+        self.assertTrue(out["multiple"])
+        self.assertEqual(out["first"], "📎")          # the far left of the key row (2026-11-27)
+        self.assertEqual(out["box"], "abc /inbox/a.txt /inbox/c.txt ")
+        sent = [b["filename"] for m, p, b in out["log"] if m == "POST" and p == f"/sessions/{S0}/attach"]
+        self.assertEqual(sent, ["a.txt", "b.txt", "c.txt"])
+        self.assertEqual(len(out["alerts"]), 1)
+        self.assertIn("b.txt", out["alerts"][0])
+        self.assertIn("attachment too large", out["alerts"][0])
+        self.assertNotIn("a.txt", out["alerts"][0])
+
+    def test_pasting_several_files_attaches_them_all(self):
+        out = self.got("paste several files: all attached")
+        self.assertEqual(out["box"], "/inbox/a.png /inbox/b.png ")
+        self.assertEqual(out["alerts"], [])
 
     def test_older_history_tried_again_after_a_failure(self):
         out = self.got("older history: a failed page is tried again by scrolling")

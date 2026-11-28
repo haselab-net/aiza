@@ -44,8 +44,9 @@ HELP = """\
 aiza の「セッション連携」でこのセッションとつながっている相手のセッション
 (別の Claude Code など)に、文を1つ送ります。送られるのは talkto に渡した文だけで、
 あなたの応答が自動で転送されることはありません。
-3つ以上つながっているときは、ほかの全員に届きます(相手には誰からかが付きます)。
-1人だけに送るときは --to にその名前(aiza の一覧の名前)を付けます。
+送り先は必ず指定します: 1人に送るときは --to にその名前(aiza の一覧の名前)、
+つながっている全員に送るときは --all を付けます。どちらも無いときは送らずに、
+今の相手の一覧を出して終わります(終了コード 1。相手が1人だけでも同じ)。
 相手はあとから加わったり、別の連携とまとめられたりします(そのとき知らせは来ません)。
 今つながっている相手の名前・種類・動いているかは talkto --list で分かります(何も送りません)。
 相手のセッションが止まっていても連携は残ります。devbox のセッションなら aiza が続きから
@@ -64,6 +65,7 @@ aiza の「セッション連携」でこのセッションとつながってい
 オプション:
   -h, --help, -help   この説明を表示する(何も送らない)
   --to 名前           つながっている相手のうち、その名前の1人だけに送る
+  --all               つながっている全員に送る(--to か --all のどちらかが要る)
   --list              今つながっている相手(--to に渡す名前・種類・動いているか)を表示する(何も送らない)
   --no-wait           結果を待たずに終わる
   -                   文を標準入力から読む(文の引数が無いときも同じ)
@@ -76,16 +78,20 @@ aiza の「セッション連携」でこのセッションとつながってい
 
 def usage_error(msg):
     print(f"talkto: {msg}", file=sys.stderr)
-    print('使い方: talkto "相手に送る文"   (詳しくは talkto --help)', file=sys.stderr)
+    print('使い方: talkto --to 名前 "相手に送る文"   (全員へは --all。詳しくは talkto --help)', file=sys.stderr)
     return 2
 
 
 LIST = object()
+ALL = object()
+NEED_TO = "--to <名前> か --all(全員へ)を付けてください。送っていません。"
 
 
 def parse(argv):
     """(text or None to read stdin, no_wait, to) or an int exit code; text
-    is LIST for `talkto --list`."""
+    is LIST for `talkto --list`. `to` is ALL for `--all` (2026-11-27, the
+    user: "引数なしだとエラーで、放送はオプションにしてください"), None
+    when neither --to nor --all was given."""
     no_wait = False
     to = None
     words = []
@@ -104,7 +110,13 @@ def parse(argv):
             return LIST, False, None
         if a == "--no-wait":
             no_wait = True
+        elif a == "--all":
+            if to not in (None, ALL):
+                return usage_error("--to と --all は一緒に使えません")
+            to = ALL
         elif a == "--to" or a.startswith("--to="):
+            if to is ALL:
+                return usage_error("--to と --all は一緒に使えません")
             if a == "--to":
                 if i + 1 >= len(argv):
                     return usage_error("--to のあとに相手の名前がありません")
@@ -161,6 +173,11 @@ def main():
         print("talkto: $AIZA_TALKTO is not set -- this shell was not started by AI-za, "
               "or this preset does not support session links", file=sys.stderr)
         return 1
+    need_to = text is not LIST and to is None
+    if need_to:
+        # Nothing is sent: ask for the list instead, so the error says who
+        # could be named. Checked before stdin is read.
+        text = LIST
     if text is LIST:
         item_id = secrets.token_hex(8)
         item = {"ts": time.time(), "id": item_id, "list": True}
@@ -173,7 +190,9 @@ def main():
             return usage_error("送る文が空です")
         item_id = secrets.token_hex(8)
         item = {"ts": time.time(), "id": item_id, "text": text}
-        if to:
+        if to is ALL:
+            item["all"] = True
+        else:
             item["to"] = to
     line = json.dumps(item)
     try:
@@ -186,6 +205,12 @@ def main():
         finally: os.close(dfd)
     except (OSError, ValueError):
         print('talkto: セッションの送信先を安全に開けませんでした。', file=sys.stderr)
+        return 1
+    if need_to:
+        print(f"talkto: {NEED_TO}", file=sys.stderr)
+        st = wait_for_status(os.path.join(os.path.dirname(path), "talkto_status.jsonl"), item_id)
+        if st is not None:
+            print(st.get("msg") or st.get("status"), file=sys.stderr)
         return 1
     if no_wait and text is not LIST:
         print("talkto: 送りました(結果は待っていません)")

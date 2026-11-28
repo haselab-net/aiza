@@ -203,7 +203,7 @@
 
 <!-- ===================================================================== -->
 <h2 id="links">4. Linking sessions together</h2>
-<p>🔗 in a session row’s ⋯ (or the chat’s ⋯) links two sessions (for example, a devbox Claude and a host Claude). Once linked, a message reaches the other side’s input box only when one Claude runs <code>talkto "…"</code>. It does not forward everything automatically. Claude can look up how to use it with <code>talkto --help</code>.</p>
+<p>🔗 in a session row’s ⋯ (or the chat’s ⋯) links two sessions (for example, a devbox Claude and a host Claude). Once linked, a message reaches the other side’s input box only when one Claude runs <code>talkto --to NAME "…"</code>. When three or more are linked, a message goes to everyone only with <code>--all</code> (with neither, nothing is sent and it is an error). It does not forward everything automatically. Claude can look up how to use it with <code>talkto --help</code>.</p>
 
 <!-- ===================================================================== -->
 <h2 id="where">5. devbox, mailbox, host and root: the differences</h2>

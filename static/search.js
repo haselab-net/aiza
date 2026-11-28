@@ -134,11 +134,11 @@
   // sending the user back to /agents/ is the right next step.
   // 設定's アカウント card (the deployment notes): its ログアウト button.
   document.getElementById("logout-btn").addEventListener("click", async () => {
-    if (confirm(t("search.log_out_who", { who: whoEl.textContent }))) {
+    if ((await ui.confirm(t("search.log_out_who", { who: whoEl.textContent }), { danger: true }))) {
       try {
-        await fetch("/agents/logout", { method: "POST", credentials: "same-origin" });
+        await fetch(window.aizaBase + "/agents/logout", { method: "POST", credentials: "same-origin" });
       } catch (e) { /* fall through to the redirect regardless */ }
-      location.href = "/agents/";
+      location.href = window.aizaBase + "/agents/";
     }
   });
 

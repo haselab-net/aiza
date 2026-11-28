@@ -205,6 +205,95 @@ class OutGateTest(unittest.TestCase):
         self.assertFalse(self.gate("out-card", "o000000000009", hashlib.sha256(b"{}").hexdigest())["ok"])
         self.assertEqual([e for _s, e in self.events if e.get("type") == "ask"], [])
 
+    def test_mail_shapes_other_than_compose_s_are_refused_and_every_recipient_is_shown(self):
+        """監査 O1・O2(2026-11-27): 箱の AI が自分で作った .eml でも、カードとページに出るのが送られるもの全部"""
+        n = iter(range(100, 200))
+
+        def try_card(raw):
+            oid = f"o000000000{next(n)}"
+            h = write_action(self.root / "box", oid, {"kind": "mail", "thread": ""}, raw)
+            return oid, self.gate("out-card", oid, h)
+
+        # compose の形(返信・添付つき、Reply-To・Sender つき)は通り、Reply-To・Sender がカードとページに出る
+        m = email.message.EmailMessage(policy=email.policy.default)
+        m["From"], m["To"], m["Subject"] = "山田 <yamada@example.ac.jp>", "a@example.ac.jp", "Re: 日程"
+        m["Reply-To"], m["Sender"] = "other@example.net", "bot@example.net"
+        m["In-Reply-To"] = m["References"] = "<x@example.ac.jp>"
+        m.set_content("本文")
+        m.add_attachment(b"%PDF", maintype="application", subtype="pdf", filename="資料.pdf")
+        m.add_attachment(b"hi", maintype="text", subtype="plain", filename="a.txt")
+        oid, r = try_card(m.as_bytes())
+        self.assertTrue(r["ok"], r)
+        summ = self.events[-1][1]["summary"]
+        self.assertIn("返信先(Reply-To): other@example.net", summ)
+        self.assertIn("Sender: bot@example.net", summ)
+        page = B.out_page(S, oid)["mail"]
+        self.assertEqual((page["reply_to"], page["sender"], page["reply"]), ("other@example.net", "bot@example.net", True))
+        self.assertEqual([a["name"] for a in page["attachments"]], ["資料.pdf", "a.txt"])
+        self.assertEqual(B.out_attachment(S, oid, 1), ("a.txt", b"hi"))
+        self.assertEqual(page["heads_raw"]["Reply-To"], "other@example.net")              # 書かれたままも出る
+        self.assertIn("yamada@example.ac.jp", page["heads_raw"]["From"])
+        oid, r = try_card(mail_bytes(to=""))                                       # 宛先の欄が空でも compose の形
+        self.assertTrue(r["ok"], r)
+
+        def head(raw, line):
+            return raw.replace(b"Subject:", line + b"\nSubject:", 1)
+        plain = mail_bytes()
+        bad = {
+            "two To": head(plain, b"To: hidden@example.net"),
+            "two Cc": head(head(plain, b"Cc: a@example.net"), b"Cc: b@example.net"),
+            "two Subject": head(plain, b"Subject: other"),
+            "two Reply-To": head(head(plain, b"Reply-To: a@example.net"), b"Reply-To: b@example.net"),
+            "Resent-To": head(plain, b"Resent-To: hidden@example.net"),
+            "unknown header": head(plain, b"X-Whatever: 1"),
+        }
+        alt = email.message.EmailMessage(policy=email.policy.default)
+        alt["To"], alt["Subject"] = "a@example.ac.jp", "s"
+        alt.set_content("見える文")
+        alt.add_alternative("<p>見えない文</p>", subtype="html")
+        bad["text+html"] = alt.as_bytes()
+        html = email.message.EmailMessage(policy=email.policy.default)
+        html["To"], html["Subject"] = "a@example.ac.jp", "s"
+        html.set_content("<p>x</p>", subtype="html")
+        bad["html only"] = html.as_bytes()
+        inl = email.message.EmailMessage(policy=email.policy.default)
+        inl["To"], inl["Subject"] = "a@example.ac.jp", "s"
+        inl.set_content("本文")
+        inl.add_attachment(b"GIF89a", maintype="image", subtype="gif", filename="i.gif", disposition="inline")
+        bad["inline part"] = inl.as_bytes()
+        fwd = email.message.EmailMessage(policy=email.policy.default)
+        fwd["To"], fwd["Subject"] = "a@example.ac.jp", "s"
+        fwd.set_content("本文")
+        fwd.add_attachment(email.message_from_bytes(mail_bytes(), policy=email.policy.default), filename="m.eml")
+        bad["attached message"] = fwd.as_bytes()
+        nameless = email.message.EmailMessage(policy=email.policy.default)
+        nameless["To"], nameless["Subject"] = "a@example.ac.jp", "s"
+        nameless.set_content("本文")
+        nameless.add_attachment(b"x", maintype="application", subtype="octet-stream")
+        bad["attachment without a name"] = nameless.as_bytes()
+        pre = m.as_bytes().replace(b"\n\n--", b"\n\nhidden preamble text\n\n--", 1)
+        bad["preamble"] = pre
+        # 監査 P1: 崩れた宛先は黙って消えず、断る(Cc に知っている相手があっても)
+        for i, v in enumerate([b"a@example.net, b@example.net (", b"a@example.net; b@example.net", b"a@example.net b@example.net",
+                               b"a@b@example.net", b"<>", b"(only a comment)"]):
+            bad[f"broken To {i}"] = mail_bytes(to="").replace(b"To:\n", b"To: " + v + b"\nCc: known@example.ac.jp\n", 1)
+        self.assertIn(b"known@example.ac.jp", bad["broken To 0"])
+        bad["broken Reply-To"] = head(plain, b"Reply-To: a@example.net; b@example.net")
+        # P2: 決めた文字コードだけ
+        bad["utf-7 text"] = plain.replace(b'charset="utf-8"', b'charset="utf-7"', 1)
+        self.assertNotEqual(bad["utf-7 text"], plain)
+        asks = len([e for _s, e in self.events if e.get("type") == "ask"])
+        for what, raw in bad.items():
+            oid, r = try_card(raw)
+            self.assertFalse(r["ok"], what)
+            self.assertIn("メールの形", r["why"], what)
+        self.assertEqual(len([e for _s, e in self.events if e.get("type") == "ask"]), asks)   # no card for any
+
+    def test_post_card_says_the_channel_name_is_declared(self):
+        h = write_action(self.root / "box", "o000000000301", {"kind": "slack", "channel_url": "https://ws.slack.com/archives/C0TESTCHAN1", "channel": "#general", "text": "t"})
+        self.card("o000000000301", h)
+        self.assertIn("名前「#general」は用意した側の申告", self.events[-1][1]["summary"])
+
     def test_one_card_per_id_and_a_few_per_ten_minutes(self):
         n = B.OUT_CARDS_PER_10MIN
         ids = [f"o{0x100 + i:012x}" for i in range(n + 1)]

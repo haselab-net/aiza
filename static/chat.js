@@ -274,7 +274,7 @@
       const ta = document.createElement("textarea");
       ta.value = text;
       ta.setAttribute("readonly", "");
-      ta.style.cssText = "position:fixed;top:0;left:0;opacity:0;";
+      ta.className = "copy-source";   // style.css: unseen
       document.body.appendChild(ta);
       ta.select();
       let ok = false;
@@ -709,7 +709,7 @@
       btn.addEventListener("click", () => {
         const params = new URLSearchParams({ session: sessionId, dir: filename, name: label });
         if (currentOwner) params.set("owner", currentOwner);
-        window.open(`/agents/outbox-browse.html?${params}`, "_blank");
+        window.open(`${window.aizaBase}/agents/outbox-browse.html?${params}`, "_blank");
       });
       div.appendChild(btn);
       return;
@@ -776,6 +776,7 @@
   const askDone = new Map();
   function askShowDone(div, done) {
     div.classList.add("done");
+    setTimeout(updateStatusCard, 0);
     for (const el of div.querySelectorAll("button, input")) el.disabled = true;
     let note = div.querySelector(".ask-note");
     if (!note) { note = document.createElement("div"); note.className = "ask-note"; div.appendChild(note); }
@@ -804,7 +805,7 @@
         closeAsk({ ask_id: ev.ask_id, how: "phone", text: r.text });
       } catch (e) {
         if (String(e.message).includes("もう答えられません")) closeAsk({ ask_id: ev.ask_id, how: "gone", text: t("chat.can_no_longer_answered") });
-        else { for (const el of div.querySelectorAll("button, input")) el.disabled = false; alert(e.message); }
+        else { for (const el of div.querySelectorAll("button, input")) el.disabled = false; ui.toast(e.message, { error: true }); }
       }
     };
     const mkBtn = (label, cls, fn) => {
@@ -916,6 +917,14 @@
       div.appendChild(why);
     }
     const foot = row();
+    // 「答えずにチャットで書く」 (2026-11-27, the user): as Esc on the terminal
+    // -- the card closes, the agent stops, and the box is ready for the
+    // message. Not on an outward action's card (the deployment notes): 拒否 is that.
+    if (!ev.gate_out) foot.appendChild(mkBtn(t("chat.dismiss_write_in_chat"), "ask-term ask-dismiss", async () => {
+      await send({ dismiss: true });
+      const box = document.getElementById("text");
+      if (box && div.classList.contains("done")) box.focus();
+    }));
     if (ev.gate_out) { /* answered here only: the terminal has no say over it */ }
     else if (!ev.terminal) foot.appendChild(mkBtn(t("chat.answer_on_terminal"), "ask-term", () => send({ terminal: true })));
     else { const n = document.createElement("span"); n.className = "ask-hint"; n.textContent = t("chat.can_also_answer_on_terminal"); foot.appendChild(n); }
@@ -932,7 +941,7 @@
     let d;
     try {
       d = await withUnlockRetry(() => api(`/sessions/${encodeURIComponent(sessionId)}/out/${encodeURIComponent(oid)}`));
-    } catch (e) { alert(e.message); return; }
+    } catch (e) { ui.toast(e.message, { error: true }); return; }
     const box = document.createElement("div");
     box.className = "out-page";
     const inner = document.createElement("div");
@@ -956,6 +965,10 @@
       if ((m.cc || []).length) add("Cc", m.cc.join("\n"), "pre");
       if ((m.bcc || []).length) add("Bcc", m.bcc.join("\n"), "pre");
       add(t("chat.from"), m.from || t("chat.default"));
+      if (m.reply_to) add(t("chat.reply_to_header"), m.reply_to);
+      if (m.sender) add("Sender", m.sender);
+      const raw = Object.entries(m.heads_raw || {}).map(([k, v]) => `${k}: ${v}`).join("\n");
+      if (raw) add(t("chat.address_headers_as_written"), raw, "pre");
       add(t("chat.subject"), m.subject || "");
       add(t("common.kind"), m.reply ? t("chat.reply") : t("chat.new_mail"));
       add(t("common.text"), m.text || (m.html_only ? t("chat.html_only_mail_shown_html") + "\n" + m.html_only : ""), "pre");
@@ -964,7 +977,7 @@
       if (!(m.attachments || []).length) list.textContent = t("common.none");
       (m.attachments || []).forEach((x, i) => {
         const link = document.createElement("a");
-        link.href = `/agents/api/sessions/${encodeURIComponent(sessionId)}/out/${encodeURIComponent(oid)}/att/${i}`;
+        link.href = `${window.aizaBase}/agents/api/sessions/${encodeURIComponent(sessionId)}/out/${encodeURIComponent(oid)}/att/${i}`;
         link.textContent = `${x.name}(${x.size} ${t("chat.bytes")}、${x.type})`;
         link.setAttribute("download", x.name);
         list.appendChild(link); list.appendChild(document.createElement("br"));
@@ -972,7 +985,7 @@
     } else if (d.kind === "trash") {
       add(t("chat.threads_move_trash"), (a.threads || []).map((x) => `${x.subject || t("chat.no_subject")} — ${x.from || "?"} — ${x.date || ""}(${x.count} ${t("common.messages")}、${x.id})`).join("\n"), "pre");
     } else if (d.kind === "slack" || d.kind === "discord") {
-      add(t("chat.post"), `${a.channel || ""}\n${a.channel_url}`, "pre");
+      add(t("chat.post"), `${a.channel_url}\n${a.channel ? t("chat.channel_name_declared", { x: a.channel }) : ""}`, "pre");
       if (a.thread_ts) add(t("chat.reply_in_thread"), a.thread_ts, "pre");
       add(t("common.text"), a.text || "", "pre");
       if ((a.attachments || []).length) {
@@ -980,7 +993,7 @@
         const list = document.createElement("div"); list.className = "out-v"; inner.appendChild(list);
         a.attachments.forEach((x, i) => {
           const link = document.createElement("a");
-          link.href = `/agents/api/sessions/${encodeURIComponent(sessionId)}/out/${encodeURIComponent(oid)}/att/${i}`;
+          link.href = `${window.aizaBase}/agents/api/sessions/${encodeURIComponent(sessionId)}/out/${encodeURIComponent(oid)}/att/${i}`;
           link.textContent = `${x.name}(${x.size} ${t("chat.bytes")})`;
           link.setAttribute("download", x.name);
           list.appendChild(link); list.appendChild(document.createElement("br"));
@@ -1002,7 +1015,7 @@
           await withUnlockRetry(() => api(`/sessions/${encodeURIComponent(sessionId)}/out/${encodeURIComponent(oid)}`, {
             method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ allow }) }));
           close();
-        } catch (e) { for (const b of btns.querySelectorAll("button")) b.disabled = false; alert(e.message); }
+        } catch (e) { for (const b of btns.querySelectorAll("button")) b.disabled = false; ui.toast(e.message, { error: true }); }
       };
       mk(t("common.allow"), "ask-go", () => answer(true));
       mk(t("chat.do_not_allow"), "ask-no", () => answer(false));
@@ -1235,6 +1248,8 @@
     } else if (ev.type === "agent_output") {
       div.className = "bubble agent";
       setTextWithLinks(div, ev.text);
+      const need = needsYouOf(ev.text);
+      if (need !== null) div.dataset.needsYou = need;
       if (speakable(currentPreset, ev)) speechSource.set(div, ev.text);
     } else if (ev.type === "agent_thinking") {
       renderThought(div, ev.text);
@@ -1280,6 +1295,75 @@
     }
     return div;
   }
+
+  // 「要判断」 to look at (2026-11-27, the user approved, the deployment notes):
+  // when the latest reply ends with 「状態: 要判断 — …」 and no question or
+  // permission card is open, a small card under it -- ✓ 確認した sends
+  // 「確認しました」 (resuming a stopped session first), 後で only folds it.
+  // The next reply or message takes it away. A choice to make comes as an
+  // AskUserQuestion card instead (the rule the sessions are given).
+  const NEEDS_YOU_RE = /(?:^|\n)[ \t]*状態[:：][ \t]*要判断[ \t]*(?:[—–-][ \t]*(.*?))?[ \t]*$/;
+  function needsYouOf(text) {
+    const m = NEEDS_YOU_RE.exec(String(text || "").replace(/\s+$/, ""));
+    return m ? (m[1] || "") : null;
+  }
+  const statusFolded = new Set();   // "<session>/<seq>" folded with 後で, in this page
+  let statusCardEl = null;
+  function updateStatusCard() {
+    const last = [...messagesEl.querySelectorAll(".bubble.agent, .bubble.user")].pop();
+    const readOnly = currentShareMode === "read" || !!(currentSessionMeta && currentSessionMeta.read_only);
+    const askOpen = !!messagesEl.querySelector(".bubble.ask:not(.done)");
+    const want = last && last.dataset.needsYou !== undefined && !readOnly && !askOpen && currentSessionId ? last : null;
+    if (!want) { if (statusCardEl) { statusCardEl.remove(); statusCardEl = null; } return; }
+    const key = `${currentOwner || ""}/${currentSessionId}/${want.dataset.seq}`;
+    if (statusCardEl && statusCardEl.dataset.key === key) {
+      if (statusCardEl.previousElementSibling !== want) want.after(statusCardEl);
+      return;
+    }
+    if (statusCardEl) statusCardEl.remove();
+    const el = document.createElement("div");
+    el.className = "status-card";
+    el.dataset.key = key;
+    const what = document.createElement("span");
+    what.className = "status-card-what";
+    what.textContent = "🙋 " + (want.dataset.needsYou || t("chat.needs_you"));
+    const ok = document.createElement("button");
+    ok.type = "button"; ok.className = "status-card-ok"; ok.textContent = "✓ " + t("chat.status_checked");
+    const later = document.createElement("button");
+    later.type = "button"; later.className = "status-card-later"; later.textContent = t("chat.status_later");
+    const fold = (on) => { el.classList.toggle("folded", on); if (on) statusFolded.add(key); else statusFolded.delete(key); };
+    later.addEventListener("click", () => fold(true));
+    what.addEventListener("click", () => { if (el.classList.contains("folded")) fold(false); });
+    const sid = currentSessionId, owner = currentOwner;
+    ok.addEventListener("click", async () => {
+      ok.disabled = later.disabled = true;
+      const text = t("chat.status_checked_message");
+      const here = () => chatNow.id === sid && chatNow.owner === owner;
+      try {
+        let to = sid;
+        if (currentSessionMeta && currentSessionMeta.alive === false && here()) to = await resumeToSend(sid, owner, here);
+        await withUnlockRetry(() => api(sessionPath(to, "/messages", to === sid ? owner : null), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text, submit: true, typed: true, ...(to !== sid ? { wait_ready: true } : {}) }),
+        }));
+      } catch (e) {
+        ok.disabled = later.disabled = false;
+        ui.toast(t("chat.could_not_send_checked_err", { err: e.message }), { error: true });
+      }
+    });
+    el.append(what, ok, later);
+    if (statusFolded.has(key)) el.classList.add("folded");
+    want.after(el);
+    statusCardEl = el;
+  }
+  let statusCardQueued = false;
+  new MutationObserver((muts) => {
+    if (muts.every((m) => [...m.addedNodes, ...m.removedNodes].every((n) => n === statusCardEl || (n.classList && n.classList.contains("status-card"))))) return;
+    if (statusCardQueued) return;
+    statusCardQueued = true;
+    setTimeout(() => { statusCardQueued = false; updateStatusCard(); }, 0);
+  }).observe(messagesEl, { childList: true });
 
   async function loadOlderHistory(limit = HISTORY_PAGE_LIMIT) {
     if (loadingHistory || !hasMoreHistory || oldestLoadedSeq === null || !currentSessionId) return false;
@@ -1527,17 +1611,17 @@
           const metas = await refreshSessions();
           const m = (metas || lastSessions).find((x) => x.id === sid && x.owner === owner);
           if (m) openSession(m);
-        } catch (e) { alert(e.message); }
+        } catch (e) { ui.toast(e.message, { error: true }); }
       });
       mkb("🤛 " + t("common.take_on"), async () => {
-        if (!confirm(t("chat.take_p_on_new_session", { p: n.title }))) return;
+        if (!(await ui.confirm(t("chat.take_p_on_new_session", { p: n.title })))) return;
         try {
           const r2 = await api("/tree", { method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ op: "take", id: n.id }) });
           const metas = await refreshSessions();
           const m = (metas || lastSessions).find((x) => x.id === r2.session && !x.owner);
           if (m) openSession(m);
-        } catch (e) { alert(e.message); }
+        } catch (e) { ui.toast(e.message, { error: true }); }
       });
     }).catch(() => {});
   }

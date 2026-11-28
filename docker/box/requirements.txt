@@ -1,0 +1,3 @@
+# The "agent" session (the deployment notes): agent-turn.py. Pinned; the SDK
+# wheel brings its own claude CLI (2.1.332 for this version).
+claude-agent-sdk==0.2.189

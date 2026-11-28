@@ -161,7 +161,7 @@ function sayPopup(btn) {
 }
 // 長押し: 500ms で開き、その押下の終わりのクリック(onclick の読み上げ)は捕捉段階で止める
 let sayPressT = null, sayLong = false;
-const sayBtnOf = e => e.target.closest && e.target.closest('#sp, .bt .say');
+const sayBtnOf = e => e.target.closest && e.target.closest('#sp');
 document.addEventListener('pointerdown', e => { const b = sayBtnOf(e); if (!b) return; sayLong = false; clearTimeout(sayPressT); sayPressT = setTimeout(() => { sayLong = true; sayPopup(b); }, 500); });
 for (const ty of ['pointerup', 'pointercancel']) document.addEventListener(ty, () => clearTimeout(sayPressT));
 document.addEventListener('pointerout', e => { if (sayBtnOf(e)) clearTimeout(sayPressT); });
@@ -203,11 +203,16 @@ function sayAll() {
   if (!sayList.length) { sayStop(); sayRun(['未決と未読はありません'], ++sayGen); return; }
   sayAt(0);
 }
-function sayOne(btn) { sayList = [btn.closest('.it')]; sayAt(0); }
+// 項目 el の from 番目の文から読む。未決・未読の項目ならそのまま下へ続け、ほかの欄の項目はその1件だけ
+function sayFrom(el, from = 0) {
+  const all = [...document.querySelectorAll('#g-未決 .rows>.it, #g-未読 .rows>.it')], k = all.indexOf(el);
+  sayList = k < 0 ? [el] : all;
+  sayAt(Math.max(k, 0), from);
+}
 if (SAY_OK) document.getElementById('spbar').style.display = '';
-else document.querySelectorAll('.bt .say').forEach(b => b.remove());
-// 読み上げ中に項目をタップで一時停止、次のタップでその項目のタップした文から続きを読む(2026-10-26 ユーザー依頼)。
-// 一時停止は cancel()(Android の一部のブラウザは pause() を止めとして扱う)。ボタン・リンク・入力欄・文字の選択は除く
+// 項目をタップすると、その項目のタップした文から読み始める(2026-11-27 利用者: 各行の 🔊 は不要、タップしたところから
+// 読み始めれば良い。読んでいないときも)。読み上げ中のタップは一時停止、次のタップでそこから続き(2026-10-26 ユーザー依頼)。
+// 一時停止は cancel()(Android の一部のブラウザは pause() を止めとして扱う)。ボタン・リンク・入力欄・文字の選択・保留の項目は除く
 const sayKey = s => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
 function sayTapped(el, cs, x, y) { // 画面の文字のタップ位置を、各文の頭の文字が画面のどこにあるかと照らして文の番号にする
   let node = null, off = 0;
@@ -221,12 +226,11 @@ function sayTapped(el, cs, x, y) { // 画面の文字のタップ位置を、各
   return best;
 }
 document.addEventListener('click', e => {
-  if (sayIdx < 0) return;
-  const el = e.target.closest && e.target.closest('.it[data-id]');
+  if (!SAY_OK) return;
+  const el = e.target.closest && e.target.closest('.it[data-id]:not(.held)');
   if (!el || e.target.closest('a, button, input, textarea, select, summary, label')) return;
   if (String(getSelection() || '').trim()) return;
-  if (!sayPaused) { sayGen++; sayHush(); sayPaused = true; sayUi(); return; }
-  let k = sayList.indexOf(el);
-  if (k < 0) { const all = [...document.querySelectorAll('#g-未決 .rows>.it, #g-未読 .rows>.it')]; k = all.indexOf(el); sayList = k < 0 ? [el] : all; k = Math.max(k, 0); }
-  sayAt(k, sayTapped(el, sayChunks(sayText(el)), e.clientX, e.clientY));
+  if (sayIdx >= 0 && !sayPaused) { sayGen++; sayHush(); sayPaused = true; sayUi(); return; }
+  const from = sayTapped(el, sayChunks(sayText(el)), e.clientX, e.clientY), k = sayList.indexOf(el);
+  if (sayIdx >= 0 && k >= 0) sayAt(k, from); else sayFrom(el, from);
 });

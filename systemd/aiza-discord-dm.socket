@@ -1,11 +1,11 @@
-# aiza-discord-dm.socket -- コンテナ(Devbox・MailBox)から研究室の Discord のボットで DM を送る受付(the deployment notes)。
-# /opt/aiza-ssh はコンテナに読み取り専用で入っているが、ソケットへの connect は通る。送り手は相手の uid(SO_PEERCRED)。
+# aiza-discord-dm.socket -- devbox から研究室の Discord のボットで DM を送る受付(the deployment notes)。
+# /opt/aiza-dm は devbox にだけ読み取り専用で入っている(Email の箱には入れない、2026-11-27)。ソケットへの connect は通る。送り手は相手の uid(SO_PEERCRED)。
 # 名簿とボットのトークンがあるホストだけに置く。
 [Unit]
 Description=aiza: Discord DM from containers (aiza-discord-dm serve)
 
 [Socket]
-ListenStream=/opt/aiza-ssh/discord-dm.sock
+ListenStream=/opt/aiza-dm/discord-dm.sock
 SocketMode=0666
 Accept=yes
 MaxConnections=8

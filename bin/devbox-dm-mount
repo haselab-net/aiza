@@ -1,0 +1,88 @@
+#!/usr/bin/env python3
+"""devbox-dm-mount CONTAINER -- put /opt/aiza-dm (discord-dm's socket and its
+client, the deployment notes) read-only into a running devbox-<user> or
+sandbox-<user>-<name>, at the same path, without recreating it.
+
+The host's devbox launcher mounts /opt/aiza-dm into a devbox when it creates one
+(2026-11-27, the user: 「ソケットを分ける」, so that the Email box, which
+mounts /opt/aiza-ssh too, no longer reaches it). A devbox made before that,
+or started again later, keeps its old mount table; this clones the host's
+/opt/aiza-dm (open_tree), makes the clone read-only, nosuid, nodev and
+private (not noexec: the client is a script run from there), enters the container's
+mount namespace and attaches it there (move_mount). Idempotent: if the
+container already has a mount at /opt/aiza-dm, nothing is done.
+Never for a box-<user>-<name> (the Email box). Root only.
+"""
+import ctypes
+import os
+import re
+import subprocess
+import sys
+
+SRC = "/opt/aiza-dm"
+NAME_RE = re.compile(r"^(devbox-[a-z_][a-z0-9_-]*|sandbox-[a-z_][a-z0-9_-]*-[a-z0-9][a-z0-9_.-]*)$")
+
+SYS_open_tree, SYS_move_mount, SYS_mount_setattr = 428, 429, 442
+OPEN_TREE_CLONE, OPEN_TREE_CLOEXEC, AT_RECURSIVE = 1, 0o2000000, 0x8000
+AT_EMPTY_PATH, MOVE_MOUNT_F_EMPTY_PATH = 0x1000, 0x4
+MOUNT_ATTR_RDONLY, MOUNT_ATTR_NOSUID, MOUNT_ATTR_NODEV = 0x1, 0x2, 0x4
+CLONE_NEWNS = 0x20000
+MS_PRIVATE = 1 << 18
+AT_FDCWD = -100
+
+libc = ctypes.CDLL(None, use_errno=True)
+libc.syscall.restype = ctypes.c_long
+
+
+class MountAttr(ctypes.Structure):
+    _fields_ = [("attr_set", ctypes.c_uint64), ("attr_clr", ctypes.c_uint64),
+                ("propagation", ctypes.c_uint64), ("userns_fd", ctypes.c_uint64)]
+
+
+def check(r, what):
+    if r < 0:
+        e = ctypes.get_errno()
+        raise OSError(e, f"{what}: {os.strerror(e)}")
+    return r
+
+
+def main():
+    if os.getuid() != 0:
+        sys.exit("devbox-dm-mount: root only")
+    if len(sys.argv) != 2 or not NAME_RE.match(sys.argv[1]):
+        sys.exit("usage: devbox-dm-mount devbox-<user>|sandbox-<user>-<name>")
+    c = sys.argv[1]
+    if not os.path.isdir(SRC) or os.path.islink(SRC):
+        return 0
+    rt = subprocess.run(["/usr/local/sbin/box-rt", c], capture_output=True, text=True).stdout.strip()
+    if rt not in ("docker", "podman"):
+        return 1
+    r = subprocess.run([rt, "container", "inspect", "-f", "{{.State.Pid}}", c], capture_output=True, text=True)
+    pid = int(r.stdout.strip() or 0) if r.returncode == 0 else 0
+    if pid <= 0:
+        return 0   # not running: the devbox launcher calls this again when it starts it
+    with open(f"/proc/{pid}/mountinfo") as f:
+        if any(line.split()[4] == SRC for line in f):
+            return 0
+    tree = check(libc.syscall(SYS_open_tree, AT_FDCWD, SRC.encode(),
+                              OPEN_TREE_CLONE | OPEN_TREE_CLOEXEC | AT_RECURSIVE), "open_tree")
+    attr = MountAttr(MOUNT_ATTR_RDONLY | MOUNT_ATTR_NOSUID | MOUNT_ATTR_NODEV, 0, MS_PRIVATE, 0)
+    check(libc.syscall(SYS_mount_setattr, tree, b"", AT_EMPTY_PATH | AT_RECURSIVE,
+                       ctypes.byref(attr), ctypes.sizeof(attr)), "mount_setattr")
+    ns = os.open(f"/proc/{pid}/ns/mnt", os.O_RDONLY | os.O_CLOEXEC)
+    check(libc.setns(ns, CLONE_NEWNS), "setns")
+    os.chdir("/")
+    if os.path.islink("/opt") or os.path.islink(SRC):
+        sys.exit("devbox-dm-mount: a symlink in the container's way")
+    os.makedirs(SRC, mode=0o755, exist_ok=True)
+    if os.path.islink(SRC) or not os.path.isdir(SRC):
+        sys.exit("devbox-dm-mount: not a directory in the container")
+    check(libc.syscall(SYS_move_mount, tree, b"", AT_FDCWD, SRC.encode(), MOVE_MOUNT_F_EMPTY_PATH), "move_mount")
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except OSError as e:
+        sys.exit(f"devbox-dm-mount: {e.strerror if e.strerror else e}")

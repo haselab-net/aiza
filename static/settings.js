@@ -72,7 +72,7 @@
       </div>
     </div>`;
   }
-  const authHead = (text) => authHtml`<h2 style="margin: 1rem 0 0.5rem; padding: 0; font-size: 0.85rem; color: #9aa5b1;">${text}</h2>`;
+  const authHead = (text) => authHtml`<h2 class="auth-section">${text}</h2>`;
   function AuthRows({ s }) {
     const places = AUTH_PLACES.filter(([scope]) => scope !== "root" || s.root);
     const rows = (tool) => places.map(([scope, label]) => authHtml`<${AuthRow} key=${scope} tool=${tool} scope=${scope} label=${t(label)} s=${s} />`);
@@ -110,13 +110,13 @@
   function authLogout(tool, scope) {
     return withAuthBusy(tool, async () => {
       const where = AUTH_SCOPE_LABELS[scope] || scope.replace(/^ssh:/, "");
-      if (!confirm(t(tool === "claude" ? "settings.log_claude_code_out_where" : "settings.log_codex_out_where", { where }))) return;
+      if (!(await ui.confirm(t(tool === "claude" ? "settings.log_claude_code_out_where" : "settings.log_codex_out_where", { where }), { danger: true }))) return;
       const r = await withUnlockRetry(() => api(`${AUTH_TOOLS[tool].api}/logout`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ scope }),
       })).catch((e) => ({ error: e.message }));
-      if (r.error) alert(t("settings.logout_failed_err", { err: r.error }));
+      if (r.error) ui.toast(t("settings.logout_failed_err", { err: r.error }), { error: true });
       await refreshToolStatus(tool);
     });
   }
@@ -127,7 +127,7 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ scope }),
       })).catch((e) => {
-        alert(t("common.could_not_start_login_err", { err: e.message }));
+        ui.toast(t("common.could_not_start_login_err", { err: e.message }), { error: true });
         return null;
       });
       if (!meta) return;

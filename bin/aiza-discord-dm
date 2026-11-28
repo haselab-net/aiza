@@ -38,8 +38,8 @@ messages per sender per hour. Exit 0 when nothing needed sending (no roster
 row, no token): sharing must not fail because of this.
 
 It also serves `serve` (the deployment notes): the socket unit
-aiza-discord-dm.socket (/opt/aiza-ssh/discord-dm.sock, which containers see
-read-only; connect still works) starts one `aiza-discord-dm serve` per
+aiza-discord-dm.socket (/opt/aiza-dm/discord-dm.sock, which the devbox sees
+read-only -- connect still works -- and the Email box does not, 2026-11-27) starts one `aiza-discord-dm serve` per
 connection with the connection as stdin/stdout. The sender is the peer's uid
 (SO_PEERCRED; containers cannot change uid). One JSON line in
 {"to": [names], "text": "..."} or {"list": true}; one JSON line out. Each

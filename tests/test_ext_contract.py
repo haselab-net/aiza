@@ -201,7 +201,7 @@ class GatewayExtension(unittest.TestCase):
 EXT_WORDS = re.compile(r"(?i)(?<![a-z_])(?<!hex)(?<!compare_)digest"
                        r"|aiza_site_routes|site-extras|SiteExtras|SITE_CTX")   # the old site module (ext/site)
 CORE_FILES = ["bin/aiza-backend", "bin/aiza-gateway", "bin/aiza-reap-idle",
-              "static/index.html", "static/i18n.js"]
+              "static/index.html", "static/style.css", "static/i18n.js"]
 # The page's own scripts (the deployment notes): every static/*.js but sw.js.
 PAGE_SCRIPTS = sorted(p.name for p in (ROOT / "static").glob("*.js") if p.name != "sw.js")
 CORE_FILES += [f"static/{n}" for n in PAGE_SCRIPTS if n not in ("i18n.js", "ext.js")]
@@ -233,6 +233,9 @@ class CorePurity(unittest.TestCase):
 
     def test_index_html(self):
         self.check("static/index.html")
+
+    def test_style_css(self):
+        self.check("static/style.css")
 
     def test_i18n(self):
         self.check("static/i18n.js")

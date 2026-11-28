@@ -74,14 +74,6 @@
     refreshSessions();
   });
 
-  // "root-shell" is the only preset a root Claude conversation can run in
-  // (there is no dedicated "claude-tui-root" -- the deployment notes): whoever is
-  // driving it typed `claude` into that shell by hand. Used only to suggest
-  // a shorter default time limit below; the backend applies its own default
-  // (and the real backstop, the passkey window) regardless of what the
-  // client suggests.
-  function isRootSession(s) { return sessionKind(s).root; }
-
   // A link is a group (2026-11-08): with one session armed, tapping 🔗 on a
   // session that is already linked adds the armed one to that link.
   async function onLinkButtonTapped(s) {
@@ -90,12 +82,12 @@
       const q = many
         ? t("links.remove_link_still_linked_b", { a: s.label, b: s.link.partner_label })
         : t("links.unlink_b", { a: s.label, b: s.link.partner_label });
-      if (!confirm(q)) return;
+      if (!(await ui.confirm(q))) return;
       await api("/sessions/unlink", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: s.id }),
-      }).catch((e) => alert(t("links.could_not_unlink_err", { err: e.message })));
+      }).catch((e) => ui.toast(t("links.could_not_unlink_err", { err: e.message }), { error: true }));
       await refreshSessions();
       return;
     }
@@ -124,7 +116,7 @@
         ? t("links.merge_links_b", { a: [other.label, other.link.partner_label].join("・"),
                                      b: [s.label, s.link.partner_label].join("・") })
         : t("links.add_link_b", { a: joiner.label, b: [group.label, group.link.partner_label].join("・") });
-      if (!confirm(q)) {
+      if (!(await ui.confirm(q))) {
         await refreshSessions();
         return;
       }
@@ -132,23 +124,31 @@
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ a: other.id, b: s.id }),
-      }).catch((e) => alert(t("links.could_not_link_err", { err: e.message })));
+      }).catch((e) => ui.toast(t("links.could_not_link_err", { err: e.message }), { error: true }));
       await refreshSessions();
       return;
     }
-    // Same defaults as the backend's DEFAULT_LINK_DURATION(_ROOT): 30 min
-    // when root is involved, 4 hours otherwise. Blank also means "default".
-    const suggested = (isRootSession(s) || isRootSession(other)) ? 30 : 240;
-    const raw = prompt(
-      t("links.link_b", { a: other.label, b: s.label }) + "\n" +
-      t("links.unlink_automatically_after_how_many"),
-      String(suggested),
-    );
-    if (raw === null) { await refreshSessions(); return; } // cancelled
+    // Same default as the backend's DEFAULT_LINK_DURATION: 3 hours wherever
+    // the sessions run. Blank also means "default".
+    const suggested = 180;
+    // Picked, not typed (the deployment notes): the usual lengths, 切らない, or
+    // minutes of one's own.
+    const ans = await ui.ask({
+      title: t("links.link_b", { a: other.label, b: s.label }),
+      fields: [{
+        name: "m", type: "choice", label: t("links.unlink_after"), value: String(suggested),
+        options: [[30, t("links.d_30m")], [60, t("links.d_1h")], [180, t("links.d_3h")], [480, t("links.d_8h")],
+                  [1440, t("links.d_24h")], [0, t("links.d_never")]].map(([value, label]) => ({ value: String(value), label })),
+        custom: { type: "number", label: t("links.or_minutes_up_to_1440") },
+      }],
+      ok: t("links.link_ok"),
+    });
+    if (ans === null) { await refreshSessions(); return; } // cancelled
+    const raw = ans.m == null ? "" : String(ans.m);
     const minutes = raw.trim() === "" ? null : Number(raw);
     const forever = minutes === 0;  // the deployment notes: 0 = never expires
     if (raw.trim() !== "" && !forever && (!Number.isFinite(minutes) || minutes <= 0)) {
-      alert(t("links.enter_positive_number_minutes"));
+      ui.toast(t("links.enter_positive_number_minutes"), { error: true });
       await refreshSessions();
       return;
     }
@@ -159,7 +159,7 @@
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
-    }).catch((e) => alert(t("links.could_not_link_err", { err: e.message })));
+    }).catch((e) => ui.toast(t("links.could_not_link_err", { err: e.message }), { error: true }));
     await refreshSessions();
   }
 
@@ -197,7 +197,7 @@
   async function boardPost(body) {
     try {
       return await api("/board", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    } catch (e) { alert(t("links.could_not_update_board_err", { err: e.message })); return null; }
+    } catch (e) { ui.toast(t("links.could_not_update_board_err", { err: e.message }), { error: true }); return null; }
   }
   async function renderBoard(data) {
     const box = boardModalEl.querySelector(".box");
@@ -251,7 +251,7 @@
       const nameLink = card.querySelector("a.name");
       if (nameLink) nameLink.addEventListener("click", (ev) => { ev.preventDefault(); openBoardMachine(m); });
       card.querySelector(".use").addEventListener("click", async () => {
-        const what = prompt(t("links.what_do_on_m_hand", { m }), "");
+        const what = await ui.ask(t("links.what_do_on_m_hand", { m }), "");
         if (what === null) return;
         const r = await boardPost({ op: "claim", machine: m, what });
         if (r) renderBoard(r);
@@ -260,14 +260,14 @@
         const row = document.createElement("div");
         row.className = "entry" + (e.state === "ended" ? " ended" : "");
         let st;
-        if (e.state === "ended") st = `<span class="st ended">${t("common.ended")}(${t(BOARD_WHY[e.ended_why] || e.ended_why || "")} ${hm(e.ended_at)})</span>`;
+        if (e.state === "ended") st = `<span class="st ended">${t("common.ended")}(${BOARD_WHY[e.ended_why] ? t(BOARD_WHY[e.ended_why]) : escapeHtml(e.ended_why || "")} ${hm(e.ended_at)})</span>`;
         else if (e.state === "asleep") st = `<span class="st asleep">💤 ${t("links.asleep")}</span>`;
         else if (e.state === "idle") st = `<span class="st idle">${t("links.no_activity_30_min")}(${Math.floor((now - (e.last_activity || now)) / 60)}${t("common.min")})</span>`;
         else st = `<span class="st using">${t("links.in_use")}</span>`;
         const mine = e.user === data.me && !e.host;
         const own = mine && e.session_id ? lastSessions.find((x) => x.id === e.session_id && !x.owner) : null;
         const label = e.label || (e.session_id ? e.session_id : t("links.hand_written"));
-        const src = { auto: t("common.auto"), ssh: t("links.ssh_auto"), claim: e.session_id ? t("links.written_session") : t("links.hand_written_2") }[e.source] || e.source;
+        const src = { auto: t("common.auto"), ssh: t("links.ssh_auto"), claim: e.session_id ? t("links.written_session") : t("links.hand_written_2") }[e.source] || escapeHtml(e.source || "");
         row.innerHTML = `
           <div class="body">
             <div>${st} <span class="who">${escapeHtml(e.user)}${e.host ? ` (${escapeHtml(e.host)})` : ""} · ${own ? `<a href="#${escapeHtml(e.session_id)}" class="open">${escapeHtml(label)}</a>` : escapeHtml(label)}</span></div>
@@ -282,7 +282,7 @@
           ed.textContent = "✏️";
           ed.title = t("links.edit_what_being_done");
           ed.addEventListener("click", async () => {
-            const what = prompt(t("links.edit_what_being_done"), e.what || "");
+            const what = await ui.ask(t("links.edit_what_being_done"), e.what || "");
             if (what === null) return;
             const r = await boardPost({ op: "note", key: e.key, what });
             if (r) renderBoard(r);

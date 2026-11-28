@@ -29,6 +29,12 @@ terminal.
 import os as _aiza_os  # aigw-legacy: sessions started before the rename (2026-11-23) only have AIGW_*
 for _k in [k for k in _aiza_os.environ if k.startswith("AIGW_")]:
     _aiza_os.environ.setdefault("AIZA_" + _k[5:], _aiza_os.environ[_k].replace("/.aigw/", "/.aiza/").replace("/.aigw-state/", "/.aiza-state/"))
+# 2026-11-27: the pre-rename name (aigw-*-hook, a symlink to this file) left in
+# someone's ~/.claude/settings.json ran this hook a second time beside the
+# managed one, so one question became two cards: under that name, do nothing.
+import sys as _aiza_sys
+if _aiza_os.path.basename(_aiza_sys.argv[0]).startswith("aigw-"):
+    _aiza_sys.exit(0)
 import hashlib
 import json
 import os
@@ -65,6 +71,7 @@ POLL = 0.5
 # waits, back to it) -- or until Claude/Codex goes away (wait_answer). The
 # settings allow 20 days (1728000 s: Claude Code's timer cannot go past
 # about 24.8 days).
+DISMISS_MESSAGE = "利用者は答えずに、チャットで書きます。"
 WAIT_PERM = None
 WAIT_PRE = None
 WAIT_CODEX = None
@@ -149,6 +156,20 @@ def output(mode, payload, answer):
     """The hook's stdout for an answer, or None for "leave it to the terminal"."""
     if not isinstance(answer, dict) or answer.get("terminal"):
         return None
+    if answer.get("dismiss") is True:
+        # 「答えずにチャットで書く」 (2026-11-27, the user): what Esc on the
+        # terminal does -- no answer, and Claude stops for the user's next
+        # message (a deny with interrupt; a PreToolUse that stops). Codex
+        # has no interrupt here: told to stop and wait instead.
+        if mode == "codex":
+            return {"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {
+                "behavior": "deny", "message": DISMISS_MESSAGE + " 続けずに、次の文を待ってください。"}}}
+        if mode == "pre":
+            return {"continue": False, "stopReason": DISMISS_MESSAGE,
+                    "hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                           "permissionDecisionReason": DISMISS_MESSAGE}}
+        return {"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {
+            "behavior": "deny", "message": DISMISS_MESSAGE, "interrupt": True}}}
     if mode == "codex":
         # Codex 0.155 reserves updatedInput/updatedPermissions/interrupt.
         behavior = answer.get("behavior")
@@ -273,6 +294,59 @@ def emit_answer(talkto, mode, payload, answer, ask_id=None, question=False, ask=
     print(json.dumps(out, ensure_ascii=False))
 
 
+GIVEN = "ask_given.json"
+GIVEN_FOR = 300
+
+
+def _given_key(payload):
+    return hashlib.sha256(json.dumps([payload.get("session_id"), payload.get("tool_input")], sort_keys=True,
+                                     ensure_ascii=False).encode()).hexdigest()
+
+
+def remember_given(talkto, payload, answer):
+    """Keep the answer the page gave in PreToolUse. Claude Code (2.1.332,
+    2026-11-27) once still asked the same question after the hook's allow
+    with the answers: a PermissionRequest and the terminal's own menu came,
+    a second card showed, and keys typed on the terminal answered it instead
+    (the user's answer was lost). recall_given hands that one the answer."""
+    try:
+        dfd = open_output_directory(Path(talkto).parent)
+        try:
+            fd = open_private(dfd, GIVEN, os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
+            with os.fdopen(fd, "w") as f:
+                json.dump({"key": _given_key(payload), "ts": time.time(), "answer": answer}, f, ensure_ascii=False)
+        finally:
+            os.close(dfd)
+    except (OSError, ValueError):
+        pass
+
+
+def recall_given(talkto, payload):
+    """The answer remember_given kept for this very question (same
+    conversation, same input), at most GIVEN_FOR seconds old; used once.
+    A question's answer is not checked anyway (emit_answer), so a file the
+    session's agent could write gives it nothing it could not do already."""
+    try:
+        dfd = open_output_directory(Path(talkto).parent)
+        try:
+            try:
+                fd = open_private(dfd, GIVEN, os.O_RDONLY)
+            except FileNotFoundError:
+                return None
+            with os.fdopen(fd, "rb") as f:
+                got = json.loads(f.read(262144))
+            os.unlink(GIVEN, dir_fd=dfd)
+        finally:
+            os.close(dfd)
+    except (OSError, ValueError):
+        return None
+    if (isinstance(got, dict) and got.get("key") == _given_key(payload) and type(got.get("ts")) in (int, float)
+            and 0 <= time.time() - got["ts"] <= GIVEN_FOR and isinstance(got.get("answer"), dict)
+            and isinstance(got["answer"].get("answers"), dict)):
+        return got["answer"]
+    return None
+
+
 def main():
     talkto = os.environ.get("AIZA_TALKTO")
     mode = sys.argv[1] if len(sys.argv) > 1 else ""
@@ -296,12 +370,19 @@ def main():
         ask["questions"] = questions(inp)
         if not ask["questions"]:
             return
+        if mode == "perm":
+            given = recall_given(talkto, payload)
+            if given is not None:      # answered on the page a moment ago (remember_given): no second card
+                emit_answer(talkto, mode, payload, given, None, question, ask)
+                return
     else:
         ask["summary"] = summary(tool, inp)
         ask["can_session"] = any(isinstance(s, dict) and s.get("type") in SESSION_KINDS
                                  for s in payload.get("permission_suggestions") or [])
     ask_id, answer = wait_answer(talkto, ask, WAIT_PERM if mode == "perm" else WAIT_PRE)
     emit_answer(talkto, mode, payload, answer, ask_id, question, ask)
+    if mode == "pre" and isinstance(answer, dict) and isinstance(answer.get("answers"), dict):
+        remember_given(talkto, payload, answer)
 
 
 def codex_permission(payload):

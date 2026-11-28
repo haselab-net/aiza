@@ -55,9 +55,13 @@
   //   tab   "work" | "settings" | an extension's tab id ("inbox")
   //   view  仕事's view: "tree" (the session list) | "ball" | "week" | "usage"
   //         (the to-do page, the deployment notes), null on the other tabs
+  // A path of this page without a demo seat's base (the deployment notes); as it is on a deployment.
+  function localPath(p) { return window.aizaBase && p.startsWith(window.aizaBase + "/") ? p.slice(window.aizaBase.length) : p; }
   const WORK_PATHS = { tree: "/work", ball: "/work/ball", week: "/work/week", usage: "/work/usage" };
   function tabFromPath(path) {
-    const p = String(path || "").replace(/\/+$/, "") || "/";
+    let p = String(path || "");
+    p = localPath(p);
+    p = p.replace(/\/+$/, "") || "/";
     if (p === "/settings") return { tab: "settings", view: null };
     const m = /^\/work(?:\/(ball|week|usage))?$/.exec(p);
     if (m) return { tab: "work", view: m[1] || "tree" };
@@ -68,10 +72,11 @@
     return { tab: "work", view: "tree" };   // /agents/ (the old address) and anything else
   }
   function tabPath(tab, view) {
-    if (tab === "work") return WORK_PATHS[view] || WORK_PATHS.tree;
-    if (tab === "settings") return "/settings";
+    const b = window.aizaBase;
+    if (tab === "work") return b + (WORK_PATHS[view] || WORK_PATHS.tree);
+    if (tab === "settings") return b + "/settings";
     const x = window.aizaExt.tab(tab);
-    return x ? x.path : "/" + tab;
+    return b + (x ? x.path : "/" + tab);
   }
   // Where the page opened. The old addresses become the new ones at once:
   // /agents/ -> /work, /agents/#auth -> /settings; a session's /agents/#<id>
@@ -85,6 +90,7 @@
     return at;
   })();
   const ui = makeStore({ page: "list", todo: null, overlay: null, tab: START_TAB.tab, view: START_TAB.view });
+  ui.localPath = localPath;   // for the other scripts (todo.js's links)
   const pageNow = () => ui.get().page;
   // A late answer must not write into what the user has since moved to
   // (the deployment notes, 2026-11-24): take a ticket before the first
@@ -191,7 +197,7 @@
       const a = document.createElement("a");
       a.className = "tab";
       a.dataset.tab = x.id;
-      a.href = x.path;
+      a.href = window.aizaBase + x.path;
       a.setAttribute("role", "tab");
       a.textContent = x.label;
       const n = document.createElement("span");
@@ -409,6 +415,205 @@
   // it starts takes over: 開始 turns the layer into the chat, so Back from
   // the chat returns to the tab, not to a layer that is gone.
   let spareEntry = false;
+  // ---- The page's own dialogs (the deployment notes, 2026-11-27) ------------
+  // In place of the browser's alert / confirm / prompt (the user: 置き換えの
+  // 方針良いです): ui.ask (fields to fill), ui.confirm (yes or no, red for
+  // what deletes or stops) and ui.toast (a few seconds at the bottom; an
+  // error's toast opens its detail when tapped). Each is a promise, and a
+  // popup is its own element (.aiza-pop), so one can open over another.
+  // Nothing written is dropped without a word: cancelling a popup whose
+  // text was changed asks first. The desk's popup (app.js) wears the same
+  // .aiza-pop look.
+  let popDepth = 0;
+  function popOpen(kind, title) {
+    const el = document.createElement("div");
+    el.className = `aiza-pop aiza-pop-${kind}`;
+    el.style.zIndex = String(80 + popDepth++);
+    el.innerHTML = `<div class="box" role="dialog" aria-modal="true"><div class="pop-head"><span></span>`
+      + `<button type="button" class="close" aria-label="close">✕</button></div><div class="pop-body"></div>`
+      + `<p class="pop-err" hidden></p><div class="pop-actions"></div></div>`;
+    el.querySelector(".pop-head span").textContent = title || "";
+    document.body.appendChild(el);
+    return el;
+  }
+  function popClose(el) { if (el.isConnected) { el.remove(); popDepth = Math.max(0, popDepth - 1); } }
+  function popButton(text, cls) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = cls;
+    b.textContent = text;
+    return b;
+  }
+
+  // ui.ask({title, text, fields: [{name, label, value, type, options, custom,
+  // placeholder}], ok, danger}) -> {name: value} or null (cancelled).
+  // type: "text" (default), "textarea", "select" (options [{value, label}]),
+  // "choice" (options as buttons, and custom: {type: "number"|"datetime"|"text",
+  // label} for a value of one's own; a datetime comes back as epoch ms).
+  // ui.ask("title", "value") is one text field: its string, or null.
+  ui.ask = (opts, value) => {
+    if (typeof opts === "string") {
+      return ui.ask({ title: opts, fields: [{ name: "v", value: value == null ? "" : String(value) }] })
+        .then((r) => (r ? r.v : null));
+    }
+    return new Promise((resolve) => {
+      const el = popOpen("ask", opts.title);
+      const body = el.querySelector(".pop-body"), err = el.querySelector(".pop-err");
+      if (opts.text) { const p = document.createElement("p"); p.className = "pop-text"; p.textContent = opts.text; body.appendChild(p); }
+      const getters = {}, initial = {};
+      for (const f of opts.fields || []) {
+        const wrap = document.createElement("label");
+        wrap.className = "pop-field";
+        if (f.label) { const l = document.createElement("span"); l.textContent = f.label; wrap.appendChild(l); }
+        let input;
+        if (f.type === "select") {
+          input = document.createElement("select");
+          for (const o of f.options || []) { const x = document.createElement("option"); x.value = String(o.value); x.textContent = o.label; input.appendChild(x); }
+          if (f.value != null) input.value = String(f.value);
+          getters[f.name] = () => input.value;
+        } else if (f.type === "choice") {
+          const row = document.createElement("div");
+          row.className = "pop-choices";
+          let chosen = f.value != null ? String(f.value) : null;
+          const btns = [];
+          let custom = null;
+          const mark = () => { for (const b of btns) b.classList.toggle("on", b.dataset.value === chosen); };
+          for (const o of f.options || []) {
+            const b = popButton(o.label, "pop-choice");
+            b.dataset.value = String(o.value);
+            b.addEventListener("click", (e) => { e.preventDefault(); chosen = b.dataset.value; if (custom) custom.value = ""; mark(); });
+            btns.push(b);
+            row.appendChild(b);
+          }
+          wrap.appendChild(row);
+          if (f.custom) {
+            const cl = document.createElement("span");
+            cl.className = "pop-custom-label";
+            cl.textContent = f.custom.label || "";
+            wrap.appendChild(cl);
+            custom = document.createElement("input");
+            custom.className = "pop-custom";
+            custom.type = f.custom.type === "datetime" ? "datetime-local" : "text";
+            if (f.custom.type === "number") custom.inputMode = "numeric";
+            custom.addEventListener("input", () => { if (custom.value) { chosen = null; mark(); } });
+            wrap.appendChild(custom);
+          }
+          mark();
+          getters[f.name] = () => {
+            if (custom && custom.value !== "") {
+              if (f.custom.type === "datetime") { const ms = new Date(custom.value).getTime(); return Number.isFinite(ms) ? ms : NaN; }
+              return custom.value;
+            }
+            return chosen;
+          };
+          input = null;
+        } else {
+          input = document.createElement(f.type === "textarea" ? "textarea" : "input");
+          if (f.type === "textarea") input.rows = 4; else input.type = "text";
+          input.value = f.value == null ? "" : String(f.value);
+          if (f.placeholder) input.placeholder = f.placeholder;
+          getters[f.name] = () => input.value;
+        }
+        if (input) { input.name = f.name; wrap.appendChild(input); }
+        initial[f.name] = getters[f.name]();
+        body.appendChild(wrap);
+      }
+      const done = (v) => { popClose(el); document.removeEventListener("keydown", onKey, true); resolve(v); };
+      const values = () => Object.fromEntries(Object.entries(getters).map(([k, g]) => [k, g()]));
+      const changed = () => Object.entries(getters).some(([k, g]) => typeof g() === "string" && g().trim() !== "" && g() !== initial[k]);
+      function cancel() {
+        if (!changed()) return done(null);
+        // what was written is not dropped without a word
+        const acts = el.querySelector(".pop-actions");
+        acts.replaceChildren();
+        err.textContent = t("page.discard_what_you_wrote");
+        err.hidden = false;
+        const back = popButton(t("page.keep_writing"), "pop-ok");
+        const drop = popButton(t("page.discard"), "pop-danger");
+        back.addEventListener("click", () => { err.hidden = true; buttons(); });
+        drop.addEventListener("click", () => done(null));
+        acts.append(drop, back);
+      }
+      function buttons() {
+        const acts = el.querySelector(".pop-actions");
+        acts.replaceChildren();
+        const no = popButton(t("common.cancel"), "pop-cancel");
+        const ok = popButton(opts.ok || t("common.ok"), opts.danger ? "pop-danger" : "pop-ok");
+        no.addEventListener("click", cancel);
+        ok.addEventListener("click", () => done(values()));
+        acts.append(no, ok);
+      }
+      function onKey(e) {
+        if (!el.isConnected) return;
+        if (e.key === "Escape") { e.preventDefault(); cancel(); }
+        else if (e.key === "Enter" && e.target && e.target.tagName === "INPUT" && el.contains(e.target)) { e.preventDefault(); done(values()); }
+      }
+      document.addEventListener("keydown", onKey, true);
+      el.querySelector(".close").addEventListener("click", cancel);
+      el.addEventListener("click", (e) => { if (e.target === el) cancel(); });
+      buttons();
+      const first = el.querySelector(".pop-field input, .pop-field textarea, .pop-field select");
+      if (first) setTimeout(() => first.focus(), 0);
+    });
+  };
+
+  // ui.confirm(text, {title, ok, danger}) -> true / false. danger: a red
+  // button, for what deletes, stops or cannot be undone.
+  ui.confirm = (text, o = {}) => new Promise((resolve) => {
+    const el = popOpen("confirm", o.title || "");
+    const p = document.createElement("p");
+    p.className = "pop-text";
+    p.textContent = text;
+    el.querySelector(".pop-body").appendChild(p);
+    const done = (v) => { popClose(el); document.removeEventListener("keydown", onKey, true); resolve(v); };
+    function onKey(e) {
+      if (!el.isConnected) return;
+      if (e.key === "Escape") { e.preventDefault(); done(false); }
+    }
+    document.addEventListener("keydown", onKey, true);
+    const no = popButton(o.cancel || t("common.cancel"), "pop-cancel");
+    const ok = popButton(o.ok || t("common.ok"), o.danger ? "pop-danger" : "pop-ok");
+    no.addEventListener("click", () => done(false));
+    ok.addEventListener("click", () => done(true));
+    el.querySelector(".pop-actions").append(no, ok);
+    el.querySelector(".close").addEventListener("click", () => done(false));
+    el.addEventListener("click", (e) => { if (e.target === el) done(false); });
+    setTimeout(() => ok.focus(), 0);
+  });
+
+  // ui.toast(text, {error, detail, ms}): a few seconds at the bottom (an
+  // error longer). An error's toast, tapped, opens it whole with its detail;
+  // it stays while open. Several stack.
+  let toastBox = null;
+  ui.toast = (text, o = {}) => {
+    if (!toastBox || !toastBox.isConnected) {
+      toastBox = document.createElement("div");
+      toastBox.className = "aiza-toasts";
+      document.body.appendChild(toastBox);
+    }
+    const el = document.createElement("div");
+    el.className = "aiza-toast" + (o.error ? " error" : "");
+    el.setAttribute("role", o.error ? "alert" : "status");
+    const span = document.createElement("span");
+    span.textContent = String(text);
+    el.appendChild(span);
+    const ms = o.ms || (o.error ? 8000 : 4000);
+    let timer = setTimeout(() => el.remove(), ms);
+    el.addEventListener("click", () => {
+      if (el.classList.toggle("open")) {
+        clearTimeout(timer);
+        if (o.detail && !el.querySelector(".detail")) {
+          const d = document.createElement("pre");
+          d.className = "detail";
+          d.textContent = String(o.detail);
+          el.appendChild(d);
+        }
+      } else timer = setTimeout(() => el.remove(), 2000);
+    });
+    toastBox.appendChild(el);
+    return el;
+  };
+
   ui.layer = {
     push: () => history.pushState({ aiza: "layer" }, "", location.pathname + location.search + location.hash),
     handToSession: () => { spareEntry = true; },
@@ -498,7 +703,7 @@
   let loginLostEl = null;
   let loginReady = false;   // set once init() has the user; before that init() goes to the login itself
   function setLoginReady() { loginReady = true; }   // init (app.js)
-  const loginUrl = () => `/agents/login?next=${encodeURIComponent(location.pathname + location.search + location.hash)}`;
+  const loginUrl = () => `${window.aizaBase}/agents/login?next=${encodeURIComponent(location.pathname + location.search + location.hash)}`;
   function loginLost() {
     if (loginLostEl || !loginReady) return;
     stopSessionEvents();
@@ -530,7 +735,7 @@
   async function checkLogin() {
     if (loginLostEl || !loginReady) return;
     try {
-      const r = await fetch("/agents/api/me", { cache: "no-store" });
+      const r = await fetch(window.aizaBase + "/agents/api/me", { cache: "no-store" });
       if (r.status === 401) loginLost();
     } catch (e) { /* offline: the next showing checks again */ }
   }

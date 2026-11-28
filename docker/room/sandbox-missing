@@ -1,0 +1,5 @@
+#!/bin/sh
+# Stand-in until the room is started with the boxes' own `sandbox` bound
+# here (the demo's VM provides it): nothing runs without a box.
+echo "sandbox: no box for this room (the demo's sandbox is not bound here)" >&2
+exit 2

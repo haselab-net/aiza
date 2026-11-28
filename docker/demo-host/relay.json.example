@@ -1,0 +1,10 @@
+{
+  "host": "10.77.0.1", "port": 3128,
+  "models": ["claude-sonnet-5-5", "claude-haiku-5-5"],
+  "usd_per_day": {"seat": 2.0, "room": 4.0, "total": 4.5},
+  "usd_per_mtok": {"in": 3.0, "out": 15.0, "cache_write": 3.75, "cache_read": 0.3},
+  "usd_per_mtok_by_model": {
+    "claude-sonnet-5-5": {"in": 3.0, "out": 15.0, "cache_write": 3.75, "cache_read": 0.3},
+    "claude-haiku-5-5": {"in": 1.0, "out": 5.0, "cache_write": 1.25, "cache_read": 0.1}
+  }
+}

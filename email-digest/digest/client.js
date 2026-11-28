@@ -3,6 +3,49 @@
 // mail-tui は host 階層の解錠(パスキー)が要るので、aiza の app.js と同じ手順で解錠してから再試行する。
 const SESSION = /*DIGEST_SESSION*/{ preset: 'mail-tui', cwd: 'digest', group: 'digest' };
 const BASE = location.pathname.replace(/\/?$/, '/');
+// このページの問い・知らせ(aiza の ui.confirm・ui.toast と同じ形と見た目。the deployment notes、2026-11-27 利用者「新着にまだブラウザダイアログがありました」)。
+// ブラウザの confirm・alert は使わない。popConfirm は約束(はい=true)、危ないものは赤いボタン。popToast は下に数秒、失敗は赤く8秒、押すと全文。
+function popStyle() {
+  if (document.getElementById('pop-style')) return;
+  const st = document.createElement('style'); st.id = 'pop-style';
+  st.textContent = ':root{--panel:#131a22;--panel-2:#1c2531;--border:#2a3542;--border-strong:#34465d;--text:#e6e6e6;--text-strong:#d7dde5;--accent:#4285f4;--danger:#c0392b;--backdrop:#0008}'
+    + '.aiza-pop{position:fixed;inset:0;background:var(--backdrop);z-index:80;display:flex;align-items:flex-start;justify-content:center;padding:16px}'
+    + '.aiza-pop .box{background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:12px;padding:.8rem;width:min(560px,100%);margin-top:8vh}'
+    + '.aiza-pop .pop-text{white-space:pre-wrap;margin:.3rem 0 .6rem;line-height:1.5}.aiza-pop .pop-actions{display:flex;justify-content:flex-end;gap:.5rem;margin-top:.7rem}'
+    + '.aiza-pop .pop-actions button{min-height:44px;padding:0 1.2rem;border-radius:8px;cursor:pointer;font-weight:700;font-size:1em}'
+    + '.aiza-pop .pop-cancel{border:1px solid var(--border);background:var(--panel-2);color:var(--text)}.aiza-pop .pop-ok{border:none;background:var(--accent);color:var(--text-strong)}'
+    + '.aiza-pop .pop-danger{border:none;background:var(--danger);color:var(--text-strong)}'
+    + '.aiza-toasts{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:90;display:flex;flex-direction:column;gap:.4rem;width:min(520px,calc(100vw - 32px));pointer-events:none}'
+    + '.aiza-toast{pointer-events:auto;padding:.6rem .9rem;border-radius:10px;border:1px solid var(--border-strong);background:var(--panel-2);color:var(--text);font-size:.9em;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
+    + '.aiza-toast.open{white-space:pre-wrap}.aiza-toast.error{border-color:var(--danger);background:var(--panel)}';
+  document.head.appendChild(st);
+}
+function popConfirm(text, o = {}) {
+  popStyle();
+  return new Promise(resolve => {
+    const el = document.createElement('div'); el.className = 'aiza-pop aiza-pop-confirm';
+    el.innerHTML = '<div class="box" role="dialog" aria-modal="true"><p class="pop-text"></p><div class="pop-actions"><button type="button" class="pop-cancel"></button><button type="button"></button></div></div>';
+    el.querySelector('.pop-text').textContent = text;
+    const [no, ok] = el.querySelectorAll('button');
+    no.textContent = L('mail.cancel'); ok.textContent = o.ok || 'OK'; ok.className = o.danger ? 'pop-danger' : 'pop-ok';
+    const done = v => { el.remove(); document.removeEventListener('keydown', key, true); resolve(v); };
+    const key = e => { if (e.key === 'Escape') { e.preventDefault(); done(false); } };
+    no.onclick = () => done(false); ok.onclick = () => done(true); el.onclick = e => { if (e.target === el) done(false); };
+    document.addEventListener('keydown', key, true);
+    document.body.appendChild(el); setTimeout(() => ok.focus(), 0);
+  });
+}
+function popToast(text, error) {
+  popStyle();
+  let box = document.querySelector('.aiza-toasts');
+  if (!box) { box = document.createElement('div'); box.className = 'aiza-toasts'; document.body.appendChild(box); }
+  const el = document.createElement('div'); el.className = 'aiza-toast' + (error ? ' error' : ''); el.setAttribute('role', error ? 'alert' : 'status');
+  el.textContent = String(text);
+  let t = setTimeout(() => el.remove(), error ? 8000 : 4000);
+  el.onclick = () => { if (el.classList.toggle('open')) clearTimeout(t); else t = setTimeout(() => el.remove(), 2000); };
+  box.appendChild(el);
+  return el;
+}
 function api(path, opts) {
   return fetch('/agents/api' + path, opts).then(async r => {
     if (!r.ok) { const b = await r.json().catch(() => null); const e = new Error(b && b.error ? b.error : String(r.status));
@@ -68,7 +111,7 @@ async function claude(id, btn) {
       }
       // 終わっていたら同じ会話を「続きから」で起動し直す
       resume = (m && m.claude_session_id) || it.session.claude_session_id || '';
-      if (!resume && !confirm(L('mail.earlier_session_ended_conversation'))) return;
+      if (!resume && !await popConfirm(L('mail.earlier_session_ended_conversation'))) return;
     }
     btn.textContent = L('mail.starting_2');
     const label = ('digest: ' + it.title).slice(0, 40);
@@ -86,7 +129,7 @@ async function claude(id, btn) {
       if (e.runningSession) { meta = { id: e.runningSession, claude_session_id: resume, reused: true }; }
       else {
       // 会話ログが見つからないなどで続きから始められないときは、新しく始めるか聞く(2026-10-11)
-      if (!resume || !confirm(L('mail.could_not_continue_earlier_conversation', { x: e.message }))) throw e;
+      if (!resume || !await popConfirm(L('mail.could_not_continue_earlier_conversation', { x: e.message }))) throw e;
       resume = ''; meta = await start('');
       }
     }
@@ -99,7 +142,7 @@ async function claude(id, btn) {
     if (text && wn) await toldWait(id);
     // 起動したら画面は移らず、ボタンを「AIを開く」に変えるだけ(急に切り替わると割り込みになる。2026-10-30 ユーザー依頼)。開くのはもう一度押したとき
     it.session = { id: meta.id, claude_session_id: meta.claude_session_id || resume || '', seen: sig(it) }; label0 = L('mail.open_ai');
-  } catch (e) { alert(L('mail.could_not_prepare_claude_session', { x: e.message })); }
+  } catch (e) { popToast(L('mail.could_not_prepare_claude_session', { x: e.message }), true); }
   finally { btn.disabled = false; btn.textContent = label0; }
 }
 

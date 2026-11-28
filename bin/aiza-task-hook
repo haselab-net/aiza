@@ -28,6 +28,12 @@ Never fails: a hook that errors must not get in Claude's way.
 import os as _aiza_os  # aigw-legacy: sessions started before the rename (2026-11-23) only have AIGW_*
 for _k in [k for k in _aiza_os.environ if k.startswith("AIGW_")]:
     _aiza_os.environ.setdefault("AIZA_" + _k[5:], _aiza_os.environ[_k].replace("/.aigw/", "/.aiza/").replace("/.aigw-state/", "/.aiza-state/"))
+# 2026-11-27: the pre-rename name (aigw-*-hook, a symlink to this file) left in
+# someone's ~/.claude/settings.json ran this hook a second time beside the
+# managed one, so one question became two cards: under that name, do nothing.
+import sys as _aiza_sys
+if _aiza_os.path.basename(_aiza_sys.argv[0]).startswith("aigw-"):
+    _aiza_sys.exit(0)
 import json
 import os
 import re

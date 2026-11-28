@@ -13,6 +13,13 @@ import test_link_groups as G
 from test_link_groups import A, B2, C, D
 from test_shared_search import B
 
+
+def to_all(text):
+    """`talkto --all "…"` -- a bare talkto is refused since 2026-11-27."""
+    t = B.TalktoText(text)
+    t.all = True
+    return t
+
 NOTICE = "[AI座 セッション連携]"
 
 
@@ -69,7 +76,7 @@ class LinkFirstTurnTest(unittest.TestCase):
         self.fresh(C, preset="root-shell", launch="claude", tmux_location="root")
         B.create_link(A, C, forever=True)
         B.send_message = self.real_send
-        status, _ = B._relay_to_partner(A, B.TalktoText("はじめまして"))
+        status, _ = B._relay_to_partner(A, to_all("はじめまして"))
         self.assertEqual(status, "delivered")
         self.assertTrue(self.typed[0].startswith(NOTICE))
         self.assertTrue(self.typed[0].endswith("\n\nはじめまして"))

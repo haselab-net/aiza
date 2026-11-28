@@ -1,0 +1,1 @@
+door ALL=(root) NOPASSWD: /usr/local/sbin/aiza-demo-vmctl

@@ -168,6 +168,14 @@ CASES = {
          " document.querySelector('#archived-list [data-folder-id=fd] .archive-btn').click()", 1000),
         ("out.rows = rows()", 100),
     ]),
+    # The 🔓 at the top right is as tall as the mic beside it, not the whole
+    # header (2026-11-27, the user: 鍵のアイコンが縦に大き過ぎる)
+    "the unlock badge's height": (FOLDERS, [
+        ("updateUnlockBadge({ ok: true, unlocked: true, expires_at: Date.now() / 1000 + 600, tier: 'root' })", 300),
+        ("const b = [...document.querySelectorAll('#top-header > button')].find((x) => !x.hidden && x.textContent === '🔓');"
+         " out.badge = b.getBoundingClientRect().height; out.mic = document.getElementById('voice-btn').getBoundingClientRect().height;"
+         " out.header = document.getElementById('top-header').getBoundingClientRect().height", 100),
+    ]),
 }
 
 

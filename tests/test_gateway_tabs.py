@@ -19,7 +19,8 @@ G = load_gateway()
 class TabRoutesTest(unittest.TestCase):
     def setUp(self):
         self.static = Path(tempfile.mkdtemp(prefix="aiza-test-tabs-"))
-        for name, text in (("login.html", "LOGIN"), ("index.html", "INDEX"), ("sw.js", "// sw")):
+        for name, text in (("login.html", "LOGIN"), ("index.html", "INDEX"), ("sw.js", "// sw"),
+                           ("style.css", ":root { --accent: #4285f4; }")):
             (self.static / name).write_text(text)
         self.saved = G.STATIC_DIR
         G.STATIC_DIR = self.static
@@ -61,6 +62,14 @@ class TabRoutesTest(unittest.TestCase):
         status, headers, _ = self.get(f"{G.BASE_PATH}/sw.js")
         self.assertEqual(status, 200)
         self.assertEqual(headers.get("service-worker-allowed"), "/")
+
+    def test_the_page_style_is_served_as_css(self):
+        # The page's styles (the deployment notes): out of index.html since
+        # 2026-11-27, served before the login like app.js.
+        status, headers, body = self.get(f"{G.BASE_PATH}/style.css")
+        self.assertEqual(status, 200)
+        self.assertTrue(headers["content-type"].startswith("text/css"), headers["content-type"])
+        self.assertEqual(body, b":root { --accent: #4285f4; }")
 
 
 if __name__ == "__main__":

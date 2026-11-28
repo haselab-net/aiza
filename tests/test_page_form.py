@@ -26,6 +26,15 @@ ROOT_MAIL = dict(CAPS, root_shell=True, mailbox={"label": "Email", "codex": Fals
 
 # name: (faults, [(js, wait ms)])
 CASES = {
+    # A public demo's room (the deployment notes): only the AI the demo offers.
+    "demo: only the AI": ({"GET /capabilities": EVERY(dict(CAPS, demo=True, presets=["agent"], root_shell=True,
+                                                          mailbox={"label": "Email", "codex": False}))}, [
+        ("out.kinds = [...document.getElementById('kind').options].map((o) => o.value);"
+         " out.places = [...document.getElementById('place').options].map((o) => o.value);"
+         " out.presets = [...document.getElementById('preset').options].map((o) => o.value);"
+         " out.loginsHidden = document.getElementById('auth-rows').closest('.set-card').hidden;"
+         " out.machines = [...document.getElementById('machine-select').options].map((o) => o.value)", 100),
+    ]),
     "shell on devbox: down, up": ({W + "sandhome&dir=": EVERY({"dir": "", "subdirs": ["a", "b"]}),
                                    W + "sandhome&dir=a": EVERY({"dir": "a", "subdirs": []})}, [
         (SHELL, 600),
@@ -170,6 +179,12 @@ class PageFormTest(unittest.TestCase):
         self.assertEqual(out["label1"], "前の名前")
         self.assertEqual(out["label2"], "")         # its own name went with it
         self.assertEqual(out["label3"], "自分の名前")
+
+    def test_a_demo_room_offers_only_its_ai(self):
+        out = self.got("demo: only the AI")
+        self.assertEqual((out["kinds"], out["places"], out["presets"]), (["agent"], ["dev"], ["agent"]))
+        self.assertTrue(out["loginsHidden"])
+        self.assertEqual(out["machines"], ["local", "auth"])   # no ssh machines, no Email, no root
 
 
 if __name__ == "__main__":

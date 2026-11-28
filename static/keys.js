@@ -59,6 +59,21 @@
     modRowEl.innerHTML = "";
     gridEl.innerHTML = "";
 
+    // File attach (2026-09-08, at the user's request; first at the far
+    // right of this row, at the far left since 2026-11-27, the user:
+    // ファイル添付のボタンを一番左に移動). Deliberately only here, not in #composer -- this
+    // whole toolbar is already hidden for the headless "claude" preset
+    // (buildKeyToolbar is never even reached for it, see hasPane below), so
+    // this button is tmux-preset-only by the same rule everything else in
+    // this row already follows; a headless chat can still attach an image
+    // by pasting one directly into the composer (see the "paste" listener
+    // on textEl further down).
+    const attachBtn = document.createElement("button");
+    attachBtn.textContent = "📎";
+    attachBtn.title = t("keys.attach_file");
+    attachBtn.addEventListener("click", () => attachFileInputEl.click());
+    modRowEl.appendChild(attachBtn);
+
     for (const [label, get, set] of MODIFIERS) {
       const btn = document.createElement("button");
       btn.textContent = label;
@@ -77,19 +92,6 @@
       modRowEl.appendChild(btn);
     }
 
-    // Image attach (2026-09-08, at the user's request: pinned at the far
-    // right of this row). Deliberately only here, not in #composer -- this
-    // whole toolbar is already hidden for the headless "claude" preset
-    // (buildKeyToolbar is never even reached for it, see hasPane below), so
-    // this button is tmux-preset-only by the same rule everything else in
-    // this row already follows; a headless chat can still attach an image
-    // by pasting one directly into the composer (see the "paste" listener
-    // on textEl further down).
-    const attachBtn = document.createElement("button");
-    attachBtn.textContent = "📎";
-    attachBtn.title = t("keys.attach_file");
-    attachBtn.addEventListener("click", () => attachFileInputEl.click());
-    modRowEl.appendChild(attachBtn);
 
     for (const k of GRID_KEYS) {
       const btn = document.createElement("button");

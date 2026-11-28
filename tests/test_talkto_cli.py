@@ -56,13 +56,14 @@ class TalktoCliTest(unittest.TestCase):
     def test_words_dashes_and_stdin(self):
         for script in SCRIPTS:
             self.path.unlink(missing_ok=True)
-            self.run_cli(script, "--no-wait", "hello", "world")
-            self.run_cli(script, "--no-wait", "--", "-v は文")
-            self.run_cli(script, "--no-wait", stdin="複数行の\n`文` $HOME 'x'\n")
-            self.run_cli(script, "--no-wait", "-", stdin="ハイフンから")
+            self.run_cli(script, "--all", "--no-wait", "hello", "world")
+            self.run_cli(script, "--no-wait", "--all", "--", "-v は文")
+            self.run_cli(script, "--no-wait", "--all", stdin="複数行の\n`文` $HOME 'x'\n")
+            self.run_cli(script, "--all", "--no-wait", "-", stdin="ハイフンから")
             got = [l.get("text") or B.base64.b64decode(l["b64"]).decode() for l in self.lines()]
             self.assertEqual(got, ["hello world", "-v は文", "複数行の\n`文` $HOME 'x'\n", "ハイフンから"], script)
             self.assertTrue(all(l.get("id") for l in self.lines()), script)
+            self.assertTrue(all(l.get("all") is True for l in self.lines()), script)
 
     def relay_once(self, outcome):
         """Plays the backend: waits for one line, relays it, writes its outcome."""
@@ -86,7 +87,7 @@ class TalktoCliTest(unittest.TestCase):
                 self.path.unlink(missing_ok=True)
                 self.path.with_name("talkto_out.jsonl.offset").unlink(missing_ok=True)
                 t = self.relay_once(outcome)
-                r = self.run_cli(script, "やあ")
+                r = self.run_cli(script, "--to", "X", "やあ")
                 t.join()
                 self.assertEqual(r.returncode, code, (script, r.stdout, r.stderr))
                 self.assertIn(outcome[1], r.stdout, script)
@@ -113,6 +114,47 @@ class TalktoCliTest(unittest.TestCase):
                 self.assertIn("--list", self.run_cli(script, "--help").stdout, script)
         finally:
             B.link_list_from_session = saved
+
+    def test_needs_to_or_all(self):
+        # 2026-11-27 (the user): no broadcast by accident -- a bare `talkto "…"`
+        # sends nothing and exits 1; --to and --all together are a usage error
+        saved = B.link_list_from_session
+        B.link_list_from_session = lambda sid: ("list", "つながっている相手(1人):\n「X」 Claude・devbox・動いている")
+        try:
+            for script in SCRIPTS:
+                self.path.unlink(missing_ok=True)
+                self.path.with_name("talkto_out.jsonl.offset").unlink(missing_ok=True)
+                t = self.relay_once(("delivered", "relayed: must not happen")) if script == "talkto" else None
+                r = self.run_cli(script, "やあ")
+                if t:
+                    t.join()
+                self.assertEqual(r.returncode, 1, (script, r.stdout, r.stderr))
+                self.assertIn("--all", r.stderr, script)
+                self.assertFalse(any("text" in l or "b64" in l for l in self.lines()), script)
+                if script == "talkto":
+                    self.assertIn("「X」", r.stderr)  # who could be named
+                for args in (["--to", "X", "--all", "x"], ["--all", "--to", "X", "x"]):
+                    self.assertEqual(self.run_cli(script, *args).returncode, 2, (script, args))
+                self.assertIn("--all", self.run_cli(script, "--help").stdout, script)
+        finally:
+            B.link_list_from_session = saved
+
+    def test_backend_refuses_unaddressed_and_reads_remote_to(self):
+        lines = [json.dumps({"id": "a1", "text": "x"}),
+                 json.dumps({"id": "a2", "b64": B.base64.b64encode("y".encode()).decode(),
+                             "to_b64": B.base64.b64encode("相手".encode()).decode()}),
+                 json.dumps({"id": "a3", "text": "z", "all": True})]
+        got = [t for _, t in B._parse_talkto_lines([l.encode() for l in lines])]
+        self.assertEqual([(str(t), t.to, t.all) for t in got], [("x", None, False), ("y", "相手", False), ("z", None, True)])
+        saved = B._load_links, B.load_meta
+        B._load_links = lambda: {"L": {"members": ["s", "t"], "expires_ts": None}}
+        B.load_meta = lambda sid: {"label": sid}
+        try:
+            status, msg = B._relay_to_partner("s", got[0])
+            self.assertEqual(status, "need_to")
+            self.assertIn("「t」", msg)
+        finally:
+            B._load_links, B.load_meta = saved
 
     def test_real_relay_without_link_says_so(self):
         saved = B._load_links

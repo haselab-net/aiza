@@ -1,0 +1,3 @@
+#!/bin/sh
+set -f
+exec sudo -n /usr/local/sbin/aiza-demo-vmctl $SSH_ORIGINAL_COMMAND

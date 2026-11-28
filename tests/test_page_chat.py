@@ -89,8 +89,38 @@ ON_S1 = ("const mo = new MutationObserver(() => { if (window.__aizaSession() !==
          " for (const id of __IDS__) document.getElementById(id).click(); });"
          " mo.observe(document.getElementById('messages'), { childList: true, subtree: true });")
 
+EVIL = '<img src=x onerror="window.__pwned=1"><script>window.__pwned=2</script>[a](javascript:window.__pwned=3) <svg onload="window.__pwned=4"> javascript:window.__pwned=5'
 # name: (faults, [(js, wait ms)])
 CASES = {
+    # 「要判断」 to look at: a small card under the latest reply (the deployment notes).
+    "status card: ✓ 確認した": ({FIRST: [{"body": {"events": [ev(1, "user_message", text="直して"), ev(2, "agent_output", text="できました。\n\n状態: 要判断 — 画面を見る")], "has_more": False}}],
+                                 f"POST /sessions/{S0}/messages": [{"every": True, "body": {"ok": True}}]}, [
+        ("const c = document.querySelector('.status-card'); out.what = c && c.querySelector('.status-card-what').textContent;"
+         " out.after = c && c.previousElementSibling.dataset.seq; c.querySelector('.status-card-ok').click()", 800),
+    ]),
+    "status card: 後で folds it": ({FIRST: [{"body": {"events": [ev(2, "agent_output", text="できました。\n\n状態: 要判断 — 画面を見る")], "has_more": False}}]}, [
+        ("document.querySelector('.status-card-later').click()", 300),
+        ("out.folded = document.querySelector('.status-card').classList.contains('folded')", 100),
+    ]),
+    "status card: not while a question is open, nor after a newer message": ({FIRST: [{"body": {"events": [
+            ev(2, "agent_output", text="できました。\n\n状態: 要判断 — 画面を見る"), ev(3, "ask", ask_id="a1", terminal=False, kind="question", tool="AskUserQuestion", questions=ONE)],
+            "has_more": False}}]}, [
+        ("out.withAsk = document.querySelectorAll('.status-card').length", 100),
+    ]),
+    "status card: a reply that does not need you": ({FIRST: [{"body": {"events": [
+            ev(2, "agent_output", text="終わりました。\n\n状態: 済み — 直した")], "has_more": False}}]}, [
+        ("out.n = document.querySelectorAll('.status-card').length", 100),
+    ]),
+    # Injection (the deployment notes C): what a visitor or an AI writes is text, never markup.
+    "injection: text stays text": ({FIRST: [{"body": {"events": [
+            ev(1, "user_message", text=EVIL), ev(2, "agent_output", text=EVIL + "\n\n```\n" + EVIL + "\n```"),
+            ev(3, "system", text=EVIL)], "has_more": False}}]}, [
+        ("document.querySelectorAll('#messages a').forEach((a) => a.click())", 300),
+        ("out.pwned = window.__pwned || null;"
+         " out.tags = [...document.querySelectorAll('#messages img[src=\"x\"], #messages svg[onload], #messages script')].length;"
+         " out.jsLinks = [...document.querySelectorAll('#messages a')].filter((a) => /^\\s*javascript:/i.test(a.getAttribute('href') || '')).length;"
+         " out.text = document.getElementById('messages').textContent.includes('onerror')", 100),
+    ]),
     "history: the first page": ({FIRST: [{"body": {"events": HIST + [LAST], "has_more": False}}]}, [
         (HELP, 300),
         ("out.shape = window.__shape()", 100),
@@ -242,6 +272,31 @@ class PageChatTest(unittest.TestCase):
     def posted(out, path):
         return [b for m, p, b in out["log"] if m == "POST" and p == path]
 
+    def test_a_reply_that_needs_you_gets_a_card_and_checked_sends(self):
+        out = self.got("status card: ✓ 確認した")
+        self.assertEqual(out["what"], "🙋 画面を見る")
+        self.assertEqual(out["after"], "2")          # right under that reply
+        sent = self.posted(out, f"/sessions/{S0}/messages")
+        self.assertEqual([b["text"] for b in sent], ["確認しました"])
+
+    def test_later_only_folds_the_card(self):
+        out = self.got("status card: 後で folds it")
+        self.assertTrue(out["folded"])
+        self.assertEqual(self.posted(out, f"/sessions/{S0}/messages"), [])
+
+    def test_no_card_while_a_question_is_open(self):
+        self.assertEqual(self.got("status card: not while a question is open, nor after a newer message")["withAsk"], 0)
+
+    def test_no_card_for_a_reply_that_does_not_need_you(self):
+        self.assertEqual(self.got("status card: a reply that does not need you")["n"], 0)
+
+    def test_what_a_visitor_or_an_ai_writes_is_never_markup(self):
+        out = self.got("injection: text stays text")
+        self.assertIsNone(out["pwned"])
+        self.assertEqual(out["tags"], 0)
+        self.assertEqual(out["jsLinks"], 0)
+        self.assertTrue(out["text"])           # shown, as text
+
     def test_an_older_page_draws_as_the_first_page_does(self):
         first = self.got("history: the first page")["shape"]
         older = self.got("history: an older page")["shape"]
@@ -284,7 +339,8 @@ class PageChatTest(unittest.TestCase):
         page = out["page"]
         self.assertEqual(page[0], "aiza-out slack(o1)")
         self.assertIn("許可を待っています", page)
-        self.assertIn("#x\nhttps://example.slack.com/archives/C1", page)
+        # the URL first; the name is what the preparing side wrote (audit O3)
+        self.assertIn("https://example.slack.com/archives/C1\n名前「#x」は用意した側の申告(開くのは上の URL)", page)
         self.assertIn("<b>本文</b>", page)     # as text, not HTML
         self.assertIn("h" * 64, page)
         self.assertEqual(out["links"], [[f"/agents/api/sessions/{S0}/out/o1/att/0", "a b.pdf"],

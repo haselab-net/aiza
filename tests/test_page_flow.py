@@ -135,6 +135,11 @@ FLOWS = {
     "resume an ended session from its chat": ("#aaaaaaaaaa05", [("wait", None, "chat @aaaaaaaaaa05"),
                                                                 ("click", "#chat-dot", "chat @aaaaaaaaaa07"),
                                                                 ("back", None, "list")]),
+    "send to a stopped session: resumed first, then sent": ("#aaaaaaaaaa05", [
+        ("wait", None, "chat @aaaaaaaaaa05"),
+        ("eval", "document.getElementById('text').value = 'x'; document.getElementById('run-btn').click()",
+         "chat @aaaaaaaaaa07"),
+        ("back", None, "list")]),
     "the archived list": ("", [("click", "#archive-toggle-btn", "list"), ("click", "#archived-list .session-row", "chat"),
                                ("back", None, "list")]),
     "search, open a hit": ("", [("click", "#search-toggle-btn", "list"),
@@ -243,7 +248,7 @@ PROBE = r"""
     if (a === "hash") location.hash = arg;
     else if (a === "back") history.back();
     else if (a === "forward") history.forward();
-    else if (a === "eval") { try { (0, eval)(arg); } catch (e) { out.missing = "eval: " + e.message; } }
+    else if (a === "eval") { try { arg(); } catch (e) { out.missing = "eval: " + e.message; } }
     else if (a === "menu") { sel().value = arg; sel().dispatchEvent(new Event("change")); }
     else if (a === "has") { if (!document.querySelector(arg)) out.missing = "nothing shows " + arg; }
     else if (a === "none") { if (document.querySelector(arg)) out.missing = "still shows " + arg; }
@@ -276,6 +281,14 @@ PROBE = r"""
 """
 
 
+def flow_probe(steps):
+    """PROBE with these steps. An "eval" step goes in as a function, not a
+    string run by eval(): the pages run under the demo room's policy, which
+    forbids eval (the deployment notes, page_harness)."""
+    return PROBE.replace("__STEPS__", "[" + ",".join(
+        f'["eval", () => {{ {arg}\n}}]' if a == "eval" else json.dumps([a, arg]) for a, arg, _ in steps) + "]")
+
+
 def seen(got, steps):
     """The pages the probe saw, with the open session only where a step
     names one."""
@@ -304,7 +317,7 @@ class PageFlowTest(unittest.TestCase):
             return e
 
     def run_flow(self, start, steps, static=None):
-        probe = PROBE.replace("__STEPS__", json.dumps([[a, arg] for a, arg, _ in steps]))
+        probe = flow_probe(steps)
         srv = serve(probe, static) if static else serve(probe)
         try:
             with tempfile.TemporaryDirectory() as prof:

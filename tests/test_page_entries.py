@@ -51,6 +51,7 @@ ENTRIES = {
     "renderSharePane -> closeSession": "share pane: 🔗 add another goes to the list",
     "renderSharePaneBody -> openSession": "share pane: move to the Email box",
     "resumeEndedSession -> openSession": "resume an ended session from its chat",
+    "resumeToSend -> openSession": "send to a stopped session: resumed first, then sent",
     "showTakeButtons -> openSession": "take over a session shared with me read-only",
     "startIssueSession -> openSession": "a GitHub issue link",
     "connectSessionEvents -> openSession": "a session whose history asks for the passkey again after the unlock",

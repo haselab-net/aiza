@@ -151,7 +151,7 @@
   function loadCloudVoices() {
     if (cloudVoices) return Promise.resolve(cloudVoices);
     if (!cloudVoicesAsked) {
-      cloudVoicesAsked = fetch("/agents/tts/voices", { credentials: "same-origin" })
+      cloudVoicesAsked = fetch(window.aizaBase + "/agents/tts/voices", { credentials: "same-origin" })
         .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
         .then((j) => (cloudVoices = j.voices || []))
         .catch((e) => { cloudVoicesAsked = null; throw e; });
@@ -173,7 +173,7 @@
   function ttsUrl(voice, text) {
     const k = voice + "\n" + text;
     if (!ttsFetched.has(k)) {
-      const p = fetch("/agents/tts", {
+      const p = fetch(window.aizaBase + "/agents/tts", {
         method: "POST", credentials: "same-origin",
         headers: { "Content-Type": "application/json" }, body: JSON.stringify({ voice, text }),
       }).then((r) => (r.ok ? r.blob() : Promise.reject(new Error(String(r.status))))).then((b) => URL.createObjectURL(b));

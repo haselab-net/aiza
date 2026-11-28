@@ -1,0 +1,10 @@
+[Unit]
+Description=aiza demo: docker networks and firewall for rooms and boxes
+After=docker.service
+Requires=docker.service
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/aiza-demo-vmctl setup
+[Install]
+WantedBy=multi-user.target

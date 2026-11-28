@@ -1,0 +1,5 @@
+#!/bin/sh
+# /opt/aiza-ssh/discord-dm -- 前の置き場(2026-11-27 まで)。今は /opt/aiza-dm/discord-dm(devbox だけ、the deployment notes)。
+if [ -x /opt/aiza-dm/discord-dm ]; then exec /opt/aiza-dm/discord-dm "$@"; fi
+echo "discord-dm: ここでは使えません。Email の箱から Discord へは aiza-out discord で(本人の許可のカード、the deployment notes)" >&2
+exit 1

@@ -71,7 +71,7 @@ function loadTree() {
       treePendingJump = null;
       if (jump && ((treeData && treeData.nodes) || []).some((n) => n.id === jump)) jumpToTreeNode(jump);
       else {
-        if (jump) alert(t("tree.cannot_see_branch_no_longer"));
+        if (jump) ui.toast(t("tree.cannot_see_branch_no_longer"), { error: true });
         if (todoOn()) renderTodo();   // 番ごと shows the tree's items too (段5)
       }
       // 仕事's tree: where each root goes may have changed (the list's folders).
@@ -127,8 +127,8 @@ function treeSessionHref(n, me) {
   const sid = n.links && n.links.session;
   if (!sid) return null;
   const whose = n.session_owner || n.owner;
-  if (whose === me) return n.session_gone ? null : `/agents/#${encodeURIComponent(sid)}`;
-  return lastSessions.some((s) => s.id === sid && s.owner === whose) ? `/agents/#${encodeURIComponent(sid)}` : null;
+  if (whose === me) return n.session_gone ? null : `${window.aizaBase}/agents/#${encodeURIComponent(sid)}`;
+  return lastSessions.some((s) => s.id === sid && s.owner === whose) ? `${window.aizaBase}/agents/#${encodeURIComponent(sid)}` : null;
 }
 // Plan stage 13: a shared node's title or status line in another language
 // comes translated (n.tr); 「訳」 next to it shows the original instead.
@@ -177,12 +177,12 @@ async function treeGoSession(id, whose) {
   const find = () => lastSessions.find((s) => s.id === id && (s.owner || null) === (whose || null));
   const meta = find() || (await refreshSessions().catch(() => null), find());
   if (meta) openSessionOverTodo(meta);
-  else location.href = `/agents/#${encodeURIComponent(id)}`;
+  else location.href = `${window.aizaBase}/agents/#${encodeURIComponent(id)}`;
 }
 async function treeOp(body) {
   try {
     await api("/tree", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  } catch (e) { alert(e.message); }
+  } catch (e) { ui.toast(e.message, { error: true }); }
   loadTree();
 }
 // 🤝 The sessions helping an item's 🧭 担当 (the deployment notes; the store
@@ -311,7 +311,7 @@ function treeStartCtx(n) {
           ? { op: "update", id: n.id, links: Object.assign({}, n.links || {}, { session: meta.id }) }
           : { op: "add", parent: n.id, title: label, visibility: n.visibility, links: { session: meta.id } };
         await api("/tree", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(req) });
-      } catch (e) { alert(e.message); }
+      } catch (e) { ui.toast(e.message, { error: true }); }
     },
   };
 }
@@ -345,12 +345,12 @@ async function treeRelease(sid) {
     delete links.session;
     try {
       await api("/tree", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ op: "update", id: n.id, links, ball: null }) });
-    } catch (e) { alert(e.message); return false; }
+    } catch (e) { ui.toast(e.message, { error: true }); return false; }
   }
   if ((treeData.nodes || []).some((n) => treeHelpers(n).some((h) => h.session === sid && h.owner === me))) {
     try {
       await api("/tree", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ op: "unhelp", session: sid }) });
-    } catch (e) { alert(e.message); return false; }
+    } catch (e) { ui.toast(e.message, { error: true }); return false; }
   }
   return true;
 }
@@ -359,17 +359,17 @@ async function treeRelease(sid) {
 // One that is a 担当 itself lets its items go first, when the user says so.
 async function treeHelpLead(n, s) {
   const me = treeData.user;
-  if ((n.session_owner || n.owner) !== me) { alert(t("tree.helping_others_lead_not_yet")); return; }
+  if ((n.session_owner || n.owner) !== me) { ui.toast(t("tree.helping_others_lead_not_yet")); return; }
   if (n.links.session === s.id || treeHelpers(n).some((h) => h.session === s.id && h.owner === me)) return;
   const c = treeContext(treeData);
   const holds = (treeData.nodes || []).filter((x) => x.links && x.links.session === s.id && (x.session_owner || x.owner) === me && !c.isDone(x));
   if (holds.length) {
-    if (!confirm(t("tree.lead_lets_go_to_help", { s: s.label, items: holds.map((x) => x.title).join("・") }))) return;
+    if (!(await ui.confirm(t("tree.lead_lets_go_to_help", { s: s.label, items: holds.map((x) => x.title).join("・") })))) return;
     if (!(await treeRelease(s.id))) return;
-  } else if (!confirm(t("tree.help_lead_confirm", { s: s.label, lead: n.session_label || n.title }))) return;
+  } else if (!(await ui.confirm(t("tree.help_lead_confirm", { s: s.label, lead: n.session_label || n.title })))) return;
   try {
     await api("/tree", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ op: "help", id: n.id, session: s.id }) });
-  } catch (e) { alert(e.message); }
+  } catch (e) { ui.toast(e.message, { error: true }); }
   if (typeof refreshSessions === "function") refreshSessions();
 }
 // What a session let go on a tree's item (or on a 担当's row, lead=true)
@@ -431,10 +431,10 @@ async function treeLinkSession(n, s) {
     // ▶ セッションで作業 → 既存 on a node no session works on: that session works on it.
     // Asked first, as everything but a plain move (2026-11-27, the user:
     // 確認は単純な移動以外で全て出してください).
-    if (!confirm(t("tree.make_lead_confirm", { s: s.label, item: n.title }))) return;
+    if (!(await ui.confirm(t("tree.make_lead_confirm", { s: s.label, item: n.title })))) return;
     await treeOp({ op: "update", id: n.id, links: Object.assign({}, n.links || {}, { session: s.id }) });
   } else {
-    if (!confirm(t("tree.make_child_lead_confirm", { s: s.label, item: n.title }))) return;
+    if (!(await ui.confirm(t("tree.make_child_lead_confirm", { s: s.label, item: n.title })))) return;
     await treeOp({ op: "add", parent: n.id, title: s.label, visibility: n.visibility, links: { session: s.id } });
   }
 }
@@ -452,7 +452,7 @@ function treeSharePanel(n, box, closeMenu) {
   // the to-do view's body.todo-page hid; then all inputs into the menu).
   const ov = document.createElement("div");
   ov.className = "tshare";
-  const rname = "tsv-" + n.id;
+  const rname = "tsv-" + escapeHtml(String(n.id));
   ov.innerHTML = `
     <div class="tshare-sec"><b>${escapeHtml(t("tree.who_can_see"))}</b>
       <label><input type="radio" name="${rname}" value="self"> ${escapeHtml(t("tree.those_who_can_edit"))}</label>
@@ -594,7 +594,7 @@ function treeDragMoved() {
   if (drop) drop.row.classList.add("drop-" + drop.how);
   st.drop = drop;
 }
-function endTreeDrag() {
+async function endTreeDrag() {
   const st = treeDrag;
   treeDrag = null;
   clearInterval(st.timer);
@@ -636,10 +636,10 @@ function endTreeDrag() {
   if (parent !== cur) body.parent = parent;
   // A whole tree into another: asked first, and out of its folder after.
   if (!cur && parent) {
-    if (!confirm(t("tree.root_into_confirm", { a: treeTitleText(n), b: treeTitleText(st.byId.get(parent)) }))) return;
+    if (!(await ui.confirm(t("tree.root_into_confirm", { a: treeTitleText(n), b: treeTitleText(st.byId.get(parent)) })))) return;
     api("/tree", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
       .then(() => saveFolders([{ op: "tree_root", node: st.id, folder: "" }]))
-      .catch((e) => alert(e.message)).then(() => loadTree());
+      .catch((e) => ui.toast(e.message, { error: true })).then(() => loadTree());
     return;
   }
   treeOp(body);
@@ -997,7 +997,7 @@ ui.trees = Object.assign(ui.trees || {}, {
     try {
       const r = await api("/tree", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ op: "add", title }) });
       if (folder && r && r.node && r.node.id) await saveFolders([{ op: "tree_root", node: r.node.id, folder }]);
-    } catch (e) { alert(e.message); }
+    } catch (e) { ui.toast(e.message, { error: true }); }
     loadTree();
   },
   node: (id) => treeNodeById(id),
@@ -1017,7 +1017,7 @@ ui.trees = Object.assign(ui.trees || {}, {
     const s = lastSessions.find((x) => x.id === sid);
     const q = items.length ? t("tree.release_lead_confirm", { s: s ? s.label : sid, items: items.map((n) => n.title).join("・") })
       : t("tree.release_helper_confirm", { s: s ? s.label : sid });
-    if (!confirm(q)) { ui.trees.loaded(); return; }
+    if (!(await ui.confirm(q))) { ui.trees.loaded(); return; }
     if (await treeRelease(sid)) { loadTree(); if (typeof refreshSessions === "function") refreshSessions(); }
   },
   turns: () => treeTurns(), turnRows: (list, byId, me, withWho) => treeTurnRows(list, byId, me, withWho),
@@ -1225,7 +1225,7 @@ function TreeView({ data, roots, bare }) {
       return html`
         <div key=${it.key} class="tnode done handoff-fold" style=${st}>
           <button class="tog" onClick=${flip}>${it.show ? "▼" : "▶"}</button>
-          <span class="tvis" style="cursor: pointer" onClick=${flip}>${(it.show ? "" : "🔁 ") + t("tree.n_finished_handoffs", { n: it.count }) + (it.show ? t("tree.fold") : "")}</span>
+          <span class="tvis" onClick=${flip}>${(it.show ? "" : "🔁 ") + t("tree.n_finished_handoffs", { n: it.count }) + (it.show ? t("tree.fold") : "")}</span>
         </div>`;
     }
     const flip = () => {
@@ -1236,7 +1236,7 @@ function TreeView({ data, roots, bare }) {
     return html`
       <div key=${it.key} class="tnode done done-fold" style=${st}>
         <button class="tog" onClick=${flip}>${treeDoneShown ? "▼" : "▶"}</button>
-        <span class="tt" style="cursor: pointer" onClick=${flip}>${"✓ " + t("tree.finished_n", { n: it.count })}</span>
+        <span class="tt" onClick=${flip}>${"✓ " + t("tree.finished_n", { n: it.count })}</span>
       </div>`;
   };
   // An item with what is under it in a frame (2026-11-27, the user:
@@ -1528,7 +1528,7 @@ function treeMenuItems(n, c, has, close, panel, setPanel, scroller, list) {
         await api(sessionPath(n.links.session, "/join", whoseS), { method: "POST" });
         await refreshSessions();
         await treeGoSession(n.links.session, whoseS);
-      } catch (e) { alert(e.message); }
+      } catch (e) { ui.toast(e.message, { error: true }); }
     });
     if (!list) mk("take", "🤛 " + t("tree.take_on_new_session_own"), () => ui.start.open(treeTakeCtx(n)));
   }
@@ -1556,8 +1556,8 @@ function treeMenuItems(n, c, has, close, panel, setPanel, scroller, list) {
   // 🧭 Take the 担当 off the item (2026-11-27, the user: 担当を剥がせる
   // ように): the item stays as it is, the session goes back to its folder.
   if (n.links && n.links.session && (n.owner === me || (n.members || []).includes(me) || (n.session_owner || n.owner) === me)) {
-    mk("unlead", "🧭 " + t("tree.take_lead_off"), () => {
-      if (!confirm(t("tree.release_lead_confirm", { s: n.session_label || t("tree.someones_session", { who: n.session_owner || n.owner }), items: n.title }))) return;
+    mk("unlead", "🧭 " + t("tree.take_lead_off"), async () => {
+      if (!(await ui.confirm(t("tree.release_lead_confirm", { s: n.session_label || t("tree.someones_session", { who: n.session_owner || n.owner }), items: n.title }), { danger: true }))) return;
       const links = Object.assign({}, n.links);
       delete links.session;
       treeOp({ op: "update", id: n.id, links, ball: null });
@@ -1567,8 +1567,8 @@ function treeMenuItems(n, c, has, close, panel, setPanel, scroller, list) {
   for (const h of treeHelpers(n)) {
     if (h.owner !== me && (n.session_owner || n.owner) !== me) continue;
     const name = h.owner === me ? (h.label || h.session) : t("tree.someones_session", { who: h.owner });
-    mk("unhelp:" + h.session, "🤝 " + t("tree.stop_helping", { s: name }), () => {
-      if (confirm(t("tree.release_helper_confirm", { s: name }))) treeOp({ op: "unhelp", session: h.session, owner: h.owner });
+    mk("unhelp:" + h.session, "🤝 " + t("tree.stop_helping", { s: name }), async () => {
+      if ((await ui.confirm(t("tree.release_helper_confirm", { s: name }), { danger: true }))) treeOp({ op: "unhelp", session: h.session, owner: h.owner });
     });
   }
   if (!n.parent) mkPanel("folder", "📁 " + t("tree.session_folder_2"), (box, close) => treeFolderPanel(n, box, close));
@@ -1582,7 +1582,7 @@ function treeMenuItems(n, c, has, close, panel, setPanel, scroller, list) {
       try {
         const r = await api("/tree", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ op: "sync", id: n.id }) });
         showUndoToast(t("tree.updated_n", { n: r.changed }), false);
-      } catch (e) { alert(e.message); }
+      } catch (e) { ui.toast(e.message, { error: true }); }
       loadTree();
     });
   }
@@ -1651,7 +1651,7 @@ function treeChildPanel(n, me, box, close) {
     close();
     treeOp({ op: "update", id: n.id, links: Object.assign({}, n.links || {}, { repo }) })
       .then(() => api("/tree", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ op: "sync", id: n.id }) }))
-      .catch((e) => alert(e.message)).finally(loadTree);
+      .catch((e) => ui.toast(e.message, { error: true })).finally(loadTree);
   }, r);
   const show = (g) => {
     tT.classList.toggle("on", !g); tG.classList.toggle("on", g);

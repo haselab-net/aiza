@@ -37,6 +37,11 @@ SEND_RE = re.compile(r"gmail\.py\S*\s+send\b")
 TRASH_RE = re.compile(r"gmail\.py\S*\s+trash\b([^;&|\n]*)")
 CONNECTOR_RE = re.compile(r"^mcp__.*gmail.*__(send_message|send_email|send_draft|reply|reply_all|forward|"
                           r"trash_message|trash_thread|delete_message|delete_thread)$", re.I)
+# discord-dm (the deployment notes) writes to the lab's people and channels with no
+# card; from the Email box, Discord goes only through `aiza-out discord`
+# (2026-11-27, the user: つなぎで止め、ソケットを分ける). Its socket is being
+# taken out of the box; until then, the tool and the socket's path are refused.
+DM_RE = re.compile(r"discord-dm")
 HOW = "aiza-out で用意して本人の許可のカードを待ち、許可されたら aiza-out run <id> で実行してください(the deployment notes)。"
 
 
@@ -106,6 +111,9 @@ def decide(payload):
     if tool != "Bash":
         return None
     cmd = strip_text_heredocs(str(inp.get("command") or ""))
+    if DM_RE.search(cmd):
+        log({"decision": "deny", "why": "discord-dm"})
+        return deny("関所: Email の箱から discord-dm は使いません。Discord へは aiza-out discord で用意し、本人の許可のカードを待ってください(the deployment notes)。")
     if SEND_RE.search(cmd):
         log({"decision": "deny", "why": "gmail.py send"})
         return deny("関所: gmail.py send は使いません。" + HOW)
@@ -141,7 +149,7 @@ def main():
     except Exception as e:  # noqa: BLE001 -- on a fault, the ways around the card stay shut
         cmd = str((payload.get("tool_input") or {}).get("command") or "") if isinstance(payload.get("tool_input"), dict) else ""
         out = deny(f"関所: 確かめられなかった({type(e).__name__})") if (
-            CONNECTOR_RE.match(payload.get("tool_name") or "") or SEND_RE.search(cmd) or TRASH_RE.search(cmd)) else None
+            CONNECTOR_RE.match(payload.get("tool_name") or "") or SEND_RE.search(cmd) or DM_RE.search(cmd) or TRASH_RE.search(cmd)) else None
     if out is not None:
         print(json.dumps(out, ensure_ascii=False))
 

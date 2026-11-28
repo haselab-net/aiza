@@ -1,0 +1,21 @@
+[Unit]
+Description=aiza public demo: front door (seats, invites, signed hand-off to the room in the demo VM)
+After=network-online.target aiza-demo-vm.service
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/sbin/aiza-demo-door
+User=aiza-demo-door
+Group=aiza-demo-door
+Environment=DOOR_STATE=/var/lib/aiza-demo-door
+LoadCredential=relay.secret:/etc/aiza-demo/relay.secret
+ProtectSystem=strict
+ReadWritePaths=/var/lib/aiza-demo-door /var/lib/aiza-demo-closed
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
